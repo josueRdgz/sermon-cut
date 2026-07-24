@@ -914,6 +914,121 @@ a:hover {
   gap: 0.85rem;
 }
 
+.background-music-panel {
+  margin-top: 1rem;
+  padding-top: 1rem;
+  border-top: 1px solid #334155;
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+}
+
+.background-music-panel__rights {
+  margin: 0;
+  padding: 0.65rem 0.85rem;
+  border-left: 3px solid #b45309;
+  background: rgba(120, 53, 15, 0.25);
+  color: #fde68a;
+  font-size: 0.9rem;
+}
+
+.background-music-panel__upload {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.65rem;
+  align-items: center;
+}
+
+.background-music-panel__controls {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.background-music-panel__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  gap: 0.75rem;
+}
+
+.background-music-panel__meters {
+  padding: 0.75rem 0.9rem;
+  border: 1px solid #334155;
+  border-radius: 8px;
+  background: rgba(15, 23, 42, 0.55);
+}
+
+.background-music-panel__meters h5 {
+  margin: 0 0 0.4rem;
+  font-size: 0.95rem;
+}
+
+.background-music-panel__meters ul {
+  margin: 0;
+  padding-left: 1.1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  font-size: 0.9rem;
+}
+
+.render-panel__meters {
+  padding: 0.65rem 0.85rem;
+  border: 1px solid #334155;
+  border-radius: 8px;
+  background: rgba(15, 23, 42, 0.4);
+}
+
+.render-panel__rights {
+  margin-top: 0.35rem;
+  font-style: italic;
+}
+
+.render-panel__estimate,
+.render-panel__profile-edit,
+.render-panel__history {
+  padding: 0.75rem 0.9rem;
+  border: 1px solid #334155;
+  border-radius: 8px;
+  background: rgba(15, 23, 42, 0.45);
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+}
+
+.render-panel__profile-edit {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  gap: 0.75rem;
+  align-items: end;
+}
+
+.render-result__facts {
+  margin: 0.4rem 0 0.75rem;
+  padding-left: 1.1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  font-size: 0.9rem;
+}
+
+.render-panel__table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.85rem;
+}
+
+.render-panel__table th,
+.render-panel__table td {
+  text-align: left;
+  padding: 0.35rem 0.45rem;
+  border-bottom: 1px solid #334155;
+}
+
+.render-panel__history h5 {
+  margin: 0;
+}
+
 /* Signals that the end card is not optional. */
 .badge--required {
   background: #78350f;

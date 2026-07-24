@@ -136,11 +136,48 @@ def build_cues_for_reel(
     if template.quote_style and options.bible_reference:
         cues = _append_reference(cues, options.bible_reference, options)
 
+    cues = _suppress_overlapping_cues(cues)
+
     return CueBuildResult(
         cues=cues,
         granularity_used=granularity,
         total_duration=timeline.total_duration,
     )
+
+
+def _suppress_overlapping_cues(cues: list[SubtitleCue]) -> list[SubtitleCue]:
+    """Prefer the outgoing (earlier) cue when crossfades stack captions.
+
+    Crossfade placements overlap on the output clock; without this filter both
+    segments emit Dialogue events for the same window and text doubles up.
+    """
+    if len(cues) < 2:
+        return cues
+    ordered = sorted(cues, key=lambda c: (c.start, c.end))
+    result: list[SubtitleCue] = []
+    for cue in ordered:
+        if not result:
+            result.append(cue)
+            continue
+        prev = result[-1]
+        if cue.start + 1e-3 < prev.end:
+            # Trim incoming cue to start after the outgoing one ends.
+            new_start = prev.end
+            if new_start + 0.04 >= cue.end:
+                continue
+            trimmed_words = tuple(w for w in cue.words if w.end > new_start)
+            result.append(
+                SubtitleCue(
+                    start=new_start,
+                    end=cue.end,
+                    text=cue.text,
+                    words=trimmed_words,
+                    highlight=cue.highlight,
+                )
+            )
+        else:
+            result.append(cue)
+    return result
 
 
 def _collect_mapped_words(
@@ -162,7 +199,19 @@ def _collect_mapped_words(
                 out_start, out_end = mapped_interval
                 mapped.append(MappedWord(text=text, start=out_start, end=out_end))
     mapped.sort(key=lambda w: (w.start, w.end))
-    return mapped
+    return _suppress_overlapping_words(mapped)
+
+
+def _suppress_overlapping_words(words: list[MappedWord]) -> list[MappedWord]:
+    """Drop incoming words that land inside an earlier (outgoing) word's span."""
+    if len(words) < 2:
+        return words
+    result: list[MappedWord] = []
+    for word in words:
+        if result and word.start + 1e-3 < result[-1].end:
+            continue
+        result.append(word)
+    return result
 
 
 def _cues_from_word_groups(

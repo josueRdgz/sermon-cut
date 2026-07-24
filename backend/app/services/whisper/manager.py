@@ -23,7 +23,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
-from app.core.exceptions import ConflictError, NotFoundError, ValidationAppError
+from app.core.exceptions import AppError, ConflictError, NotFoundError, ValidationAppError
 from app.core.paths import job_temp_dir
 from app.models.project import Project, ProjectStatus
 from app.models.transcript import TranscriptSource
@@ -35,12 +35,12 @@ from app.models.transcription_job import (
 from app.services import storage
 from app.services.transcripts import service as transcripts_service
 from app.services.transcripts.types import ParsedSegment, ParsedTranscript, ParsedWord
-from app.services.whisper.audio import extract_audio
+from app.services.whisper.audio import AudioExtractionCancelled, extract_audio
 from app.services.whisper.device import DeviceSelection, select_device
 from app.services.whisper.engine import TranscriptionEngine, get_default_engine
 
 SessionFactory = Callable[[], Session]
-AudioExtractor = Callable[[Path, Path], Path]
+AudioExtractor = Callable[..., Path]
 DeviceSelector = Callable[[str, str], DeviceSelection]
 
 # How often (seconds) progress is flushed to SQLite while transcribing.
@@ -248,7 +248,19 @@ class JobManager:
             if event.is_set():
                 self._mark_cancelled(session, job)
                 return
-            self._audio_extractor(video_path, audio_path)
+            try:
+                self._audio_extractor(video_path, audio_path, cancel_event=event)
+            except TypeError:
+                # Test doubles may still use the two-argument signature.
+                self._audio_extractor(video_path, audio_path)
+            except AudioExtractionCancelled:
+                self._mark_cancelled(session, job)
+                return
+            except AppError:
+                if event.is_set():
+                    self._mark_cancelled(session, job)
+                    return
+                raise
 
             job.stage = "loading_model"
             job.progress = 0.08
@@ -367,6 +379,15 @@ class JobManager:
             project.status = ProjectStatus.failed
             project.error_message = message[:2000]
         session.commit()
+
+    def shutdown(self, wait: bool = False) -> None:
+        """Signal active jobs to cancel and stop accepting new work."""
+        with self._lock:
+            for event in self._cancel_events.values():
+                event.set()
+        shutdown = getattr(self._executor, "shutdown", None)
+        if callable(shutdown):
+            shutdown(wait=wait)
 
 
 _manager: JobManager | None = None

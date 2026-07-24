@@ -1,17 +1,23 @@
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 
+import { prepareApiBaseUrl } from './api/client';
 import App from './App';
 import './index.css';
 
-const rootElement = document.getElementById('root');
+async function boot(): Promise<void> {
+  await prepareApiBaseUrl();
 
-if (!rootElement) {
-  throw new Error('Root element #root not found');
+  const rootElement = document.getElementById('root');
+  if (!rootElement) {
+    throw new Error('Root element #root not found');
+  }
+
+  createRoot(rootElement).render(
+    <StrictMode>
+      <App />
+    </StrictMode>,
+  );
 }
 
-createRoot(rootElement).render(
-  <StrictMode>
-    <App />
-  </StrictMode>,
-);
+void boot();

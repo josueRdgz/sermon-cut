@@ -9,10 +9,21 @@ from app.models.analysis import (
     AnalysisJob,
     AnalysisJobStatus,
 )
+from app.models.background_music import (
+    BackgroundMusicPreset,
+    BackgroundMusicScope,
+    BackgroundMusicSettings,
+)
 from app.models.end_card import (
     EndCardAudioMode,
     EndCardLayout,
     EndCardSettings,
+)
+from app.models.export_profile import (
+    ExportPlatform,
+    ExportProfile,
+    ExportQuality,
+    FpsMode,
 )
 from app.models.project import Project, ProjectStatus
 from app.models.reel import (
@@ -41,9 +52,16 @@ __all__ = [
     "AnalysisJob",
     "AnalysisJobStatus",
     "AspectRatio",
+    "BackgroundMusicPreset",
+    "BackgroundMusicScope",
+    "BackgroundMusicSettings",
     "EndCardAudioMode",
     "EndCardLayout",
     "EndCardSettings",
+    "ExportPlatform",
+    "ExportProfile",
+    "ExportQuality",
+    "FpsMode",
     "Project",
     "ProjectStatus",
     "Reel",

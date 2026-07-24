@@ -20,6 +20,18 @@ export interface RenderJob {
   speed: number | null;
   output_filename: string | null;
   output_size_bytes: number | null;
+  profile_id: string | null;
+  profile_slug: string | null;
+  profile_name: string | null;
+  quality: string | null;
+  crf: number | null;
+  encode_preset: string | null;
+  audio_bitrate_k: number | null;
+  sha256: string | null;
+  report_filename: string | null;
+  verified: boolean | null;
+  expected_audio: boolean | null;
+  publish_status: string | null;
   ffmpeg_command: string | null;
   error_message: string | null;
   created_at: string;
@@ -34,10 +46,12 @@ export interface RenderJobListResponse {
 }
 
 export interface StartRenderPayload {
+  profile_id?: string | null;
+  quality?: 'draft' | 'standard' | 'high';
   aspect_ratio?: string | null;
   layout?: RenderLayout;
   normalize_loudness?: boolean;
-  crf?: number;
+  crf?: number | null;
   burn_subtitles?: boolean;
 }
 

@@ -65,7 +65,21 @@ class FakeRunner:
 
 
 def _fake_prober(has_audio: bool = True, fps: float | None = 30.0):
-    def _probe(_path: Path) -> VideoMetadata:
+    def _probe(path: Path) -> VideoMetadata:
+        try:
+            size = path.stat().st_size
+        except OSError:
+            size = 0
+        # FakeRunner writes tiny stubs for the *output*; treat them as verified exports.
+        if size <= 8192 and path.suffix.lower() == ".mp4" and "original" not in path.name:
+            return VideoMetadata(
+                duration_seconds=5.2,
+                width=1080,
+                height=1920,
+                fps=30.0,
+                video_codec="h264",
+                audio_codec="aac" if has_audio else None,
+            )
         return VideoMetadata(
             duration_seconds=900.0,
             width=1920,
@@ -88,6 +102,7 @@ def render_env(
 
     url = f"sqlite:///{(tmp_path / 'test.db').as_posix()}"
     monkeypatch.setenv("SERMON_CUT_DATABASE_URL", url)
+    monkeypatch.setenv("SERMON_CUT_AUTO_MIGRATE", "false")
     get_settings.cache_clear()
 
     engine = create_engine(url, connect_args={"check_same_thread": False}, poolclass=StaticPool)
@@ -208,8 +223,14 @@ def test_render_completes_and_saves_output(render_env) -> None:
     assert body["progress"] == pytest.approx(1.0)
     assert body["width"] == 1080
     assert body["height"] == 1920
-    assert body["output_filename"] == "gancho-y-climax.mp4"
+    assert body["output_filename"] == "sermon_clip-01_youtube-short.mp4"
     assert body["output_size_bytes"] == 2048
+    assert body["profile_slug"] == "youtube-short"
+    assert body["quality"] == "standard"
+    assert body["verified"] is True
+    assert body["sha256"]
+    assert body["report_filename"] == "sermon_clip-01_youtube-short.report.json"
+    assert body["publish_status"] == "local_only"
     # The sanitized command is stored for debugging.
     assert body["ffmpeg_command"].startswith("ffmpeg ")
     assert "libx264" in body["ffmpeg_command"]
@@ -219,6 +240,8 @@ def test_render_completes_and_saves_output(render_env) -> None:
 
     output = project_renders_dir(UUID(project_id)) / body["output_filename"]
     assert output.is_file()
+    report = project_renders_dir(UUID(project_id)) / body["report_filename"]
+    assert report.is_file()
     # Temporary artefacts were cleaned up.
     assert not list((project_renders_dir(UUID(project_id)) / ".tmp").glob("*.mp4"))
 
@@ -288,8 +311,8 @@ def test_second_render_does_not_overwrite_the_first(render_env) -> None:
     first = client.post(f"/api/projects/{project_id}/reels/{reel_id}/render", json={}).json()
     second = client.post(f"/api/projects/{project_id}/reels/{reel_id}/render", json={}).json()
 
-    assert first["output_filename"] == "gancho-y-climax.mp4"
-    assert second["output_filename"] == "gancho-y-climax-2.mp4"
+    assert first["output_filename"] == "sermon_clip-01_youtube-short.mp4"
+    assert second["output_filename"] == "sermon_clip-01_youtube-short-2.mp4"
 
     listed = client.get(f"/api/projects/{project_id}/reels/{reel_id}/renders").json()
     assert listed["total"] == 2

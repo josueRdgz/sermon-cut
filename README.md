@@ -1,31 +1,45 @@
 # Sermon Cut
 
-Aplicación **local para macOS** y de **código abierto** para convertir un video
-de una predicación en **Shorts / Reels verticales**: importar la transcripción,
-identificar los mejores fragmentos, componer un Reel con varios segmentos no
-consecutivos y exportar un video vertical con subtítulos y una pantalla final.
+Aplicación **local** y de **código abierto** (macOS, Windows y Linux) para
+convertir un video de una predicación en **Shorts / Reels verticales**: importar
+la transcripción, identificar los mejores fragmentos, componer un Reel con
+varios segmentos no consecutivos y exportar un video vertical con subtítulos y
+una pantalla final. **No requiere Docker.**
 
 > **Estado actual:** proyectos locales + importación/normalización de
 > transcripciones (SRT, WebVTT, JSON interno, TXT) + **transcripción local con
 > faster-whisper** + **Reels compuestos por varios fragmentos no consecutivos**
-> + **render real a MP4 con FFmpeg** + **subtítulos ASS incrustados** (plantillas
-> y quemado con libass) + **pantalla final obligatoria** (3 diseños generados con
-> Pillow) + **análisis editorial opcional** (Gemini o mock).
-> **Todavía no:** generación automática de clips sin revisión humana ni Gemini
-> obligatorio.
+> + **render real a MP4 con FFmpeg** + **subtítulos ASS incrustados** +
+> **pantalla final obligatoria** + **análisis editorial opcional** (Gemini o
+> mock) + **perfiles de exportación** + **música de fondo local opcional**.
+> Ver [limitaciones actuales](docs/LIMITATIONS.md).
 
-## Requisitos (macOS)
+## Requisitos
 
-- **macOS** (plataforma objetivo)
-- **Homebrew** (recomendado para instalar dependencias del sistema)
-- **Python 3.12+**
-- **Node.js 18+** (probado con 20) y **npm**
-- **FFmpeg** y **FFprobe** instalados y disponibles en el `PATH`
-- **git**
+| | macOS | Windows | Linux |
+|--|-------|---------|-------|
+| Python | 3.12+ | 3.12+ (añadir al PATH) | 3.12+ |
+| Node.js / npm | 18+ (20 recomendado) | 18+ | 18+ |
+| FFmpeg + FFprobe | Homebrew | winget / Chocolatey | apt / dnf |
+| Docker | **No** | **No** | **No** |
 
 ```bash
+# macOS (ejemplo)
 brew install python@3.12 node ffmpeg
 ffmpeg -version && ffprobe -version
+```
+
+```powershell
+# Windows (ejemplo)
+winget install Python.Python.3.12
+winget install OpenJS.NodeJS.LTS
+winget install Gyan.FFmpeg
+```
+
+```bash
+# Debian/Ubuntu (ejemplo)
+sudo apt update
+sudo apt install python3 python3-venv python3-pip ffmpeg nodejs npm
 ```
 
 ### FFmpeg: qué necesita el render
@@ -54,17 +68,44 @@ ffmpeg -hide_banner -filters  | grep -E 'xfade|gblur|loudnorm|acrossfade|\bass\b
 Si `ffmpeg` no está en el `PATH`, el endpoint de render responde `503` con
 `code: "ffmpeg_missing"`.
 
-## Puesta en marcha
+## Puesta en marcha (recomendada)
 
 ```bash
-cp .env.example .env
-./scripts/start-backend.sh   # terminal 1 (incluye migraciones si usas Option B)
-./scripts/start-frontend.sh  # terminal 2
+# macOS
+./scripts/setup-macos.sh
+
+# Linux
+./scripts/setup-linux.sh
 ```
 
-Backend manual: `cd backend && source .venv/bin/activate && alembic upgrade head && uvicorn app.main:app --reload --port 8000`
+```powershell
+# Windows (PowerShell)
+Set-ExecutionPolicy -Scope Process Bypass
+.\scripts\setup-windows.ps1
+```
+
+Luego, en dos terminales:
+
+```bash
+./scripts/start-backend.sh    # o .\scripts\start-backend.ps1
+./scripts/start-frontend.sh   # o .\scripts\start-frontend.ps1
+```
 
 Abre <http://localhost:5173>.
+
+Diagnóstico:
+
+```bash
+cd backend && source .venv/bin/activate
+python -m app.cli doctor
+```
+
+Copia de configuración: `cp .env.example .env` (los scripts de setup lo hacen
+si falta). Almacenamiento configurable con `SERMON_CUT_STORAGE_DIR`. Las
+migraciones se aplican al arrancar el API (con protección ante fallos) y también
+vía `python -m app.cli migrate`.
+
+Datos de prueba libres de derechos: carpeta [`demo/`](demo/README.md).
 
 ## Cómo crear el primer proyecto
 
@@ -226,6 +267,13 @@ Fixtures de ejemplo: `backend/tests/fixtures/transcripts/`.
 | POST | `/api/projects/{id}/end-card/logo` | Subir logo opcional |
 | POST | `/api/projects/{id}/end-card/music` | Subir música local del usuario |
 | GET | `/api/projects/{id}/end-card/preview` | PNG de la pantalla final (vista previa) |
+| GET | `/api/background-music/presets` | Presets de música de fondo (`none` por defecto) |
+| GET/PUT | `/api/projects/{id}/background-music` | Configuración de música de fondo (local) |
+| POST | `/api/projects/{id}/background-music/upload` | Subir MP3/WAV/M4A/OGG del usuario |
+| GET | `/api/projects/{id}/background-music/meters` | Medidores pre-exportación (LUFS / voz) |
+| GET | `/api/export-profiles` | Listar perfiles de exportación (editables) |
+| GET/PUT | `/api/export-profiles/{id}` | Ver / editar un perfil |
+| POST | `/api/projects/{id}/reels/{reelId}/export-estimate` | Estimación aproximada de tamaño |
 | GET | `/api/analysis/provider` | Estado del proveedor (Gemini opcional / mock) |
 | POST | `/api/projects/{id}/analysis` | Iniciar análisis editorial (202) |
 | GET | `/api/projects/{id}/analysis` | Último trabajo de análisis (polling) |
@@ -239,6 +287,8 @@ Fixtures de ejemplo: `backend/tests/fixtures/transcripts/`.
 | GET | `/api/render-jobs/{id}` | Estado de un render |
 | POST | `/api/render-jobs/{id}/cancel` | Cancelar un render |
 | GET | `/api/render-jobs/{id}/output?download=true` | Reproducir o descargar el MP4 |
+| GET | `/api/render-jobs/{id}/report` | Reporte JSON del render |
+| POST | `/api/render-jobs/{id}/reveal` | Abrir carpeta del archivo (macOS/Windows/Linux) |
 
 Errores de dominio: `{ "detail": "...", "code": "..." }`.
 
@@ -286,8 +336,9 @@ ventanas sobre el video original, por ejemplo:
 ## Render de un Reel (FFmpeg)
 
 Desde el editor de Reels, el panel **«Exportar video»** produce un **MP4
-H.264 + AAC** real: corta cada ventana del video original, las une y normaliza
-el resultado. Todavía **sin subtítulos ni pantalla final**.
+H.264 + AAC** real: corta cada ventana del video original, las une, puede
+**quemar subtítulos ASS**, añade la **pantalla final obligatoria** y escribe un
+reporte JSON verificado con FFprobe.
 
 **Salida y lienzo**
 
@@ -318,7 +369,9 @@ el resultado. Todavía **sin subtítulos ni pantalla final**.
 - `hard_cut` usa `concat`; `short_crossfade` y `dip_to_black` usan `xfade` +
   `acrossfade` con **la misma duración**, de modo que audio y video se acortan
   exactamente igual y no se desincronizan.
-- Con `Normalizar audio` activo se aplica `loudnorm` (≈ −16 LUFS) a la mezcla final.
+- Con `Normalizar audio` activo se aplica `alimiter` + `loudnorm` (objetivo
+  configurable, por defecto ≈ −16 LUFS / TP −1.5 dBTP, valores prudentes para
+  voz hablada) a la mezcla principal, para normalizar sonoridad y evitar clipping.
 
 **Casos que se manejan automáticamente**
 
@@ -426,6 +479,42 @@ global o volver a heredarla.
 **después** de quemar los subtítulos, así que los tiempos de los cues siguen
 siendo relativos al contenido principal.
 
+## Música de fondo (opcional, local)
+
+Desactivada por defecto (`preset=none`). El usuario sube **su propio** MP3, WAV,
+M4A u OGG; se guarda dentro del proyecto. **No hay descargas ni catálogos
+comerciales.**
+
+Advertencia mostrada en la UI:
+
+> El usuario es responsable de contar con los derechos necesarios para utilizar este audio.
+
+**Presets:** `none` · `end_card_only` · `very_soft_background` (volumen bajo +
+ducking). Configurables: volumen, inicio/final del archivo, fade in/out, alcance
+(todo el Reel o solo pantalla final), ducking y objetivo LUFS.
+
+**Mezcla:** con ducking, `sidechaincompress` baja la música cuando hay voz; el
+`amix` prioriza la voz. Antes de exportar, la UI muestra medidores (LUFS,
+margen de voz, riesgo de clipping).
+
+## Perfiles de exportación
+
+Perfiles editables (semilla inicial):
+
+| Perfil | Lienzo | Notas |
+|--------|--------|--------|
+| YouTube Shorts | 1080×1920 · 9:16 | Máx. 60 s (configurable hasta 180). FPS original o 30. |
+| Facebook Reels | 1080×1920 | Área segura para la UI de Facebook. |
+| Instagram Reels | 1080×1920 | Safe area superior e inferior ampliada. |
+| WhatsApp Status | 1080×1920 | Archivo más pequeño; fragmentación opcional. |
+
+Calidad `draft` / `standard` / `high` con CRF configurable. Estimación de tamaño
+antes de exportar. Nombre seguro:
+`titulo-sermon_clip-01_youtube-short.mp4`. Tras el encode: verificación FFprobe
+(falla sin audio, duración cero, resolución incorrecta o archivo corrupto),
+hash SHA-256 y reporte JSON. Reproducir en la UI, abrir carpeta en el SO.
+**Sin publicación automática.**
+
 ## Análisis editorial opcional (Gemini)
 
 La aplicación **sigue funcionando sin Gemini**. Si no hay clave, el análisis usa
@@ -511,12 +600,39 @@ subidas de logo/música y la vista previa PNG.
 ajuste de tiempos, el rechazo de texto inventado y el flujo aceptar/descartar
 sin render automático.
 
+## Escritorio (Tauri 2)
+
+Empaquetado opcional sin reescribir backend/frontend. Guía:
+[docs/DESKTOP.md](docs/DESKTOP.md).
+
+```bash
+./scripts/dev-desktop.sh      # ventana de escritorio (dev)
+./scripts/build-desktop.sh    # build local (no publica releases)
+```
+
+El flujo en navegador (`start-backend` + `start-frontend`) sigue disponible.
+
 ## Diseño
 
-- macOS, 100% local, sin Celery/Redis.
-- Rutas con `pathlib`; sin blobs en SQLite.
+- macOS / Windows / Linux, **local-first** (sin Docker ni Celery/Redis). Gemini y
+  la descarga inicial de modelos Whisper son **opcionales** — ver
+  [docs/PRIVACY.md](docs/PRIVACY.md).
+- Rutas con `pathlib`; almacenamiento configurable (`SERMON_CUT_STORAGE_DIR`).
 - El `<video>` usa la URL de stream; no se carga el archivo entero en memoria JS.
+- Limitaciones conocidas: [docs/LIMITATIONS.md](docs/LIMITATIONS.md).
+- Escritorio / Tauri: [docs/DESKTOP.md](docs/DESKTOP.md).
+- Privacidad: [docs/PRIVACY.md](docs/PRIVACY.md).
+- Licencias de terceros / FFmpeg: [docs/LICENSING.md](docs/LICENSING.md).
+
+## Comunidad
+
+- [CONTRIBUTING.md](CONTRIBUTING.md) — cómo contribuir
+- [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md)
+- [SECURITY.md](SECURITY.md) — reporte privado de vulnerabilidades
+- [CHANGELOG.md](CHANGELOG.md)
+- Plantillas de issues/PR y CI en `.github/`
 
 ## Licencia
 
 [MIT](LICENSE).
+

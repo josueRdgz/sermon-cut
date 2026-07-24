@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import logging
-from pathlib import Path
 from uuid import UUID
 
 from sqlalchemy.orm import Session
@@ -438,7 +437,13 @@ def expand_segment_context(
 
 
 def assert_render_allowed(db: Session, project_id: UUID, reel_id: UUID) -> None:
-    """Soft server-side gate: refuse render when undismissed blocks remain."""
+    """Server-side gate: refuse render when undismissed *blocked* issues remain.
+
+    Warnings and info issues are a **soft gate**: the UI asks the user to review
+    or dismiss them, but the API only hard-stops on ``blocked`` severity so
+    operators can still export after an informed decision. See docs/PRIVACY.md
+    and the pastoral disclaimer in the export panel.
+    """
     report = validate_reel(
         db,
         project_id,

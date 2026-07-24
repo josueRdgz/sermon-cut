@@ -2,15 +2,34 @@
 
 from __future__ import annotations
 
+import logging
 import shutil
 import subprocess
+import threading
+import time
 from pathlib import Path
 
 from app.core.exceptions import AppError
 
+logger = logging.getLogger(__name__)
+
 # faster-whisper expects 16 kHz mono PCM.
 TARGET_SAMPLE_RATE = 16000
 TARGET_CHANNELS = 1
+
+_POLL_INTERVAL = 0.2
+_TERM_GRACE = 2.0
+
+
+class AudioExtractionCancelled(AppError):
+    """Raised when extraction is aborted via ``cancel_event``."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            "Audio extraction was cancelled.",
+            code="audio_extraction_cancelled",
+            status_code=499,
+        )
 
 
 def build_ffmpeg_command(video_path: Path, audio_path: Path, ffmpeg: str = "ffmpeg") -> list[str]:
@@ -33,9 +52,14 @@ def build_ffmpeg_command(video_path: Path, audio_path: Path, ffmpeg: str = "ffmp
     ]
 
 
-def extract_audio(video_path: Path, audio_path: Path) -> Path:
+def extract_audio(
+    video_path: Path,
+    audio_path: Path,
+    cancel_event: threading.Event | None = None,
+) -> Path:
     """Extract ``video_path`` audio to ``audio_path`` (WAV mono 16 kHz).
 
+    When ``cancel_event`` is set, FFmpeg is terminated (SIGTERM then SIGKILL).
     Returns the audio path. Raises ``AppError`` on failure.
     """
     ffmpeg = shutil.which("ffmpeg")
@@ -56,24 +80,68 @@ def extract_audio(video_path: Path, audio_path: Path) -> Path:
     command = build_ffmpeg_command(video_path, audio_path, ffmpeg)
 
     try:
-        result = subprocess.run(
+        process = subprocess.Popen(
             command,
-            capture_output=True,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
             text=True,
-            timeout=60 * 60,  # 1 hour ceiling for very long sermons
-            check=False,
         )
-    except (OSError, subprocess.SubprocessError) as exc:
+    except OSError as exc:
         raise AppError(
             f"Failed to run FFmpeg: {exc}",
             code="audio_extraction_failed",
             status_code=500,
         ) from exc
 
-    if result.returncode != 0 or not audio_path.is_file():
+    deadline = time.monotonic() + 60 * 60
+    try:
+        while True:
+            if cancel_event is not None and cancel_event.is_set():
+                _terminate_process(process)
+                raise AudioExtractionCancelled()
+            if time.monotonic() > deadline:
+                _terminate_process(process)
+                raise AppError(
+                    "FFmpeg audio extraction timed out.",
+                    code="audio_extraction_failed",
+                    status_code=500,
+                )
+            code = process.poll()
+            if code is not None:
+                break
+            time.sleep(_POLL_INTERVAL)
+    finally:
+        if process.poll() is None:
+            _terminate_process(process)
+
+    stderr = ""
+    if process.stderr is not None:
+        try:
+            stderr = process.stderr.read() or ""
+        except OSError:
+            stderr = ""
+
+    if process.returncode != 0 or not audio_path.is_file():
+        if cancel_event is not None and cancel_event.is_set():
+            raise AudioExtractionCancelled()
+        logger.warning("FFmpeg extract failed (code=%s): %s", process.returncode, stderr[-500:])
         raise AppError(
             "FFmpeg could not extract audio from the video.",
             code="audio_extraction_failed",
             status_code=422,
         )
     return audio_path
+
+
+def _terminate_process(process: subprocess.Popen[str]) -> None:
+    if process.poll() is not None:
+        return
+    process.terminate()
+    try:
+        process.wait(timeout=_TERM_GRACE)
+    except subprocess.TimeoutExpired:
+        process.kill()
+        try:
+            process.wait(timeout=1.0)
+        except subprocess.TimeoutExpired:
+            logger.warning("FFmpeg extract process did not exit after kill")

@@ -97,15 +97,23 @@ def _karaoke_highlight(
     """Emit one Dialogue with ``\\k`` tags so the current word lights up.
 
     SecondaryColour holds the highlight; PrimaryColour is the resting colour.
+    Pauses between words (and lead-in before the first word) are encoded as
+    empty ``\\k`` holds so the highlight stays aligned with speech.
     """
     parts: list[str] = []
+    cursor = cue.start
     for index, word in enumerate(cue.words):
+        gap = word.start - cursor
+        if gap > 0.005:
+            gap_cs = max(1, int(round(gap * 100)))
+            parts.append(f"{{\\k{gap_cs}}}")
         # \\k duration is centiseconds of this word's hold.
         hold_cs = max(1, int(round((word.end - word.start) * 100)))
         token = _case(word.text, options.uppercase)
         parts.append(f"{{\\k{hold_cs}}}{escape_ass_text(token)}")
         if index + 1 < len(cue.words):
             parts.append(r"{\k0} ")
+        cursor = max(cursor, word.end)
     prefix = r"{\fad(80,80)}" if template.animate else ""
     return prefix + "".join(parts)
 

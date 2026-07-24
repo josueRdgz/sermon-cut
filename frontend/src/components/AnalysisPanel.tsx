@@ -202,6 +202,14 @@ export function AnalysisPanel({ projectId, onCandidateAccepted }: AnalysisPanelP
         cada uno.
       </p>
 
+      {provider?.gemini_configured && (
+        <p className="error" role="note">
+          Aviso de privacidad: al usar Gemini, el texto de la predicación (transcripción) se
+          envía a los servidores de Google. Si el contenido es sensible o confidencial, usa solo el
+          mock local. Detalles en docs/PRIVACY.md.
+        </p>
+      )}
+
       {provider && (
         <p className="muted">
           Proveedor activo: <strong>{provider.active}</strong>

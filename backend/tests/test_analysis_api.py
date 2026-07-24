@@ -44,6 +44,7 @@ def analysis_env(
 
     url = f"sqlite:///{(tmp_path / 'test.db').as_posix()}"
     monkeypatch.setenv("SERMON_CUT_DATABASE_URL", url)
+    monkeypatch.setenv("SERMON_CUT_AUTO_MIGRATE", "false")
     get_settings.cache_clear()
 
     engine = create_engine(url, connect_args={"check_same_thread": False}, poolclass=StaticPool)

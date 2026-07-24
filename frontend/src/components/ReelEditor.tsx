@@ -18,6 +18,7 @@ import type { TranscriptSegment } from '../types/transcript';
 import { formatDuration, formatTimecode } from '../utils/format';
 import { ConfirmDialog } from './ConfirmDialog';
 import { CutSuggestionMarkers, CutSuggestionsPanel } from './CutSuggestionsPanel';
+import { BackgroundMusicPanel } from './BackgroundMusicPanel';
 import { EndCardPanel } from './EndCardPanel';
 import { FramingPanel } from './FramingPanel';
 import { RenderPanel } from './RenderPanel';
@@ -831,6 +832,8 @@ export function ReelEditor({ projectId, hasVideo, hasCover, videoDuration }: Ree
             aspectRatio={activeReel.aspect_ratio}
             hasCover={hasCover}
           />
+
+          <BackgroundMusicPanel projectId={projectId} />
 
           <RenderPanel
             projectId={projectId}

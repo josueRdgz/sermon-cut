@@ -377,6 +377,15 @@ class AnalysisManager:
             project.error_message = message[:2000]
         session.commit()
 
+    def shutdown(self, wait: bool = False) -> None:
+        """Cancel in-flight analysis jobs and stop the executor."""
+        with self._lock:
+            for event in self._cancel_events.values():
+                event.set()
+        shutdown = getattr(self._executor, "shutdown", None)
+        if callable(shutdown):
+            shutdown(wait=wait)
+
 
 def _transcript_to_inputs(transcript) -> list[TranscriptSegmentInput]:
     items: list[TranscriptSegmentInput] = []

@@ -1,0 +1,9 @@
+[[permission]]
+identifier = "allow-get-api-base-url"
+description = "Allows the webview to read the local FastAPI base URL (127.0.0.1)."
+commands.allow = ["get_api_base_url"]
+
+[[permission]]
+identifier = "allow-get-backend-port"
+description = "Allows the webview to read the local FastAPI TCP port."
+commands.allow = ["get_backend_port"]

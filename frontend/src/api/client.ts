@@ -1,8 +1,26 @@
 import type { ApiErrorBody } from '../types/project';
 
-// Base URL for the backend API. In development the Vite dev server proxies
-// "/api" to the local FastAPI backend, so a relative base works out of the box.
-export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? '';
+// Base URL for the backend API. In browser/Vite development the empty string
+// uses the Vite proxy for "/api". In the Tauri desktop shell it is set to
+// http://127.0.0.1:<port> via prepareApiBaseUrl() before React mounts.
+export let API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? '';
+
+/** Resolve API origin when running inside the Tauri desktop shell. */
+export async function prepareApiBaseUrl(): Promise<void> {
+  if (API_BASE_URL) return;
+  // Prefer the official runtime flag; fall back for older webviews.
+  const isTauri =
+    typeof window !== 'undefined' &&
+    ('__TAURI_INTERNALS__' in window || '__TAURI__' in window);
+  if (!isTauri) return;
+  try {
+    const { invoke } = await import('@tauri-apps/api/core');
+    API_BASE_URL = await invoke<string>('get_api_base_url');
+  } catch (err) {
+    console.error('Failed to resolve desktop API base URL', err);
+    throw err;
+  }
+}
 
 export class ApiError extends Error {
   readonly status: number;

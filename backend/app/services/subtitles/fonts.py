@@ -4,35 +4,53 @@ from __future__ import annotations
 
 import logging
 import shutil
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
-# Preferred system font files (macOS first). Only open/system-bundled faces —
-# no commercial webfonts, no remote downloads.
+# System font candidates only (macOS / Windows / Linux). Never bundle proprietary
+# faces into the app installer — staging a local copy for libass is fine.
 _FONT_CANDIDATES: dict[str, tuple[str, ...]] = {
     "Helvetica Neue": (
         "/System/Library/Fonts/HelveticaNeue.ttc",
         "/System/Library/Fonts/Helvetica.ttc",
         "/Library/Fonts/Arial.ttf",
         "/System/Library/Fonts/Supplemental/Arial.ttf",
+        r"C:\Windows\Fonts\arial.ttf",
+        r"C:\Windows\Fonts\segoeui.ttf",
+        "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+        "/usr/share/fonts/TTF/DejaVuSans.ttf",
+        "/usr/share/fonts/truetype/freefont/FreeSans.ttf",
     ),
     "Helvetica": (
         "/System/Library/Fonts/Helvetica.ttc",
         "/System/Library/Fonts/HelveticaNeue.ttc",
         "/Library/Fonts/Arial.ttf",
+        r"C:\Windows\Fonts\arial.ttf",
+        "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
     ),
     "Arial": (
         "/Library/Fonts/Arial.ttf",
         "/System/Library/Fonts/Supplemental/Arial.ttf",
         "/System/Library/Fonts/Helvetica.ttc",
+        r"C:\Windows\Fonts\arial.ttf",
+        r"C:\Windows\Fonts\arialbd.ttf",
+        "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
     ),
     "Georgia": (
         "/Library/Fonts/Georgia.ttf",
         "/System/Library/Fonts/Supplemental/Georgia.ttf",
         "/System/Library/Fonts/NewYork.ttf",
         "/System/Library/Fonts/HelveticaNeue.ttc",
+        r"C:\Windows\Fonts\georgia.ttf",
+        "/usr/share/fonts/truetype/liberation/LiberationSerif-Regular.ttf",
+        "/usr/share/fonts/truetype/dejavu/DejaVuSerif.ttf",
+        "/usr/share/fonts/TTF/DejaVuSerif.ttf",
     ),
 }
 
@@ -62,6 +80,12 @@ def resolve_font(family: str, fonts_dir: Path) -> ResolvedFont:
         if path_str in seen:
             continue
         seen.add(path_str)
+        # Skip clearly foreign OS paths to avoid pointless stat() noise.
+        if sys.platform.startswith("win"):
+            if path_str.startswith("/") and not path_str.startswith("//"):
+                continue
+        elif path_str.startswith("C:\\") or path_str.startswith("c:\\"):
+            continue
         source = Path(path_str)
         if not source.is_file():
             continue
@@ -78,11 +102,21 @@ def resolve_font(family: str, fonts_dir: Path) -> ResolvedFont:
                     continue
         # Map back to a family ASS understands.
         resolved_family = family if family in _FONT_CANDIDATES else "Helvetica Neue"
-        if "Georgia" in source.name:
-            resolved_family = "Georgia"
-        elif "Arial" in source.name:
-            resolved_family = "Arial"
-        elif "HelveticaNeue" in source.name or "Helvetica" in source.name:
+        name_lower = source.name.lower()
+        if (
+            "georgia" in name_lower
+            or "liberationserif" in name_lower
+            or "dejavuserif" in name_lower
+        ):
+            resolved_family = "Georgia" if family == "Georgia" else resolved_family
+        elif (
+            "arial" in name_lower
+            or "liberation" in name_lower
+            or "dejavusans" in name_lower
+        ):
+            sans_families = {"Arial", "Helvetica", "Helvetica Neue"}
+            resolved_family = "Arial" if family in sans_families else family
+        elif "helveticaneue" in name_lower or "helvetica" in name_lower:
             resolved_family = "Helvetica Neue" if family == "Helvetica Neue" else "Helvetica"
         return ResolvedFont(
             family_name=resolved_family,

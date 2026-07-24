@@ -25,7 +25,17 @@ export function cancelRenderJob(jobId: string): Promise<RenderJob> {
   return apiJson<RenderJob>(`/api/render-jobs/${jobId}/cancel`, 'POST', {});
 }
 
+export function revealRenderOutput(
+  jobId: string,
+): Promise<{ path: string; directory: string; platform: string; method: string }> {
+  return apiJson(`/api/render-jobs/${jobId}/reveal`, 'POST', {});
+}
+
 export function renderOutputUrl(jobId: string, download = false): string {
   const suffix = download ? '?download=true' : '';
   return `${API_BASE_URL}/api/render-jobs/${jobId}/output${suffix}`;
+}
+
+export function renderReportUrl(jobId: string): string {
+  return `${API_BASE_URL}/api/render-jobs/${jobId}/report`;
 }

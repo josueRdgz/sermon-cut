@@ -95,6 +95,20 @@ class EndCardSpec:
     music_path: Path | None = None
     music_volume: float = 0.6
     continue_from_seconds: float | None = None
+    # Optional trim window inside the music file (user-provided bed).
+    music_start_seconds: float = 0.0
+    music_end_seconds: float | None = None
+    music_fade_in_seconds: float | None = None
+    music_fade_out_seconds: float | None = None
+
+
+@dataclass(frozen=True)
+class LoudnessSpec:
+    """Spoken-word loudness target for the main timeline mix."""
+
+    target_lufs: float = -16.0
+    true_peak_db: float = -1.5
+    lra: float = 11.0
 
 
 @dataclass(frozen=True)
@@ -343,6 +357,17 @@ def _end_card_chains(
         f"[{audio_index}:a]aformat=sample_fmts=fltp:sample_rates={TARGET_SAMPLE_RATE}"
         f":channel_layouts=stereo",
         f"aresample={TARGET_SAMPLE_RATE}:async=1",
+    ]
+    if mode == AUDIO_LOCAL_MUSIC:
+        start = max(0.0, spec.music_start_seconds)
+        end = spec.music_end_seconds
+        if end is not None and end > start:
+            audio_parts.append(f"atrim={_fmt(start)}:{_fmt(end)}")
+            audio_parts.append("asetpts=PTS-STARTPTS")
+        elif start > 0:
+            audio_parts.append(f"atrim=start={_fmt(start)}")
+            audio_parts.append("asetpts=PTS-STARTPTS")
+    audio_parts += [
         # Pad short beds (or a source that ended early) so the card keeps its length.
         f"apad=whole_dur={_fmt(duration)}",
         f"atrim=0:{_fmt(duration)}",
@@ -350,11 +375,23 @@ def _end_card_chains(
     ]
     if mode == AUDIO_LOCAL_MUSIC:
         audio_parts.append(f"volume={_fmt(max(0.0, min(1.0, spec.music_volume)))}")
-        if fade_in > 0:
-            audio_parts.append(f"afade=t=in:st=0:d={_fmt(fade_in)}")
-    if mode in {AUDIO_CONTINUE_WITH_FADE, AUDIO_LOCAL_MUSIC} and fade_out > 0:
+        fade_in_music = (
+            spec.music_fade_in_seconds
+            if spec.music_fade_in_seconds is not None
+            else fade_in
+        )
+        fade_in_music = max(0.0, min(fade_in_music, duration))
+        if fade_in_music > 0:
+            audio_parts.append(f"afade=t=in:st=0:d={_fmt(fade_in_music)}")
+    fade_out_music = (
+        spec.music_fade_out_seconds
+        if mode == AUDIO_LOCAL_MUSIC and spec.music_fade_out_seconds is not None
+        else fade_out
+    )
+    if mode in {AUDIO_CONTINUE_WITH_FADE, AUDIO_LOCAL_MUSIC} and fade_out_music > 0:
         # Land the fade exactly on the last frame of the card.
-        audio_parts.append(f"afade=t=out:st={_fmt(duration - fade_out)}:d={_fmt(fade_out)}")
+        fo = max(0.0, min(fade_out_music, duration))
+        audio_parts.append(f"afade=t=out:st={_fmt(duration - fo)}:d={_fmt(fo)}")
     lines.append(",".join(audio_parts) + "[eca]")
     return lines
 
@@ -386,9 +423,14 @@ def build_render_command(
     normalize_loudness: bool = True,
     crf: int = 20,
     preset: str = "medium",
+    audio_bitrate_k: int = 192,
+    canvas_width: int | None = None,
+    canvas_height: int | None = None,
     ass_path: Path | None = None,
     fonts_dir: Path | None = None,
     end_card: EndCardSpec | None = None,
+    background_music: "BackgroundMusicSpec | None" = None,
+    loudness: LoudnessSpec | None = None,
 ) -> RenderPlan:
     """Build the full FFmpeg argument list for one reel render.
 
@@ -396,7 +438,19 @@ def build_render_command(
     libass via the ``ass`` filter. When ``end_card`` is set, its pre-rendered PNG
     is appended after the main content — subtitles are burned before that concat,
     so cue times stay relative to the main timeline.
+
+    ``background_music`` is only mixed into the *main* timeline when its scope is
+    ``full_reel``. End-card-only beds are expected to be wired via ``end_card``.
     """
+    # Local import avoids a circular dependency with the background_music package.
+    from app.models.background_music import BackgroundMusicScope
+    from app.services.background_music.ffmpeg_filters import (
+        ALIMITER,
+        BackgroundMusicSpec,
+        build_background_music_graph,
+        build_loudnorm_filter,
+    )
+
     if not segments:
         raise ValueError("A render needs at least one segment.")
     if layout not in LAYOUTS:
@@ -406,10 +460,17 @@ def build_render_command(
             raise ValueError(f"Segment {index + 1} has a non-positive duration.")
 
     width, height = canvas_for(aspect_ratio)
+    if canvas_width is not None and canvas_height is not None:
+        width, height = int(canvas_width), int(canvas_height)
     output_fps = normalize_fps(fps)
+    loud = loudness or LoudnessSpec()
 
     if end_card is not None and end_card.duration <= 0:
         raise ValueError("The end card duration must be positive.")
+
+    full_reel_music: BackgroundMusicSpec | None = None
+    if background_music is not None and background_music.scope == BackgroundMusicScope.full_reel:
+        full_reel_music = background_music
 
     args: list[str] = [ffmpeg, "-hide_banner", "-nostdin", "-loglevel", "error"]
 
@@ -438,6 +499,14 @@ def build_render_command(
             ]
 
     count = len(segments)
+    next_input = count * (1 if has_audio else 2)
+    music_input_index: int | None = None
+    if full_reel_music is not None:
+        # Loop short beds so the prep filter can trim to the main duration.
+        args += ["-stream_loop", "-1", "-i", str(full_reel_music.path)]
+        music_input_index = next_input
+        next_input += 1
+
     end_card_mode: str | None = None
     if end_card is not None:
         end_card_mode = resolve_end_card_audio_mode(end_card, has_audio=has_audio)
@@ -470,8 +539,24 @@ def build_render_command(
         filters.append(f"[{video_label}]{ass_filter}[vout]")
         video_label = "vout"
 
-    if normalize_loudness:
-        filters.append(f"[{audio_label}]loudnorm=I=-16:TP=-1.5:LRA=11[aout]")
+    if full_reel_music is not None and music_input_index is not None:
+        mix_lines, audio_label = build_background_music_graph(
+            voice_label=audio_label,
+            music_input_index=music_input_index,
+            spec=full_reel_music,
+            main_duration=expected,
+            normalize_loudness=normalize_loudness,
+        )
+        filters += mix_lines
+    elif normalize_loudness:
+        # Limiter first, then loudnorm — spoken-word defaults, configurable LUFS.
+        loud_filter = build_loudnorm_filter(
+            target_lufs=loud.target_lufs,
+            true_peak_db=loud.true_peak_db,
+            lra=loud.lra,
+        )
+        filters.append(f"[{audio_label}]{ALIMITER}[alim]")
+        filters.append(f"[alim]{loud_filter}[aout]")
         audio_label = "aout"
 
     if end_card is not None and end_card_mode is not None:
@@ -489,7 +574,7 @@ def build_render_command(
             )
             audio_label = "amain"
 
-        image_index = count * (1 if has_audio else 2)
+        image_index = next_input
         filters += _end_card_chains(
             end_card,
             mode=end_card_mode,
@@ -529,7 +614,7 @@ def build_render_command(
         "-c:a",
         "aac",
         "-b:a",
-        "192k",
+        f"{max(64, min(320, int(audio_bitrate_k)))}k",
         "-ar",
         str(TARGET_SAMPLE_RATE),
         "-ac",

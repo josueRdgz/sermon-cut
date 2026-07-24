@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from functools import lru_cache
 
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from app.core.paths import ROOT_DIR, default_database_url
@@ -25,49 +26,60 @@ class Settings(BaseSettings):
     app_name: str = "Sermon Cut"
     api_prefix: str = "/api"
 
-    database_url: str = default_database_url()
+    # Optional override for local media + SQLite (absolute or relative path).
+    # When empty, defaults to ``<repo>/storage``.
+    storage_dir: str | None = None
 
-    # CORS is intentionally limited to the local Vite dev server only.
-    cors_origins: list[str] = [
-        "http://localhost:5173",
-        "http://127.0.0.1:5173",
-    ]
+    database_url: str = Field(default_factory=default_database_url)
+
+    # Run ``alembic upgrade head`` when the API starts. Failures are logged and
+    # do not abort startup unless you run migrations manually with --raise.
+    auto_migrate: bool = True
+
+    # CORS: Vite dev server + Tauri webview origins (desktop shell).
+    cors_origins: list[str] = Field(
+        default_factory=lambda: [
+            "http://localhost:5173",
+            "http://127.0.0.1:5173",
+            "tauri://localhost",
+            "https://tauri.localhost",
+            "http://tauri.localhost",
+            "https://asset.localhost",
+            "http://asset.localhost",
+        ]
+    )
 
     # Maximum size for a single uploaded file (video or cover). Default: 4 GiB.
     max_upload_bytes: int = 4 * 1024 * 1024 * 1024
 
     # ---- Local transcription (faster-whisper) ----
-    # Default model. "small" is a good balance for modest machines; use "medium"
-    # for higher quality on stronger hardware.
     whisper_model: str = "small"
-    # Device preference: "auto" (CUDA if available, else CPU), "cuda" or "cpu".
     whisper_device: str = "auto"
-    # ctranslate2 compute type: "auto" resolves per device (float16 on CUDA,
-    # int8 on CPU). Can be pinned e.g. to "int8", "int8_float16", "float16".
     whisper_compute_type: str = "auto"
-    # When true, the extracted temporary WAV is kept for debugging instead of
-    # being deleted once the job finishes.
     keep_temp_audio: bool = False
 
-    # Minimum duration (seconds) of a single ReelSegment. Configurable so short
-    # punchy cuts remain possible while accidental zero-length clips are rejected.
     min_reel_segment_seconds: float = 0.1
 
     # ---- Optional AI analysis (Gemini) ----
-    # "auto" uses Gemini when SERMON_CUT_GEMINI_API_KEY is set, else the mock.
-    # "mock" always uses the deterministic offline provider.
-    # "gemini" requires a key and the google-genai extra.
     ai_provider: str = "auto"
-    # API key: environment / local .env only — never commit real keys.
     gemini_api_key: str | None = None
     gemini_model: str = "gemini-2.5-flash"
     gemini_timeout_seconds: float = 90.0
     gemini_max_attempts: int = 3
-    # Approximate character budget per chunk before calling the model.
     ai_chunk_char_limit: int = 48_000
+
+    # ---- Loudness (spoken-word friendly) ----
+    target_lufs: float = -16.0
+    true_peak_db: float = -1.5
+    loudness_lra: float = 11.0
 
 
 @lru_cache
 def get_settings() -> Settings:
     """Return a cached Settings instance."""
     return Settings()
+
+
+def clear_settings_cache() -> None:
+    """Drop the cached settings (useful after changing env in tests/CLI)."""
+    get_settings.cache_clear()

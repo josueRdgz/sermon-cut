@@ -1,0 +1,11 @@
+1
+00:00:00,000 --> 00:00:01,200
+Bienvenidos a esta demostración de Sermon Clips.
+
+2
+00:00:01,200 --> 00:00:02,600
+Este audio es un tono sintético, no una predicación real.
+
+3
+00:00:02,600 --> 00:00:04,000
+Úsalo solo para probar la instalación local.

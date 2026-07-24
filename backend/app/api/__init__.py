@@ -9,8 +9,10 @@ from __future__ import annotations
 from fastapi import APIRouter
 
 from app.api.analysis import router as analysis_router
+from app.api.background_music import router as background_music_router
 from app.api.cut_suggestions import router as cut_suggestions_router
 from app.api.end_card import router as end_card_router
+from app.api.export_profiles import router as export_profiles_router
 from app.api.framing import router as framing_router
 from app.api.health import router as health_router
 from app.api.projects import router as projects_router
@@ -32,5 +34,7 @@ api_router.include_router(framing_router)
 api_router.include_router(renders_router)
 api_router.include_router(subtitles_router)
 api_router.include_router(end_card_router)
+api_router.include_router(background_music_router)
+api_router.include_router(export_profiles_router)
 
 __all__ = ["api_router"]

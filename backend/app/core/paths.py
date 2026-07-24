@@ -1,11 +1,13 @@
 """Centralized filesystem paths built with pathlib.
 
-Every path in the project is derived from this module so we never concatenate
-path strings by hand. The target platform is macOS.
+Paths can be overridden with ``SERMON_CUT_STORAGE_DIR`` (environment) or by
+calling ``configure_paths`` after settings load. Defaults live under
+``<repo>/storage``.
 """
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from uuid import UUID
 
@@ -13,14 +15,54 @@ from uuid import UUID
 BACKEND_DIR: Path = Path(__file__).resolve().parents[2]
 ROOT_DIR: Path = BACKEND_DIR.parent
 
-STORAGE_DIR: Path = ROOT_DIR / "storage"
+
+def _default_storage_dir() -> Path:
+    override = os.environ.get("SERMON_CUT_STORAGE_DIR", "").strip()
+    if override:
+        return Path(override).expanduser().resolve()
+    return (ROOT_DIR / "storage").resolve()
+
+
+STORAGE_DIR: Path = _default_storage_dir()
 PROJECTS_DIR: Path = STORAGE_DIR / "projects"
 TEMP_DIR: Path = STORAGE_DIR / "temp"
 EXPORTS_DIR: Path = STORAGE_DIR / "exports"
-
 DATABASE_FILE: Path = STORAGE_DIR / "sermon_cut.db"
+WHISPER_CACHE_DIR: Path = STORAGE_DIR / "whisper-models"
 
-_MANAGED_DIRS: tuple[Path, ...] = (STORAGE_DIR, PROJECTS_DIR, TEMP_DIR, EXPORTS_DIR)
+_MANAGED_DIRS: tuple[Path, ...] = (
+    STORAGE_DIR,
+    PROJECTS_DIR,
+    TEMP_DIR,
+    EXPORTS_DIR,
+    WHISPER_CACHE_DIR,
+)
+
+
+def configure_paths(storage_dir: str | Path | None = None) -> Path:
+    """Rebind storage roots (call once at startup when settings override the env)."""
+    global STORAGE_DIR, PROJECTS_DIR, TEMP_DIR, EXPORTS_DIR, DATABASE_FILE, WHISPER_CACHE_DIR
+    global _MANAGED_DIRS
+
+    if storage_dir is not None and str(storage_dir).strip():
+        root = Path(storage_dir).expanduser().resolve()
+    else:
+        root = _default_storage_dir()
+
+    STORAGE_DIR = root
+    PROJECTS_DIR = STORAGE_DIR / "projects"
+    TEMP_DIR = STORAGE_DIR / "temp"
+    EXPORTS_DIR = STORAGE_DIR / "exports"
+    DATABASE_FILE = STORAGE_DIR / "sermon_cut.db"
+    WHISPER_CACHE_DIR = STORAGE_DIR / "whisper-models"
+    _MANAGED_DIRS = (
+        STORAGE_DIR,
+        PROJECTS_DIR,
+        TEMP_DIR,
+        EXPORTS_DIR,
+        WHISPER_CACHE_DIR,
+    )
+    return STORAGE_DIR
 
 
 def ensure_storage_dirs() -> None:

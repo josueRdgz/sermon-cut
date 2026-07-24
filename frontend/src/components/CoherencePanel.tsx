@@ -195,7 +195,9 @@ export function CoherencePanel({
             onChange={(e) => setIncludeAi(e.target.checked)}
             disabled={busy}
           />
-          <span>Revisión opcional con Gemini (solo JSON, sin reescribir)</span>
+          <span>
+            Revisión opcional con Gemini (envía texto del sermón a Google; ver docs/PRIVACY.md)
+          </span>
         </label>
         <button type="button" className="button--ghost" onClick={() => void runValidate()} disabled={busy}>
           {busy ? 'Validando…' : 'Revalidar'}

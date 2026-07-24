@@ -1,6 +1,7 @@
 # ---- Python / backend ----
 __pycache__/
 *.py[cod]
+*$py.class
 .venv/
 venv/
 env/
@@ -8,6 +9,10 @@ env/
 .pytest_cache/
 .ruff_cache/
 .mypy_cache/
+.coverage
+htmlcov/
+.tox/
+.nox/
 
 # ---- Node / frontend ----
 node_modules/
@@ -15,25 +20,85 @@ dist/
 coverage/
 *.local
 *.tsbuildinfo
+.vite/
 
-# ---- Databases ----
+# ---- Tauri / Rust ----
+frontend/src-tauri/target/
+
+# ---- Databases (never commit local SQLite) ----
 *.db
+*.db-journal
+*.db-wal
+*.db-shm
 *.sqlite
 *.sqlite3
+storage/**/*.db
 
 # ---- Storage (generated media; keep folder structure only) ----
-storage/projects/*
-storage/temp/*
-storage/exports/*
+storage/projects/**
+storage/temp/**
+storage/exports/**
+storage/whisper-models/**
 !storage/**/.gitkeep
 
-# ---- Environment ----
+# ---- Media / personal content (never commit) ----
+# Prefer scoping to storage and common dumps — keep the tiny CC0 demo commitable.
+storage/**/*.{mp4,mov,mkv,avi,webm,m4a,mp3,wav,flac,aac,ogg}
+*.mov
+*.mkv
+*.avi
+*.webm
+# Loose dumps at repo root
+/*.mp4
+/*.mp3
+/*.wav
+/*.m4a
+# Allow tiny committed demo assets explicitly:
+!demo/
+!demo/media/
+!demo/media/sample-clip.mp4
+!demo/**/*.srt
+!demo/**/*.json
+!demo/**/*.txt
+!demo/**/*.md
+!demo/**/*.sh
+!demo/**/*.ps1
+!demo/media/.gitkeep
+
+# ---- Whisper / ML weights (never commit) ----
+*.bin
+*.pt
+*.pth
+*.onnx
+*.gguf
+models/
+whisper-models/
+**/huggingface/
+.cache/
+
+# ---- Renders / transcripts personales ----
+**/renders/**
+**/*.report.json
+storage/**/transcript*
+
+# ---- Environment / secrets ----
 .env
 .env.*
 !.env.example
+!.env*.example
+credentials.json
+**/secrets/**
+*.pem
+*.key
 
 # ---- OS / editor ----
 .DS_Store
 Thumbs.db
 .idea/
 .vscode/
+*.swp
+*~
+
+# ---- Logs ----
+*.log
+logs/

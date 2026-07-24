@@ -18,17 +18,27 @@ from app.services.endcard.layout import FittedText, SafeArea, fit_text, safe_are
 
 logger = logging.getLogger(__name__)
 
-# Candidate system font files, in preference order (macOS first).
+# Candidate system font files, in preference order (macOS / Windows / Linux).
 _REGULAR_FONTS = (
     "/System/Library/Fonts/HelveticaNeue.ttc",
     "/System/Library/Fonts/Helvetica.ttc",
     "/System/Library/Fonts/Supplemental/Arial.ttf",
     "/Library/Fonts/Arial.ttf",
+    r"C:\Windows\Fonts\arial.ttf",
+    r"C:\Windows\Fonts\segoeui.ttf",
+    "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
+    "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+    "/usr/share/fonts/TTF/DejaVuSans.ttf",
+    "/usr/share/fonts/truetype/freefont/FreeSans.ttf",
 )
 _SERIF_FONTS = (
     "/System/Library/Fonts/Supplemental/Georgia.ttf",
     "/Library/Fonts/Georgia.ttf",
     "/System/Library/Fonts/NewYork.ttf",
+    r"C:\Windows\Fonts\georgia.ttf",
+    "/usr/share/fonts/truetype/liberation/LiberationSerif-Regular.ttf",
+    "/usr/share/fonts/truetype/dejavu/DejaVuSerif.ttf",
+    "/usr/share/fonts/TTF/DejaVuSerif.ttf",
 )
 
 _TEXT_COLOR = (255, 255, 255, 255)

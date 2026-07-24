@@ -218,3 +218,49 @@ def test_timeline_matches_render_expected_duration() -> None:
         ]
     )
     assert timeline.total_duration == pytest.approx(plan.expected_duration_seconds)
+
+
+def test_karaoke_encodes_gaps_between_words() -> None:
+    from app.services.subtitles.ass import format_dialogue_text
+    from app.services.subtitles.cues import MappedWord
+    from app.services.subtitles.templates import get_template
+
+    options = SubtitleOptions(style="modern_highlight", granularity=SubtitleGranularity.word)
+    template = get_template(options.style)
+    cue = SubtitleCue(
+        start=0.0,
+        end=3.0,
+        text="hola mundo",
+        words=(
+            MappedWord("hola", 0.5, 1.0),
+            MappedWord("mundo", 2.0, 2.5),
+        ),
+        highlight=True,
+    )
+    text = format_dialogue_text(cue, template, options)
+    # Lead-in 0.5s → \k50; word; gap 1.0s → \k100; word
+    assert r"{\k50}" in text
+    assert r"{\k100}" in text or r"{\k99}" in text or r"{\k101}" in text
+
+
+def test_crossfade_does_not_stack_duplicate_segment_cues() -> None:
+    reel = [
+        TimelineSegment(0.0, 10.0, "short_crossfade", 500),
+        TimelineSegment(40.0, 50.0),
+    ]
+    transcript = [
+        SourceSegment(text="saliente", start=0.0, end=10.0, words=[]),
+        SourceSegment(text="entrante", start=40.0, end=50.0, words=[]),
+    ]
+    result = build_cues_for_reel(
+        reel_segments=reel,
+        transcript_segments=transcript,
+        fallback_texts=[None, None],
+        options=SubtitleOptions(
+            style="clear_reading",
+            granularity=SubtitleGranularity.segment,
+        ),
+    )
+    # Overlap window ~9.5–10.0 must not show both captions at once.
+    for left, right in zip(result.cues, result.cues[1:], strict=False):
+        assert left.end <= right.start + 1e-3

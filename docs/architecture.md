@@ -165,6 +165,28 @@ Organización por capas para separar responsabilidades:
 - Frontend: `EndCardPanel` configura todo, sube logo/música, muestra la vista
   previa (PNG servido por el backend) y lleva la etiqueta `Obligatoria`.
 
+### Música de fondo (opcional)
+
+- `services/background_music/` guarda un archivo local del usuario
+  (`background-music.<ext>`) y genera el grafo FFmpeg: preparación del bed,
+  ducking con `sidechaincompress`, `amix` priorizando voz, `alimiter` y
+  `loudnorm` (LUFS configurable, por defecto −16). Preset por defecto: `none`.
+- Alcance `full_reel` mezcla en la línea principal; `end_card_only` alimenta la
+  pantalla final cuando ésta no tiene música propia.
+- Frontend: `BackgroundMusicPanel` + medidores en `RenderPanel` antes de exportar.
+  Sin catálogos ni descargas; advertencia de derechos en la UI.
+
+### Perfiles de exportación
+
+- `services/export_profiles/` define perfiles editables (YouTube Shorts, Facebook /
+  Instagram Reels, WhatsApp Status), estimación de tamaño, naming seguro,
+  verificación FFprobe, hash SHA-256, reporte JSON y «abrir carpeta» multiplataforma.
+- El `RenderManager` aplica CRF/preset/bitrate del perfil, fuerza el lienzo
+  1080×1920, ajusta márgenes de subtítulos a la safe area y **no publica** nada
+  automáticamente (`publish_status=local_only`).
+- Frontend: selector de perfil/calidad/CRF, estimación, historial y revelar carpeta
+  en `RenderPanel`.
+
 ### Render (FFmpeg)
 
 - `services/render/args.py` es una función **pura**: recibe las ventanas, el
@@ -231,9 +253,10 @@ Las carpetas se versionan vacías (`.gitkeep`); su contenido está en `.gitignor
 
 ## Principios
 
-- Plataforma objetivo: **macOS**.
-- Ejecución **100% local**; sin servicios externos obligatorios.
+- Plataformas objetivo: **macOS, Windows y Linux**.
+- Ejecución **local-first**; sin servicios externos *obligatorios*. Gemini y la
+  descarga de modelos Whisper son opcionales (ver [PRIVACY.md](PRIVACY.md)).
 - Sin **Celery** ni **Redis**.
 - Rutas siempre con **`pathlib`**, nunca concatenando strings.
 - Sin blobs binarios en SQLite.
-- Dependencias mínimas y justificadas.
+- Dependencias mínimas y justificadas. FFmpeg del sistema: [LICENSING.md](LICENSING.md).

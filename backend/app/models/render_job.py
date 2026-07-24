@@ -6,7 +6,7 @@ import enum
 import uuid
 from datetime import UTC, datetime
 
-from sqlalchemy import BigInteger, DateTime, Enum, Float, ForeignKey, Integer, String, Text
+from sqlalchemy import BigInteger, Boolean, DateTime, Enum, Float, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.types import Uuid
 
@@ -82,6 +82,25 @@ class RenderJob(Base):
     # Relative to the project's renders/ directory; never an absolute path.
     output_filename: Mapped[str | None] = mapped_column(String(255), nullable=True)
     output_size_bytes: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+
+    # Export profile metadata (local only — never auto-published).
+    profile_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("export_profiles.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    profile_slug: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    profile_name: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    quality: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    crf: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    encode_preset: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    audio_bitrate_k: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    sha256: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    report_filename: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    verified: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    expected_audio: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    # Always ``local_only`` for now — no auto-publish.
+    publish_status: Mapped[str | None] = mapped_column(String(32), nullable=True)
 
     # Sanitized (shell-quoted) FFmpeg command, kept for debugging.
     ffmpeg_command: Mapped[str | None] = mapped_column(Text, nullable=True)

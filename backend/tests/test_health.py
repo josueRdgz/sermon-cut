@@ -2,9 +2,15 @@
 
 from __future__ import annotations
 
+import os
+
+os.environ["SERMON_CUT_AUTO_MIGRATE"] = "false"
+
+from app.core.config import get_settings
 from app.main import create_app
 from fastapi.testclient import TestClient
 
+get_settings.cache_clear()
 client = TestClient(create_app())
 
 

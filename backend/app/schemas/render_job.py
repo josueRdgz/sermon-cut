@@ -8,6 +8,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from app.models.export_profile import ExportQuality
 from app.models.reel import AspectRatio
 
 
@@ -23,11 +24,14 @@ class RenderLayout(enum.StrEnum):
 class RenderStartRequest(BaseModel):
     """Options for a new render."""
 
-    # Defaults to the Reel's own aspect ratio when omitted.
+    profile_id: UUID | None = None
+    quality: ExportQuality = ExportQuality.standard
+    # Defaults to the profile (or Reel) aspect ratio when omitted.
     aspect_ratio: AspectRatio | None = None
     layout: RenderLayout = RenderLayout.center_crop
     normalize_loudness: bool = True
-    crf: int = Field(default=20, ge=14, le=32)
+    # When set, overrides the quality→CRF mapping from the profile.
+    crf: int | None = Field(default=None, ge=14, le=32)
     # When False, skip ASS burning even if the reel has subtitles enabled.
     burn_subtitles: bool = True
 
@@ -53,6 +57,18 @@ class RenderJobResponse(BaseModel):
     speed: float | None
     output_filename: str | None
     output_size_bytes: int | None
+    profile_id: UUID | None = None
+    profile_slug: str | None = None
+    profile_name: str | None = None
+    quality: str | None = None
+    crf: int | None = None
+    encode_preset: str | None = None
+    audio_bitrate_k: int | None = None
+    sha256: str | None = None
+    report_filename: str | None = None
+    verified: bool | None = None
+    expected_audio: bool | None = None
+    publish_status: str | None = None
     ffmpeg_command: str | None
     error_message: str | None
     created_at: datetime
@@ -64,3 +80,10 @@ class RenderJobResponse(BaseModel):
 class RenderJobListResponse(BaseModel):
     items: list[RenderJobResponse]
     total: int
+
+
+class RevealResponse(BaseModel):
+    path: str
+    directory: str
+    platform: str
+    method: str
