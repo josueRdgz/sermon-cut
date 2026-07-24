@@ -34,6 +34,36 @@ mitigation as soon as practical.
   (e.g. world-writable `SERMON_CUT_STORAGE_DIR` on a shared host)
 - Denial of service against a user’s own `uvicorn` process
 
+## Optional YouTube import (yt-dlp)
+
+The YouTube import feature is **opt-in** and off unless you enable it and install
+`yt-dlp`. Local file upload is always the primary, stable path. When it is used:
+
+- URLs are validated for **syntax and domain** before any subprocess runs. Only
+  `youtube.com` / `youtu.be` single-video URLs are accepted. Playlists,
+  channels, search pages, `file://`, `localhost`, and private/internal hosts are
+  rejected (SSRF protection).
+- `yt-dlp` runs with `subprocess.Popen`, an **explicit argument list**, and
+  `shell=False`. **No argument is ever taken from the frontend** — only the
+  validated canonical URL and a backend-defined quality. `--ignore-config` is
+  used so a local `yt-dlp` config cannot inject flags, and `--no-playlist`
+  enforces single-video downloads.
+- The first version uses **no cookies and no credentials** (`--no-cookies`); only
+  public/unlisted videos accessible without auth are supported. Browser-cookie
+  auth is intentionally **not** implemented and would require explicit user
+  consent in a future version.
+- Raw `yt-dlp` output (which can contain absolute paths or command lines) is kept
+  in a **local log file only**; the API returns stable error codes and safe
+  messages, never cookies, full commands, or absolute paths.
+- Downloads are bounded by configurable **max duration**, **max estimated size**,
+  and a **free-disk** check before starting. Cancellation terminates the process
+  and removes `.part` / incomplete files without touching a previously valid
+  video.
+
+Because YouTube changes its mechanisms frequently, keep `yt-dlp` updated
+(`pip install -U yt-dlp`). Some URLs may temporarily fail; local upload remains
+the reliable fallback.
+
 ## Hardening tips for operators
 
 - Keep `.env` out of Git (already gitignored).

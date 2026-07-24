@@ -109,7 +109,9 @@ Datos de prueba libres de derechos: carpeta [`demo/`](demo/README.md).
 
 ## Cómo crear el primer proyecto
 
-1. **Crear proyecto** → rellena título, iglesia, canal; sube video (y portada opcional).
+1. **Crear proyecto** → rellena título, iglesia, canal; elige el **origen del
+   video**: **archivo local** (método principal) o **URL de YouTube** (opcional,
+   ver abajo); sube portada opcional.
 2. En el detalle del proyecto, **transcribe localmente** (elige modelo e idioma)
    o importa una **transcripción** existente (SRT / VTT / JSON / TXT).
 3. Usa el buscador, edita segmentos y haz clic en uno para saltar en el video HTML5.
@@ -121,6 +123,41 @@ Datos de prueba libres de derechos: carpeta [`demo/`](demo/README.md).
 6. Exporta la transcripción a SRT, VTT o JSON interno cuando quieras.
 
 Los medios viven en `storage/projects/{uuid}/`. SQLite solo guarda metadatos.
+
+## Importar desde YouTube (opcional)
+
+La subida de archivos locales es el método **principal y estable**. De forma
+**opcional** puedes crear un proyecto a partir de la **URL de un video
+individual de YouTube**: la app lo descarga a tu almacenamiento local y luego lo
+procesa **exactamente igual** que un video subido manualmente.
+
+Requisitos: instalar el ejecutable **`yt-dlp`** (`pip install -U yt-dlp`) y tener
+**FFmpeg/FFprobe**. Comprueba el entorno con `python -m app.cli doctor`.
+
+Flujo en la UI (**Nueva predicación → Origen del video → URL de YouTube**):
+
+1. Pega la URL y pulsa **Comprobar video** (vista previa: título, canal,
+   duración, miniatura, resolución, fecha).
+2. Elige la **calidad** (720p, 1080p por defecto, o «mejor disponible» — nunca
+   4K por defecto).
+3. Acepta el aviso de derechos y pulsa **Crear proyecto**: verás progreso por
+   fases (metadatos → video → audio → fusión → validación) y un botón
+   **Cancelar**.
+
+Detalles y límites:
+
+- Solo **videos individuales** de `youtube.com` / `youtu.be` (incluidos Shorts y
+  directos ya finalizados). Se rechazan playlists, canales, búsquedas,
+  directos activos y videos sin streams descargables. Si la URL trae playlist +
+  video, se importa **solo el video** (`--no-playlist`).
+- Salida orientada a edición: **H.264 + AAC en MP4** con *fallback* robusto.
+- Primera versión **sin autenticación**: solo videos públicos o no listados.
+- **Importa únicamente videos propios o autorizados.** Eres responsable de
+  respetar los derechos de autor y las condiciones de la plataforma.
+- YouTube cambia con frecuencia: mantén `yt-dlp` actualizado. Algunas URLs pueden
+  fallar temporalmente; la **subida local es el fallback estable**.
+- Configúralo con `SERMON_CUT_YOUTUBE_*` (ver `.env.example`) o desactívalo con
+  `SERMON_CUT_YOUTUBE_IMPORT_ENABLED=false`.
 
 ## Formatos de transcripción compatibles
 
@@ -234,6 +271,11 @@ Fixtures de ejemplo: `backend/tests/fixtures/transcripts/`.
 | GET | `/api/health` | Estado + FFmpeg/FFprobe |
 | CRUD | `/api/projects`… | Proyectos y media |
 | GET | `/api/projects/{id}/media/video` | Stream del video (Range / HTML5) |
+| POST | `/api/youtube/preview` | Validar URL + vista previa (yt-dlp) |
+| POST | `/api/projects/{id}/youtube-import` | Iniciar import de YouTube (202) |
+| GET | `/api/projects/{id}/youtube-import` | Último import (para polling) |
+| GET | `/api/youtube-import-jobs/{id}` | Estado de un import |
+| POST | `/api/youtube-import-jobs/{id}/cancel` | Cancelar un import |
 | POST | `/api/projects/{id}/transcript` | Subir/normalizar transcripción |
 | GET | `/api/projects/{id}/transcript` | Consultar transcripción |
 | DELETE | `/api/projects/{id}/transcript` | Eliminar transcripción |

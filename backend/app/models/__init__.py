@@ -45,8 +45,14 @@ from app.models.transcript import (
     TranscriptWord,
 )
 from app.models.transcription_job import TranscriptionJob, TranscriptionJobStatus
+from app.models.youtube_import_job import (
+    ACTIVE_YOUTUBE_IMPORT_STATUSES,
+    YouTubeImportJob,
+    YouTubeImportJobStatus,
+)
 
 __all__ = [
+    "ACTIVE_YOUTUBE_IMPORT_STATUSES",
     "AnalysisCandidate",
     "AnalysisCandidateStatus",
     "AnalysisJob",
@@ -80,4 +86,6 @@ __all__ = [
     "TranscriptionJob",
     "TranscriptionJobStatus",
     "TransitionType",
+    "YouTubeImportJob",
+    "YouTubeImportJobStatus",
 ]

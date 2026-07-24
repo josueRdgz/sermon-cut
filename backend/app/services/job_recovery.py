@@ -16,6 +16,11 @@ from app.models.transcription_job import (
     TranscriptionJob,
     TranscriptionJobStatus,
 )
+from app.models.youtube_import_job import (
+    ACTIVE_YOUTUBE_IMPORT_STATUSES,
+    YouTubeImportJob,
+    YouTubeImportJobStatus,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -34,7 +39,7 @@ def reconcile_stale_jobs(session: Session) -> dict[str, int]:
     ``running`` / ``cancelling`` would permanently block new work.
     """
     now = _utc_now()
-    counts = {"render": 0, "transcription": 0, "analysis": 0}
+    counts = {"render": 0, "transcription": 0, "analysis": 0, "youtube_import": 0}
 
     renders = list(
         session.scalars(
@@ -86,6 +91,25 @@ def reconcile_stale_jobs(session: Session) -> dict[str, int]:
         job.finished_at = now
         counts["analysis"] += 1
 
+    youtube_imports = list(
+        session.scalars(
+            select(YouTubeImportJob).where(
+                YouTubeImportJob.status.in_(tuple(ACTIVE_YOUTUBE_IMPORT_STATUSES))
+            )
+        ).all()
+    )
+    for job in youtube_imports:
+        if job.status == YouTubeImportJobStatus.cancelling:
+            job.status = YouTubeImportJobStatus.cancelled
+            job.stage = "cancelled"
+        else:
+            job.status = YouTubeImportJobStatus.failed
+            job.stage = "failed"
+            job.error_code = "youtube_interrupted"
+            job.error_message = _INTERRUPT_MESSAGE
+        job.finished_at = now
+        counts["youtube_import"] += 1
+
     # Unlock projects stuck in worker statuses with no remaining active work.
     stuck = list(
         session.scalars(
@@ -103,24 +127,29 @@ def reconcile_stale_jobs(session: Session) -> dict[str, int]:
     )
     for project in stuck:
         if project.status == ProjectStatus.importing:
-            # Mid-upload crash: return to draft rather than leave "importing".
-            project.status = ProjectStatus.draft
+            # Mid-import crash: keep a valid prior video (ready) or fall back to
+            # the pre-import "created" state. There is no "draft" status.
+            project.status = (
+                ProjectStatus.ready if project.video_filename else ProjectStatus.created
+            )
             project.error_message = _INTERRUPT_MESSAGE
             continue
         project.status = ProjectStatus.editing
         if project.error_message and "Interrupted" in project.error_message:
             pass
-        elif counts["render"] or counts["transcription"] or counts["analysis"]:
+        elif any(counts.values()):
             project.error_message = _INTERRUPT_MESSAGE
 
     session.commit()
     total = sum(counts.values())
     if total:
         logger.warning(
-            "Reconciled %s stale job(s): render=%s transcription=%s analysis=%s",
+            "Reconciled %s stale job(s): render=%s transcription=%s analysis=%s "
+            "youtube_import=%s",
             total,
             counts["render"],
             counts["transcription"],
             counts["analysis"],
+            counts["youtube_import"],
         )
     return counts

@@ -15,6 +15,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   `StatusIndicator`, `ProjectCard`, `EmptyState`, `MetricCard`, …). Health
   endpoint now reports Whisper/Gemini availability, app version and storage
   usage; covers are served via `/api/projects/{id}/media/cover`.
+- Optional YouTube import via `yt-dlp` (opt-in). Local file upload remains the
+  primary, stable path. Validates the URL + domain, previews via
+  `--dump-single-json`, downloads a single video (H.264/AAC MP4, default 1080p,
+  never 4K), merges, verifies with FFprobe, and registers it as the project
+  video. Real cancellation, structured progress, SSRF/domain guards,
+  `--no-playlist`, duration/size/disk limits, and a rights-acceptance notice.
+  New endpoints under `/api/youtube*`; `doctor` now checks yt-dlp + JS runtime.
 - Tauri 2 desktop shell (local FastAPI on `127.0.0.1`, system FFmpeg).
 - `docs/PRIVACY.md`, `docs/LICENSING.md`, `docs/DESKTOP.md`, `docs/PENDING.md`.
 - Startup reconciliation of orphaned render/transcription/analysis jobs.

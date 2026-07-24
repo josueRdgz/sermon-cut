@@ -92,6 +92,10 @@ def client(
         "app.services.analysis.manager.AnalysisManager.shutdown",
         lambda self, wait=False: None,
     )
+    monkeypatch.setattr(
+        "app.services.youtube.manager.YouTubeImportManager.shutdown",
+        lambda self, wait=False: None,
+    )
 
     def _override_get_db() -> Generator[Session, None, None]:
         db = db_session_factory()

@@ -21,6 +21,7 @@ from app.api.renders import router as renders_router
 from app.api.subtitles import router as subtitles_router
 from app.api.transcription import router as transcription_router
 from app.api.transcripts import router as transcripts_router
+from app.api.youtube import router as youtube_router
 
 api_router = APIRouter()
 api_router.include_router(health_router)
@@ -36,5 +37,6 @@ api_router.include_router(subtitles_router)
 api_router.include_router(end_card_router)
 api_router.include_router(background_music_router)
 api_router.include_router(export_profiles_router)
+api_router.include_router(youtube_router)
 
 __all__ = ["api_router"]

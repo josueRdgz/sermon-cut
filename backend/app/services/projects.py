@@ -146,7 +146,6 @@ async def attach_video(
             max_bytes=settings.max_upload_bytes,
         )
         storage.assert_file_magic(destination, kind="video")
-        metadata = probe_video(destination)
     except Exception as exc:
         project.status = ProjectStatus.failed
         project.error_message = str(getattr(exc, "detail", exc))
@@ -154,7 +153,35 @@ async def attach_video(
         db.commit()
         raise
 
-    # Replace any previous video file with a different extension.
+    try:
+        return finalize_project_video(db, project, stored_name)
+    except Exception as exc:
+        project.status = ProjectStatus.failed
+        project.error_message = str(getattr(exc, "detail", exc))
+        _touch(project)
+        db.commit()
+        raise
+
+
+def finalize_project_video(
+    db: Session,
+    project: Project,
+    stored_name: str,
+    *,
+    verify_magic: bool = False,
+) -> Project:
+    """Probe a video already on disk and register it as the project's original.
+
+    Shared by local upload and YouTube import: both paths land a file under the
+    project directory, then hand it to FFprobe and update project metadata /
+    status identically. The rest of the SermonCut pipeline is unchanged.
+    """
+    destination = storage.resolve_inside_project(project.id, stored_name)
+    if verify_magic:
+        storage.assert_file_magic(destination, kind="video")
+    metadata = probe_video(destination)
+
+    # Replace any previous video file with a different name/extension.
     if project.video_filename and project.video_filename != stored_name:
         old = storage.resolve_inside_project(project.id, project.video_filename)
         old.unlink(missing_ok=True)

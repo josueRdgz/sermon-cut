@@ -86,6 +86,11 @@ def job_temp_dir(job_id: UUID) -> Path:
     return TEMP_DIR / f"transcription-{job_id}"
 
 
+def project_source_dir(project_id: UUID) -> Path:
+    """Scratch directory for downloaded sources (yt-dlp .part files, streams)."""
+    return project_dir(project_id) / "source"
+
+
 def project_renders_dir(project_id: UUID) -> Path:
     """Return the directory holding rendered reels for a project."""
     return project_dir(project_id) / "renders"

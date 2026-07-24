@@ -79,6 +79,101 @@ def _pkg_version(name: str) -> str | None:
         return None
 
 
+def _ytdlp_recommends_js_runtime() -> bool:
+    """Return True when the installed yt-dlp hints that a JS runtime helps.
+
+    Newer yt-dlp releases can leverage an external JavaScript runtime (Deno /
+    Node) for some YouTube player challenges. We never assert it is mandatory —
+    we only surface the recommendation when yt-dlp's own help mentions it.
+    """
+    from app.core.config import get_settings as _get_settings
+    from app.services.youtube.ytdlp import locate_ytdlp
+
+    exe = locate_ytdlp(_get_settings())
+    if exe is None:
+        return False
+    try:
+        result = subprocess.run(
+            [exe, "--help"],
+            capture_output=True,
+            text=True,
+            timeout=15,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return False
+    help_text = (result.stdout or "") + (result.stderr or "")
+    lowered = help_text.lower()
+    return "--extractor-args" in lowered and ("deno" in lowered or "jsi" in lowered)
+
+
+def _collect_youtube_checks(checks: list[CheckResult], settings: object) -> None:
+    from app.services.youtube.ytdlp import locate_ytdlp, ytdlp_version
+
+    enabled = getattr(settings, "youtube_import_enabled", True)
+    if not enabled:
+        checks.append(
+            CheckResult(
+                name="yt-dlp",
+                ok=True,
+                detail=(
+                    "Importación desde YouTube deshabilitada "
+                    "(SERMON_CUT_YOUTUBE_IMPORT_ENABLED=false)."
+                ),
+            )
+        )
+        return
+
+    exe = locate_ytdlp(settings)  # type: ignore[arg-type]
+    if exe is None:
+        checks.append(
+            CheckResult(
+                name="yt-dlp",
+                ok=True,  # optional feature: missing is informational, not fatal.
+                detail="yt-dlp no encontrado (la importación desde YouTube quedará desactivada).",
+                hint=(
+                    "Opcional. Instala con 'pip install yt-dlp' o define "
+                    "SERMON_CUT_YTDLP_PATH. La subida local sigue funcionando."
+                ),
+            )
+        )
+        return
+
+    version = ytdlp_version(exe)
+    checks.append(
+        CheckResult(
+            name="yt-dlp",
+            ok=True,
+            detail=f"yt-dlp {version or 'instalado'} ({exe})",
+            hint="Manténlo actualizado ('pip install -U yt-dlp'): YouTube cambia con frecuencia.",
+        )
+    )
+
+    if _ytdlp_recommends_js_runtime():
+        deno = shutil.which("deno")
+        node = shutil.which("node")
+        runtime = deno or node
+        checks.append(
+            CheckResult(
+                name="yt-dlp:js_runtime",
+                ok=True,
+                detail=(
+                    f"Runtime JS detectado ({'deno' if deno else 'node'}: {runtime})."
+                    if runtime
+                    else "Sin runtime JS (Deno/Node) — algunos videos podrían fallar."
+                ),
+                hint=(
+                    None
+                    if runtime
+                    else (
+                        "Esta versión de yt-dlp puede requerir Deno o Node para ciertos "
+                        "formatos de YouTube. Instálalo si ves errores de descarga."
+                    )
+                ),
+            )
+        )
+
+
 def collect_checks() -> list[CheckResult]:
     settings = get_settings()
     if settings.storage_dir:
@@ -168,6 +263,9 @@ def collect_checks() -> list[CheckResult]:
             else "FFprobe se instala con FFmpeg. Vuelve a instalar el paquete completo.",
         )
     )
+
+    # ---- Optional YouTube import (yt-dlp) ----
+    _collect_youtube_checks(checks, settings)
 
     # ---- Storage permissions ----
     for label, path in (

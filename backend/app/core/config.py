@@ -77,6 +77,22 @@ class Settings(BaseSettings):
     true_peak_db: float = -1.5
     loudness_lra: float = 11.0
 
+    # ---- Optional YouTube import (yt-dlp) ----
+    # Local file upload always stays the primary, stable method. This is opt-in.
+    youtube_import_enabled: bool = True
+    # Explicit path to the yt-dlp executable. When empty it is resolved on PATH.
+    ytdlp_path: str | None = None
+    # Default requested quality: "720p" | "1080p" | "best". Never 4K by default.
+    youtube_default_quality: str = "1080p"
+    # Reject videos longer than this (seconds). Default: 4 hours.
+    youtube_max_duration_seconds: int = 4 * 60 * 60
+    # Refuse to start if the estimated download exceeds this size. Default 8 GiB.
+    youtube_max_estimated_bytes: int = 8 * 1024 * 1024 * 1024
+    # Require at least this much free disk (bytes) beyond the estimate. 1 GiB.
+    youtube_min_free_bytes: int = 1 * 1024 * 1024 * 1024
+    # Seconds to wait for metadata extraction before giving up.
+    youtube_metadata_timeout_seconds: float = 60.0
+
 
 @lru_cache
 def get_settings() -> Settings:
