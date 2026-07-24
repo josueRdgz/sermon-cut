@@ -8,10 +8,10 @@ consecutivos y exportar un video vertical con subtítulos y una pantalla final.
 > **Estado actual:** proyectos locales + importación/normalización de
 > transcripciones (SRT, WebVTT, JSON interno, TXT) + **transcripción local con
 > faster-whisper** + **Reels compuestos por varios fragmentos no consecutivos**
-> (línea de tiempo, vista previa lógica) + **render real a MP4 con FFmpeg**
-> (corta, une y normaliza los fragmentos).
-> **Todavía no:** subtítulos quemados, pantalla final, Gemini ni generación
-> automática de clips.
+> + **render real a MP4 con FFmpeg** + **subtítulos ASS incrustados** (plantillas
+> y quemado con libass) + **pantalla final obligatoria** (3 diseños generados con
+> Pillow).
+> **Todavía no:** Gemini ni generación automática de clips.
 
 ## Requisitos (macOS)
 
@@ -37,15 +37,17 @@ Homebrew incluye todo lo necesario:
   filtro `xfade`, usado en las transiciones con fundido.
 - **`libx264`** habilitado (`--enable-libx264`) para el video H.264.
 - **Codificador AAC** — el nativo de FFmpeg (`aac`) es suficiente.
-- **Filtros**: `scale`, `crop`, `overlay`, `gblur`, `fps`, `concat`, `xfade`,
-  `afade`, `acrossfade`, `aresample`, `loudnorm`, y `lavfi`/`anullsrc` para
-  generar silencio cuando el video original no tiene pista de audio.
+- **Filtros**: `scale`, `crop`, `pad`, `overlay`, `gblur`, `fps`, `concat`,
+  `xfade`, `fade`, `afade`, `acrossfade`, `apad`, `atrim`, `volume`, `aresample`,
+  `loudnorm`, `ass` (libass) y `lavfi`/`anullsrc` para generar silencio cuando el
+  video original no tiene pista de audio.
+- Un **demuxer de imagen** (`-loop 1`) para concatenar la pantalla final.
 
 Comprobación rápida:
 
 ```bash
 ffmpeg -hide_banner -encoders | grep -E 'libx264|\baac\b'
-ffmpeg -hide_banner -filters  | grep -E 'xfade|gblur|loudnorm|acrossfade'
+ffmpeg -hide_banner -filters  | grep -E 'xfade|gblur|loudnorm|acrossfade|\bass\b'
 ```
 
 Si `ffmpeg` no está en el `PATH`, el endpoint de render responde `503` con
@@ -201,6 +203,14 @@ Fixtures de ejemplo: `backend/tests/fixtures/transcripts/`.
 | POST | `/api/projects/{id}/reels/from-transcript` | Crear/añadir desde segmentos de transcripción |
 | POST/PATCH/DELETE | `/api/projects/{id}/reels/{reelId}/segments`… | Fragmentos del Reel |
 | PUT | `/api/projects/{id}/reels/{reelId}/segments/order` | Reordenar fragmentos |
+| GET | `/api/subtitle-templates` | Plantillas ASS disponibles |
+| GET | `/api/projects/{id}/reels/{reelId}/subtitle-preview` | Cues remapeados (vista previa) |
+| GET | `/api/end-card/layouts` | Diseños de pantalla final |
+| GET/PUT | `/api/end-card/settings` | Configuración global de la pantalla final |
+| GET/PUT/DELETE | `/api/projects/{id}/end-card/settings` | Configuración por proyecto (DELETE vuelve a la global) |
+| POST | `/api/projects/{id}/end-card/logo` | Subir logo opcional |
+| POST | `/api/projects/{id}/end-card/music` | Subir música local del usuario |
+| GET | `/api/projects/{id}/end-card/preview` | PNG de la pantalla final (vista previa) |
 | POST | `/api/projects/{id}/reels/{reelId}/render` | Iniciar render con FFmpeg (202) |
 | GET | `/api/projects/{id}/reels/{reelId}/render` | Último render (para polling) |
 | GET | `/api/projects/{id}/reels/{reelId}/renders` | Historial de renders del Reel |
@@ -296,6 +306,88 @@ el resultado. Todavía **sin subtítulos ni pantalla final**.
 - El comando FFmpeg **saneado** (con comillas, copiable a la terminal) se
   registra en el log y puede verse en la UI para depuración.
 
+## Subtítulos incrustados (ASS / libass)
+
+Los subtítulos se generan como **ASS** y se queman en el MP4 con el filtro
+`ass` de FFmpeg (libass). Los tiempos **no** son los del video original: se
+recalculan sobre la línea temporal final del Reel.
+
+Ejemplo con cortes duros: segmento A de 20 s + segmento B de 30 s → B empieza en
+el segundo **20** de la salida. Con crossfade, el solape usable se resta (igual
+que en el grafo FFmpeg).
+
+**Plantillas**
+
+| ID | Idea |
+| -- | ---- |
+| `reformed_sober` | Blanco + contorno oscuro, máx. 2 líneas, tipografía seria, sin emojis |
+| `modern_highlight` | Grupos cortos; palabra actual resaltada (karaoke ASS); máx. 5–6 palabras |
+| `clear_reading` | Dos líneas, caja semitransparente, sin animación |
+| `sermon_quote` | Cita; referencia bíblica opcional |
+
+**Granularidad:** `auto` | `segment` | `phrase` | `word`. Si no hay word
+timestamps, se degrada a frase/segmento. Solo se usan palabras **vivas** de la
+transcripción: una palabra borrada no reaparece aunque quede texto antiguo en el
+fragmento del Reel.
+
+**Fuentes:** solo tipografías **instaladas en el sistema** (p. ej. Helvetica Neue,
+Arial, Georgia en macOS). Se copian a un `fontsdir` temporal para libass. **No**
+se descargan fuentes de Internet ni se incluyen tipografías comerciales en el
+repo.
+
+**Personalización en la UI:** estilo, tamaño, posición, mayúsculas, máx. de
+palabras, opacidad, margen inferior, con vista previa sobre el reproductor.
+
+## Pantalla final (obligatoria)
+
+Todo Reel termina con una pantalla final. **No se puede desactivar**; la UI la
+marca como `Obligatoria`. Dura entre **3 y 8 segundos** (por defecto 5 s, con
+fade in de 300 ms y fade out del audio principal de 500 ms).
+
+Muestra la portada de la predicación, el título del sermón, el texto «Ver sermón
+completo en nuestro canal de YouTube», el nombre de la iglesia y el
+identificador del canal, más logo, URL y código QR opcionales.
+
+**Diseños**
+
+| ID | Idea |
+| -- | ---- |
+| `cover_full` | La portada llena la pantalla, oscurecida para que el texto se lea |
+| `cover_card` | La portada dentro de una tarjeta con esquinas redondeadas sobre un fondo desenfocado |
+| `minimal` | Fondo limpio, logo arriba y título con tipografía serif; no necesita portada |
+
+**Generación de la imagen:** se compone con **Pillow** y se guarda como PNG
+temporal. No hay navegador ni motor headless de por medio: funciona sin red y en
+cualquier equipo. Las tipografías son las **instaladas en el sistema**, igual que
+en los subtítulos.
+
+**Zonas seguras y texto:** todos los elementos viven dentro de un rectángulo que
+deja libre un 8 % a los lados, un 10 % arriba y un 16 % abajo, para que la UI de
+Shorts / Reels no tape nada. El espacio vertical se reparte **antes** de dibujar
+(bandas para la portada, el QR y el logo), y cada párrafo se ajusta a lo que
+queda: el título pasa a varias líneas automáticamente, la fuente se reduce si
+hace falta y, como último recurso, se recorta con «…». El texto nunca desborda.
+
+**Audio de la pantalla final**
+
+- `silence` — el audio principal hace fade out en el empalme y la pantalla queda
+  en silencio.
+- `continue_with_fade` — el audio del video **continúa** desde donde acabó el
+  último fragmento y se desvanece al final de la tarjeta. Si el video ya no tiene
+  material que reproducir, degrada a `silence`.
+- `local_music` — usa **un archivo tuyo** subido al proyecto, con volumen
+  ajustable y fades. Nunca se descarga música automáticamente; sin archivo
+  subido, el modo se rechaza (`code: "end_card_music_missing"`).
+
+**Configuración global y por proyecto:** existe una fila global de
+`EndCardSettings` (`project_id IS NULL`) y, opcionalmente, una fila por proyecto
+que la sobrescribe. Desde la UI se puede guardar la configuración actual como
+global o volver a heredarla.
+
+**Concatenación:** la PNG entra como una entrada `-loop 1` y se une con `concat`
+**después** de quemar los subtítulos, así que los tiempos de los cues siguen
+siendo relativos al contenido principal.
+
 ## Configuración
 
 - `SERMON_CUT_MAX_UPLOAD_BYTES` — límite por archivo de media (default 4 GiB).
@@ -319,6 +411,13 @@ npm run test && npm run lint && npx tsc --noEmit
 parseo de `-progress`. `test_render_api.py` incluye una **prueba de integración
 opcional** que genera un clip sintético y lo renderiza con el FFmpeg real; se
 omite automáticamente (`skipif`) si `ffmpeg` no está instalado.
+`test_subtitles.py` cubre el remapeo temporal tras múltiples cortes, la
+degradación sin word timestamps y el filtro `ass` en el grafo.
+`test_end_card.py` cubre el ajuste de texto (wrap, reducción de fuente, recorte
+con «…»), el recorte de la duración a 3–8 s y el cableado de la pantalla final en
+el grafo FFmpeg, incluida la degradación de los modos de audio.
+`test_end_card_api.py` cubre la configuración global vs. por proyecto, las
+subidas de logo/música y la vista previa PNG.
 
 ## Diseño
 

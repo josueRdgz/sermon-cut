@@ -17,11 +17,14 @@ import type { AspectRatio, Reel, ReelSegment, TransitionType } from '../types/re
 import type { TranscriptSegment } from '../types/transcript';
 import { formatDuration, formatTimecode } from '../utils/format';
 import { ConfirmDialog } from './ConfirmDialog';
+import { EndCardPanel } from './EndCardPanel';
 import { RenderPanel } from './RenderPanel';
+import { SubtitlePanel } from './SubtitlePanel';
 
 interface ReelEditorProps {
   projectId: string;
   hasVideo: boolean;
+  hasCover: boolean;
   videoDuration: number | null;
 }
 
@@ -48,7 +51,7 @@ function gapSeconds(prev: ReelSegment, next: ReelSegment): number {
   return next.source_start_seconds - prev.source_end_seconds;
 }
 
-export function ReelEditor({ projectId, hasVideo, videoDuration }: ReelEditorProps) {
+export function ReelEditor({ projectId, hasVideo, hasCover, videoDuration }: ReelEditorProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const [reels, setReels] = useState<Reel[]>([]);
   const [activeReelId, setActiveReelId] = useState<string | null>(null);
@@ -63,6 +66,7 @@ export function ReelEditor({ projectId, hasVideo, videoDuration }: ReelEditorPro
   const [confirmDeleteReel, setConfirmDeleteReel] = useState(false);
   const [previewing, setPreviewing] = useState(false);
   const [previewIndex, setPreviewIndex] = useState(0);
+  const [sourceTime, setSourceTime] = useState<number | null>(null);
   const previewIndexRef = useRef(0);
   const previewingRef = useRef(false);
 
@@ -353,7 +357,9 @@ export function ReelEditor({ projectId, hasVideo, videoDuration }: ReelEditorPro
     if (!video || !activeReel) return;
 
     function onTimeUpdate() {
-      if (!previewingRef.current || !activeReel || !video) return;
+      if (!video) return;
+      setSourceTime(video.currentTime);
+      if (!previewingRef.current || !activeReel) return;
       const ordered = [...activeReel.segments].sort((a, b) => a.order - b.order);
       const index = previewIndexRef.current;
       const current = ordered[index];
@@ -567,16 +573,27 @@ export function ReelEditor({ projectId, hasVideo, videoDuration }: ReelEditorPro
           </div>
 
           {hasVideo && (
-            <video
-              ref={videoRef}
-              className="transcript-editor__video"
-              controls={!previewing}
-              preload="metadata"
-              src={projectVideoUrl(projectId)}
-            >
-              Tu navegador no soporta video HTML5.
-            </video>
+            <div className="reel-player">
+              <video
+                ref={videoRef}
+                className="transcript-editor__video"
+                controls={!previewing}
+                preload="metadata"
+                src={projectVideoUrl(projectId)}
+              >
+                Tu navegador no soporta video HTML5.
+              </video>
+              <div id="reel-subtitle-overlay" className="reel-player__subtitle-slot" />
+            </div>
           )}
+
+          <SubtitlePanel
+            projectId={projectId}
+            reel={activeReel}
+            sourceTime={sourceTime}
+            previewSegmentIndex={previewing ? previewIndex : null}
+            onReelUpdated={replaceReel}
+          />
 
           <ol className="reel-timeline">
             {orderedSegments.map((segment, index) => {
@@ -747,6 +764,12 @@ export function ReelEditor({ projectId, hasVideo, videoDuration }: ReelEditorPro
               );
             })}
           </ol>
+
+          <EndCardPanel
+            projectId={projectId}
+            aspectRatio={activeReel.aspect_ratio}
+            hasCover={hasCover}
+          />
 
           <RenderPanel
             projectId={projectId}

@@ -6,7 +6,7 @@ import enum
 import uuid
 from datetime import UTC, datetime
 
-from sqlalchemy import DateTime, Enum, Float, ForeignKey, Integer, String, Text
+from sqlalchemy import Boolean, DateTime, Enum, Float, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.types import Uuid
 
@@ -34,15 +34,29 @@ class TransitionType(enum.StrEnum):
 
 
 class SubtitleStyle(enum.StrEnum):
-    """Initial subtitle style presets (rendering comes later)."""
+    """ASS subtitle templates burned into the rendered reel."""
 
-    default = "default"
-    bold = "bold"
-    caption = "caption"
+    reformed_sober = "reformed_sober"
+    modern_highlight = "modern_highlight"
+    clear_reading = "clear_reading"
+    sermon_quote = "sermon_quote"
+
+
+class SubtitleGranularity(enum.StrEnum):
+    auto = "auto"
+    segment = "segment"
+    phrase = "phrase"
+    word = "word"
+
+
+class SubtitlePosition(enum.StrEnum):
+    bottom = "bottom"
+    center = "center"
+    top = "top"
 
 
 class ReelStatus(enum.StrEnum):
-    """Lifecycle of a Reel edit (no file rendering yet)."""
+    """Lifecycle of a Reel edit."""
 
     draft = "draft"
     ready = "ready"
@@ -76,8 +90,26 @@ class Reel(Base):
     subtitle_style: Mapped[SubtitleStyle] = mapped_column(
         Enum(SubtitleStyle, name="subtitle_style", native_enum=False, length=32),
         nullable=False,
-        default=SubtitleStyle.default,
+        default=SubtitleStyle.reformed_sober,
     )
+    subtitle_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    subtitle_granularity: Mapped[SubtitleGranularity] = mapped_column(
+        Enum(SubtitleGranularity, name="subtitle_granularity", native_enum=False, length=16),
+        nullable=False,
+        default=SubtitleGranularity.auto,
+    )
+    subtitle_font_size: Mapped[int] = mapped_column(Integer, nullable=False, default=52)
+    subtitle_position: Mapped[SubtitlePosition] = mapped_column(
+        Enum(SubtitlePosition, name="subtitle_position", native_enum=False, length=16),
+        nullable=False,
+        default=SubtitlePosition.bottom,
+    )
+    subtitle_uppercase: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    subtitle_max_words: Mapped[int] = mapped_column(Integer, nullable=False, default=6)
+    subtitle_opacity: Mapped[float] = mapped_column(Float, nullable=False, default=1.0)
+    subtitle_margin_bottom: Mapped[int] = mapped_column(Integer, nullable=False, default=120)
+    subtitle_bible_reference: Mapped[str | None] = mapped_column(String(200), nullable=True)
+
     aspect_ratio: Mapped[AspectRatio] = mapped_column(
         Enum(AspectRatio, name="aspect_ratio", native_enum=False, length=16),
         nullable=False,

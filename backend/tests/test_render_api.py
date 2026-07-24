@@ -226,6 +226,42 @@ def test_render_completes_and_saves_output(render_env) -> None:
     assert "-progress" in runner.calls[0]
 
 
+def test_render_always_appends_the_mandatory_end_card(render_env) -> None:
+    client, session_factory, _ = render_env
+    project_id, reel_id = _seed_project_and_reel(session_factory)
+
+    body = client.post(
+        f"/api/projects/{project_id}/reels/{reel_id}/render",
+        json={"layout": "center_crop"},
+    ).json()
+    assert body["status"] == "completed"
+
+    command = body["ffmpeg_command"]
+    assert "endcard-" in command
+    assert "-loop" in command
+    # 22 s + 24 s of content, plus the 5 s default end card.
+    assert body["total_seconds"] == pytest.approx(51.0)
+
+    # The generated PNG is a temp artefact and must not linger.
+    from app.core.paths import project_renders_dir
+
+    assert not list((project_renders_dir(UUID(project_id)) / ".tmp").glob("*.png"))
+
+
+def test_end_card_duration_override_reaches_the_render(render_env) -> None:
+    client, session_factory, _ = render_env
+    project_id, reel_id = _seed_project_and_reel(session_factory)
+
+    saved = client.put(
+        f"/api/projects/{project_id}/end-card/settings",
+        json={"layout": "minimal", "duration_seconds": 3.0},
+    )
+    assert saved.status_code == 200, saved.text
+
+    body = client.post(f"/api/projects/{project_id}/reels/{reel_id}/render", json={}).json()
+    assert body["total_seconds"] == pytest.approx(49.0)
+
+
 def test_render_output_is_downloadable_and_playable(render_env) -> None:
     client, session_factory, _ = render_env
     project_id, reel_id = _seed_project_and_reel(session_factory)

@@ -1,6 +1,9 @@
 export type AspectRatio = '9:16' | '1:1' | '16:9';
 export type TransitionType = 'hard_cut' | 'short_crossfade' | 'dip_to_black';
-export type SubtitleStyle = 'default' | 'bold' | 'caption';
+export type SubtitleStyle =
+  'reformed_sober' | 'modern_highlight' | 'clear_reading' | 'sermon_quote';
+export type SubtitleGranularity = 'auto' | 'segment' | 'phrase' | 'word';
+export type SubtitlePosition = 'bottom' | 'center' | 'top';
 export type ReelStatus = 'draft' | 'ready' | 'rendering' | 'completed' | 'failed';
 
 export interface ReelSegment {
@@ -23,6 +26,15 @@ export interface Reel {
   description: string | null;
   editorial_score: number | null;
   subtitle_style: SubtitleStyle;
+  subtitle_enabled: boolean;
+  subtitle_granularity: SubtitleGranularity;
+  subtitle_font_size: number;
+  subtitle_position: SubtitlePosition;
+  subtitle_uppercase: boolean;
+  subtitle_max_words: number;
+  subtitle_opacity: number;
+  subtitle_margin_bottom: number;
+  subtitle_bible_reference: string | null;
   aspect_ratio: AspectRatio;
   status: ReelStatus;
   created_at: string;
@@ -63,6 +75,15 @@ export interface ReelUpdatePayload {
   description?: string | null;
   editorial_score?: number | null;
   subtitle_style?: SubtitleStyle;
+  subtitle_enabled?: boolean;
+  subtitle_granularity?: SubtitleGranularity;
+  subtitle_font_size?: number;
+  subtitle_position?: SubtitlePosition;
+  subtitle_uppercase?: boolean;
+  subtitle_max_words?: number;
+  subtitle_opacity?: number;
+  subtitle_margin_bottom?: number;
+  subtitle_bible_reference?: string | null;
   aspect_ratio?: AspectRatio;
   status?: ReelStatus;
 }

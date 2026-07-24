@@ -106,14 +106,24 @@ def content_duration_seconds(segments: list[SegmentTiming]) -> float:
 
 
 def total_duration_seconds(segments: list[SegmentTiming]) -> float:
-    """Content duration plus transition times between consecutive segments.
+    """Assembled output duration, matching the FFmpeg / subtitle timeline.
 
-    The transition on the last segment is ignored (nothing follows it).
+    Hard cuts sum segment durations. Crossfades *subtract* the usable overlap
+    (they do not add extra time).
     """
     if not segments:
         return 0.0
-    content = content_duration_seconds(segments)
-    transitions = sum(
-        max(0, seg.transition_duration_ms) / 1000.0 for seg in segments[:-1]
+    from app.services.subtitles.timeline import TimelineSegment, build_output_timeline
+
+    timeline = build_output_timeline(
+        [
+            TimelineSegment(
+                source_start=s.source_start_seconds,
+                source_end=s.source_end_seconds,
+                transition_type=s.transition_type.value,
+                transition_duration_ms=s.transition_duration_ms,
+            )
+            for s in segments
+        ]
     )
-    return content + transitions
+    return timeline.total_duration

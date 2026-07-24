@@ -32,7 +32,10 @@ def start_render(
     db: Session = Depends(get_db),
     manager: RenderManager = Depends(get_render_manager),
 ) -> RenderJobResponse:
-    """Render the reel to MP4 (H.264 + AAC). No subtitles or end screen yet."""
+    """Render the reel to MP4 (H.264 + AAC).
+
+    Burns ASS subtitles when enabled and always appends the mandatory end card.
+    """
     job = manager.start(
         db,
         project_id,
@@ -41,6 +44,7 @@ def start_render(
         layout=payload.layout.value,
         normalize_loudness=payload.normalize_loudness,
         crf=payload.crf,
+        burn_subtitles=payload.burn_subtitles,
     )
     return RenderJobResponse.model_validate(job)
 

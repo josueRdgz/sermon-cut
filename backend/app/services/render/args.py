@@ -67,6 +67,24 @@ class RenderSegmentSpec:
 
 
 @dataclass(frozen=True)
+class EndCardSpec:
+    """The mandatory closing screen appended after the main content.
+
+    ``continue_from_seconds`` is the source position where the tail audio is
+    taken from when the audio should keep playing over the card.
+    """
+
+    image_path: Path
+    duration: float
+    fade_in_seconds: float = 0.3
+    audio_fade_out_seconds: float = 0.5
+    audio_mode: str = "continue_with_fade"
+    music_path: Path | None = None
+    music_volume: float = 0.6
+    continue_from_seconds: float | None = None
+
+
+@dataclass(frozen=True)
 class RenderPlan:
     """Everything needed to run and monitor one render."""
 
@@ -114,10 +132,7 @@ def _video_chain(index: int, *, layout: str, width: int, height: int, fps: float
                 f"[fgsrc{index}]scale={width}:{height}"
                 f":force_original_aspect_ratio=decrease[fg{index}]"
             ),
-            (
-                f"[bg{index}][fg{index}]overlay=(W-w)/2:(H-h)/2:shortest=1,"
-                f"{common}[v{index}]"
-            ),
+            (f"[bg{index}][fg{index}]overlay=(W-w)/2:(H-h)/2:shortest=1,{common}[v{index}]"),
         ]
 
     # center_crop: scale to cover the canvas, then crop the centre.
@@ -188,8 +203,7 @@ def _join_chain(segments: list[RenderSegmentSpec]) -> tuple[list[str], str, str,
                 f":duration={_fmt(usable)}:offset={_fmt(offset)}[cv{index}]"
             )
             lines.append(
-                f"[{current_a}][a{index}]acrossfade=d={_fmt(usable)}:c1=tri:c2=tri"
-                f"[ca{index}]"
+                f"[{current_a}][a{index}]acrossfade=d={_fmt(usable)}:c1=tri:c2=tri[ca{index}]"
             )
             total += segment.duration - usable
 
@@ -197,6 +211,124 @@ def _join_chain(segments: list[RenderSegmentSpec]) -> tuple[list[str], str, str,
         current_a = f"ca{index}"
 
     return lines, current_v, current_a, total
+
+
+AUDIO_SILENCE = "silence"
+AUDIO_CONTINUE_WITH_FADE = "continue_with_fade"
+AUDIO_LOCAL_MUSIC = "local_music"
+
+
+def resolve_end_card_audio_mode(spec: EndCardSpec, *, has_audio: bool) -> str:
+    """Degrade the requested audio mode to what is actually available."""
+    mode = spec.audio_mode
+    if mode == AUDIO_CONTINUE_WITH_FADE and (not has_audio or spec.continue_from_seconds is None):
+        return AUDIO_SILENCE
+    if mode == AUDIO_LOCAL_MUSIC and spec.music_path is None:
+        return AUDIO_SILENCE
+    known = {AUDIO_SILENCE, AUDIO_CONTINUE_WITH_FADE, AUDIO_LOCAL_MUSIC}
+    return mode if mode in known else AUDIO_SILENCE
+
+
+def _end_card_inputs(
+    spec: EndCardSpec,
+    *,
+    source: Path,
+    mode: str,
+    fps: float,
+) -> list[str]:
+    """Input arguments for the end card image and its audio bed."""
+    duration = _fmt(spec.duration)
+    args = [
+        "-loop",
+        "1",
+        "-framerate",
+        _fmt(fps),
+        "-t",
+        duration,
+        "-i",
+        str(spec.image_path),
+    ]
+    if mode == AUDIO_CONTINUE_WITH_FADE:
+        args += [
+            "-accurate_seek",
+            "-ss",
+            _fmt(spec.continue_from_seconds or 0.0),
+            "-t",
+            duration,
+            "-i",
+            str(source),
+        ]
+    elif mode == AUDIO_LOCAL_MUSIC and spec.music_path is not None:
+        args += ["-t", duration, "-i", str(spec.music_path)]
+    else:
+        args += [
+            "-f",
+            "lavfi",
+            "-t",
+            duration,
+            "-i",
+            f"anullsrc=channel_layout=stereo:sample_rate={TARGET_SAMPLE_RATE}",
+        ]
+    return args
+
+
+def _end_card_chains(
+    spec: EndCardSpec,
+    *,
+    mode: str,
+    image_index: int,
+    audio_index: int,
+    width: int,
+    height: int,
+    fps: float,
+) -> list[str]:
+    """Normalization chains for the end card, ending in ``[ecv]`` / ``[eca]``."""
+    duration = spec.duration
+    fade_in = max(0.0, min(spec.fade_in_seconds, duration))
+    fade_out = max(0.0, min(spec.audio_fade_out_seconds, duration))
+
+    video = (
+        f"[{image_index}:v]scale={width}:{height}"
+        f":force_original_aspect_ratio=decrease,"
+        f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2,"
+        f"setsar=1,fps={_fmt(fps)},format=yuv420p,setpts=PTS-STARTPTS"
+    )
+    if fade_in > 0:
+        video += f",fade=t=in:st=0:d={_fmt(fade_in)}"
+    lines = [f"{video}[ecv]"]
+
+    audio_parts = [
+        f"[{audio_index}:a]aformat=sample_fmts=fltp:sample_rates={TARGET_SAMPLE_RATE}"
+        f":channel_layouts=stereo",
+        f"aresample={TARGET_SAMPLE_RATE}:async=1",
+        # Pad short beds (or a source that ended early) so the card keeps its length.
+        f"apad=whole_dur={_fmt(duration)}",
+        f"atrim=0:{_fmt(duration)}",
+        "asetpts=PTS-STARTPTS",
+    ]
+    if mode == AUDIO_LOCAL_MUSIC:
+        audio_parts.append(f"volume={_fmt(max(0.0, min(1.0, spec.music_volume)))}")
+        if fade_in > 0:
+            audio_parts.append(f"afade=t=in:st=0:d={_fmt(fade_in)}")
+    if mode in {AUDIO_CONTINUE_WITH_FADE, AUDIO_LOCAL_MUSIC} and fade_out > 0:
+        # Land the fade exactly on the last frame of the card.
+        audio_parts.append(f"afade=t=out:st={_fmt(duration - fade_out)}:d={_fmt(fade_out)}")
+    lines.append(",".join(audio_parts) + "[eca]")
+    return lines
+
+
+def escape_filter_path(path: Path) -> str:
+    """Escape a filesystem path for embedding inside an FFmpeg filtergraph."""
+    text = path.resolve().as_posix()
+    return (
+        text.replace("\\", "\\\\")
+        .replace(":", "\\:")
+        .replace("'", "\\'")
+        .replace("[", "\\[")
+        .replace("]", "\\]")
+        .replace(",", "\\,")
+        .replace(";", "\\;")
+    )
 
 
 def build_render_command(
@@ -212,11 +344,16 @@ def build_render_command(
     normalize_loudness: bool = True,
     crf: int = 20,
     preset: str = "medium",
+    ass_path: Path | None = None,
+    fonts_dir: Path | None = None,
+    end_card: EndCardSpec | None = None,
 ) -> RenderPlan:
     """Build the full FFmpeg argument list for one reel render.
 
-    Produces MP4 (H.264 + AAC). Subtitles and end screens are intentionally out
-    of scope for this first render.
+    Produces MP4 (H.264 + AAC). When ``ass_path`` is set, burns subtitles with
+    libass via the ``ass`` filter. When ``end_card`` is set, its pre-rendered PNG
+    is appended after the main content — subtitles are burned before that concat,
+    so cue times stay relative to the main timeline.
     """
     if not segments:
         raise ValueError("A render needs at least one segment.")
@@ -228,6 +365,9 @@ def build_render_command(
 
     width, height = canvas_for(aspect_ratio)
     output_fps = normalize_fps(fps)
+
+    if end_card is not None and end_card.duration <= 0:
+        raise ValueError("The end card duration must be positive.")
 
     args: list[str] = [ffmpeg, "-hide_banner", "-nostdin", "-loglevel", "error"]
 
@@ -256,11 +396,14 @@ def build_render_command(
             ]
 
     count = len(segments)
+    end_card_mode: str | None = None
+    if end_card is not None:
+        end_card_mode = resolve_end_card_audio_mode(end_card, has_audio=has_audio)
+        args += _end_card_inputs(end_card, source=source, mode=end_card_mode, fps=output_fps)
+
     filters: list[str] = []
     for index, segment in enumerate(segments):
-        filters += _video_chain(
-            index, layout=layout, width=width, height=height, fps=output_fps
-        )
+        filters += _video_chain(index, layout=layout, width=width, height=height, fps=output_fps)
         audio_stream = f"{index}:a" if has_audio else f"{count + index}:a"
         filters.append(_audio_chain(audio_stream, index, segment.duration))
 
@@ -271,9 +414,47 @@ def build_render_command(
         join_lines, video_label, audio_label, expected = _join_chain(segments)
         filters += join_lines
 
+    if ass_path is not None:
+        ass_filter = f"ass={escape_filter_path(ass_path)}"
+        if fonts_dir is not None:
+            ass_filter += f":fontsdir={escape_filter_path(fonts_dir)}"
+        filters.append(f"[{video_label}]{ass_filter}[vout]")
+        video_label = "vout"
+
     if normalize_loudness:
         filters.append(f"[{audio_label}]loudnorm=I=-16:TP=-1.5:LRA=11[aout]")
         audio_label = "aout"
+
+    if end_card is not None and end_card_mode is not None:
+        # The main audio only fades at the boundary when the card does not carry
+        # it over; in continue mode the fade happens inside the card instead.
+        main_fade = (
+            0.0
+            if end_card_mode == AUDIO_CONTINUE_WITH_FADE
+            else max(0.0, min(end_card.audio_fade_out_seconds, expected))
+        )
+        if main_fade > 0:
+            filters.append(
+                f"[{audio_label}]afade=t=out:st={_fmt(expected - main_fade)}"
+                f":d={_fmt(main_fade)}[amain]"
+            )
+            audio_label = "amain"
+
+        image_index = count * (1 if has_audio else 2)
+        filters += _end_card_chains(
+            end_card,
+            mode=end_card_mode,
+            image_index=image_index,
+            audio_index=image_index + 1,
+            width=width,
+            height=height,
+            fps=output_fps,
+        )
+        filters.append(
+            f"[{video_label}][{audio_label}][ecv][eca]concat=n=2:v=1:a=1[vfinal][afinal]"
+        )
+        video_label, audio_label = "vfinal", "afinal"
+        expected += end_card.duration
 
     filter_complex = ";".join(filters)
 

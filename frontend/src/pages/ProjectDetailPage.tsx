@@ -120,6 +120,7 @@ export function ProjectDetailPage() {
       <ReelEditor
         projectId={project.id}
         hasVideo={project.has_video}
+        hasCover={project.has_cover}
         videoDuration={project.duration_seconds}
       />
 

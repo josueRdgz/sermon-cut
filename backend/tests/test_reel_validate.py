@@ -76,14 +76,20 @@ def test_crossfade_requires_positive_ms() -> None:
         )
 
 
-def test_duration_sums_segments_and_transitions() -> None:
+def test_duration_matches_ffmpeg_timeline() -> None:
     segments = [
         SegmentTiming(10.0, 20.0, TransitionType.short_crossfade, 500),
         SegmentTiming(45.0, 55.0, TransitionType.dip_to_black, 300),
         SegmentTiming(80.0, 90.0, TransitionType.hard_cut, 0),
     ]
-    # Content: 10 + 10 + 10 = 30; transitions between 1→2 and 2→3: 0.5 + 0.3
+    # Content: 10 + 10 + 10 = 30; crossfades *subtract* usable overlap: 0.5 + 0.3
     assert content_duration_seconds(segments) == pytest.approx(30.0)
-    assert total_duration_seconds(segments) == pytest.approx(30.8)
-    # Last segment's transition is ignored.
+    assert total_duration_seconds(segments) == pytest.approx(29.2)
     assert total_duration_seconds(segments[:1]) == pytest.approx(10.0)
+
+    hard_cuts = [
+        SegmentTiming(0.0, 20.0, TransitionType.hard_cut, 0),
+        SegmentTiming(40.0, 70.0, TransitionType.hard_cut, 0),
+    ]
+    # A=20s then B=30s → B starts at 20, total 50.
+    assert total_duration_seconds(hard_cuts) == pytest.approx(50.0)

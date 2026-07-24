@@ -26,6 +26,8 @@ class RenderStartRequest(BaseModel):
     layout: RenderLayout = RenderLayout.center_crop
     normalize_loudness: bool = True
     crf: int = Field(default=20, ge=14, le=32)
+    # When False, skip ASS burning even if the reel has subtitles enabled.
+    burn_subtitles: bool = True
 
 
 class RenderJobResponse(BaseModel):

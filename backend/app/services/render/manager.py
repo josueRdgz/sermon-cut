@@ -27,6 +27,8 @@ from app.models.project import Project, ProjectStatus
 from app.models.reel import Reel
 from app.models.render_job import ACTIVE_RENDER_STATUSES, RenderJob, RenderJobStatus
 from app.services import storage
+from app.services.endcard import resolve as resolve_end_card
+from app.services.endcard.pipeline import build_end_card_spec
 from app.services.ffprobe import probe_video
 from app.services.render.args import (
     RenderSegmentSpec,
@@ -35,6 +37,8 @@ from app.services.render.args import (
 )
 from app.services.render.progress import ProgressUpdate
 from app.services.render.runner import FFmpegError, run_ffmpeg
+from app.services.subtitles import build_subtitle_artifacts
+from app.services.transcripts import service as transcripts_service
 
 logger = logging.getLogger(__name__)
 
@@ -129,6 +133,7 @@ class RenderManager:
         layout: str,
         normalize_loudness: bool = True,
         crf: int = 20,
+        burn_subtitles: bool = True,
     ) -> RenderJob:
         project = db.get(Project, project_id)
         if project is None:
@@ -179,7 +184,7 @@ class RenderManager:
             self._cancel_events[job.id] = threading.Event()
 
         future = self._executor.submit(
-            self._run_job, job.id, normalize_loudness, crf
+            self._run_job, job.id, normalize_loudness, crf, burn_subtitles
         )
         with self._lock:
             self._futures[job.id] = future
@@ -253,11 +258,20 @@ class RenderManager:
             self._cancel_events.pop(job_id, None)
             self._futures.pop(job_id, None)
 
-    def _run_job(self, job_id: UUID, normalize_loudness: bool, crf: int) -> None:
+    def _run_job(
+        self,
+        job_id: UUID,
+        normalize_loudness: bool,
+        crf: int,
+        burn_subtitles: bool = True,
+    ) -> None:
         session = self._session_factory()
         event = self._event_for(job_id)
         temp_path: Path | None = None
         log_path: Path | None = None
+        ass_path: Path | None = None
+        fonts_dir: Path | None = None
+        end_card_image: Path | None = None
 
         try:
             job = session.get(RenderJob, job_id)
@@ -315,6 +329,47 @@ class RenderManager:
             temp_dir.mkdir(parents=True, exist_ok=True)
             temp_path = temp_dir / f"render-{job_id}.mp4"
             log_path = temp_dir / f"render-{job_id}.log"
+            ass_path = temp_dir / f"render-{job_id}.ass"
+            fonts_dir = temp_dir / f"fonts-{job_id}"
+            end_card_image = temp_dir / f"endcard-{job_id}.png"
+
+            ass_file: Path | None = None
+            try:
+                transcript = transcripts_service.get_transcript_for_project(
+                    session, job.project_id
+                )
+            except NotFoundError:
+                transcript = None
+
+            from app.services.render.args import canvas_for
+
+            preview_w, preview_h = canvas_for(job.aspect_ratio)
+            artifacts = None
+            if burn_subtitles:
+                artifacts = build_subtitle_artifacts(
+                    reel=reel,
+                    transcript=transcript,
+                    output_width=preview_w,
+                    output_height=preview_h,
+                    ass_path=ass_path,
+                    fonts_dir=fonts_dir,
+                )
+            if artifacts is not None:
+                ass_file, _font, _cues = artifacts
+
+            # The end card is mandatory: every render closes with it.
+            job.stage = "end_card"
+            session.commit()
+            end_card_config = resolve_end_card(session, job.project_id)
+            end_card_spec = build_end_card_spec(
+                project=project,
+                config=end_card_config,
+                width=preview_w,
+                height=preview_h,
+                image_path=end_card_image,
+                main_content_end_seconds=segments[-1].end,
+                source_duration_seconds=getattr(metadata, "duration_seconds", None),
+            )
 
             try:
                 plan = build_render_command(
@@ -328,6 +383,9 @@ class RenderManager:
                     fps=probed_fps,
                     normalize_loudness=normalize_loudness,
                     crf=crf,
+                    ass_path=ass_file,
+                    fonts_dir=fonts_dir if ass_file is not None else None,
+                    end_card=end_card_spec,
                 )
             except ValueError as exc:
                 raise ValidationAppError(str(exc), code="invalid_render_options") from exc
@@ -406,19 +464,28 @@ class RenderManager:
             session.rollback()
             self._mark_failed(session, job_id, str(exc))
         finally:
-            self._cleanup(temp_path, log_path)
+            self._cleanup(temp_path, log_path, ass_path, fonts_dir, end_card_image)
             self._discard(job_id)
             session.close()
 
-    def _cleanup(self, temp_path: Path | None, log_path: Path | None) -> None:
+    def _cleanup(
+        self,
+        temp_path: Path | None,
+        log_path: Path | None,
+        ass_path: Path | None = None,
+        fonts_dir: Path | None = None,
+        end_card_image: Path | None = None,
+    ) -> None:
         if self._keep_temp:
             return
-        for path in (temp_path, log_path):
+        for path in (temp_path, log_path, ass_path, end_card_image):
             if path is not None and path.exists():
                 try:
                     path.unlink()
                 except OSError:
                     logger.warning("Could not remove temp file %s", path)
+        if fonts_dir is not None and fonts_dir.exists():
+            shutil.rmtree(fonts_dir, ignore_errors=True)
 
     def _mark_cancelled(self, session: Session, job: RenderJob) -> None:
         job.status = RenderJobStatus.cancelled

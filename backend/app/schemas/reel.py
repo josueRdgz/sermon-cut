@@ -7,7 +7,14 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.models.reel import AspectRatio, ReelStatus, SubtitleStyle, TransitionType
+from app.models.reel import (
+    AspectRatio,
+    ReelStatus,
+    SubtitleGranularity,
+    SubtitlePosition,
+    SubtitleStyle,
+    TransitionType,
+)
 
 
 class ReelSegmentCreate(BaseModel):
@@ -52,7 +59,16 @@ class ReelCreate(BaseModel):
     hook: str | None = Field(default=None, max_length=500)
     description: str | None = None
     editorial_score: float | None = Field(default=None, ge=0, le=10)
-    subtitle_style: SubtitleStyle = SubtitleStyle.default
+    subtitle_style: SubtitleStyle = SubtitleStyle.reformed_sober
+    subtitle_enabled: bool = True
+    subtitle_granularity: SubtitleGranularity = SubtitleGranularity.auto
+    subtitle_font_size: int = Field(default=52, ge=24, le=96)
+    subtitle_position: SubtitlePosition = SubtitlePosition.bottom
+    subtitle_uppercase: bool = False
+    subtitle_max_words: int = Field(default=6, ge=1, le=24)
+    subtitle_opacity: float = Field(default=1.0, ge=0.2, le=1.0)
+    subtitle_margin_bottom: int = Field(default=120, ge=40, le=400)
+    subtitle_bible_reference: str | None = Field(default=None, max_length=200)
     aspect_ratio: AspectRatio = AspectRatio.nine_sixteen
     status: ReelStatus = ReelStatus.draft
     segments: list[ReelSegmentCreate] = Field(default_factory=list)
@@ -66,6 +82,15 @@ class ReelUpdate(BaseModel):
     description: str | None = None
     editorial_score: float | None = Field(default=None, ge=0, le=10)
     subtitle_style: SubtitleStyle | None = None
+    subtitle_enabled: bool | None = None
+    subtitle_granularity: SubtitleGranularity | None = None
+    subtitle_font_size: int | None = Field(default=None, ge=24, le=96)
+    subtitle_position: SubtitlePosition | None = None
+    subtitle_uppercase: bool | None = None
+    subtitle_max_words: int | None = Field(default=None, ge=1, le=24)
+    subtitle_opacity: float | None = Field(default=None, ge=0.2, le=1.0)
+    subtitle_margin_bottom: int | None = Field(default=None, ge=40, le=400)
+    subtitle_bible_reference: str | None = Field(default=None, max_length=200)
     aspect_ratio: AspectRatio | None = None
     status: ReelStatus | None = None
 
@@ -96,6 +121,15 @@ class ReelResponse(BaseModel):
     description: str | None
     editorial_score: float | None
     subtitle_style: SubtitleStyle
+    subtitle_enabled: bool
+    subtitle_granularity: SubtitleGranularity
+    subtitle_font_size: int
+    subtitle_position: SubtitlePosition
+    subtitle_uppercase: bool
+    subtitle_max_words: int
+    subtitle_opacity: float
+    subtitle_margin_bottom: int
+    subtitle_bible_reference: str | None
     aspect_ratio: AspectRatio
     status: ReelStatus
     created_at: datetime
@@ -103,7 +137,7 @@ class ReelResponse(BaseModel):
     segments: list[ReelSegmentResponse]
     # Sum of source windows only (no transitions).
     content_duration_seconds: float
-    # Content + transition times between segments.
+    # Assembled output duration (matches FFmpeg / subtitle timeline).
     total_duration_seconds: float
 
 

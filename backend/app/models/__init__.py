@@ -3,12 +3,19 @@
 Import every model here so Alembic autogenerate and ``Base.metadata`` stay in sync.
 """
 
+from app.models.end_card import (
+    EndCardAudioMode,
+    EndCardLayout,
+    EndCardSettings,
+)
 from app.models.project import Project, ProjectStatus
 from app.models.reel import (
     AspectRatio,
     Reel,
     ReelSegment,
     ReelStatus,
+    SubtitleGranularity,
+    SubtitlePosition,
     SubtitleStyle,
     TransitionType,
 )
@@ -24,6 +31,9 @@ from app.models.transcription_job import TranscriptionJob, TranscriptionJobStatu
 
 __all__ = [
     "AspectRatio",
+    "EndCardAudioMode",
+    "EndCardLayout",
+    "EndCardSettings",
     "Project",
     "ProjectStatus",
     "Reel",
@@ -31,6 +41,8 @@ __all__ = [
     "ReelStatus",
     "RenderJob",
     "RenderJobStatus",
+    "SubtitleGranularity",
+    "SubtitlePosition",
     "SubtitleStyle",
     "Transcript",
     "TranscriptSegment",

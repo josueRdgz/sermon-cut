@@ -82,9 +82,9 @@ def test_create_reel_with_non_contiguous_segments(
     body = resp.json()
     assert len(body["segments"]) == 3
     assert [s["order"] for s in body["segments"]] == [0, 1, 2]
-    # Content: 22 + 24 + 17 = 63; + 0.25s crossfade between 1→2
+    # Content: 22 + 24 + 17 = 63; crossfade 0.25s *subtracts* from total
     assert body["content_duration_seconds"] == pytest.approx(63.0, abs=0.001)
-    assert body["total_duration_seconds"] == pytest.approx(63.25, abs=0.001)
+    assert body["total_duration_seconds"] == pytest.approx(62.75, abs=0.001)
     starts = [s["source_start_seconds"] for s in body["segments"]]
     assert starts == [620.0, 665.0, 721.0]
 

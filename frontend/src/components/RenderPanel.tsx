@@ -37,6 +37,7 @@ const ASPECT_OPTIONS: { value: AspectRatio; label: string }[] = [
 const STAGE_LABELS: Record<string, string> = {
   queued: 'En cola',
   preparing: 'Preparando',
+  end_card: 'Generando pantalla final',
   encoding: 'Codificando',
   finalizing: 'Finalizando',
   completed: 'Completado',
@@ -65,6 +66,7 @@ export function RenderPanel({
   const [aspectRatio, setAspectRatio] = useState<AspectRatio>(reelAspectRatio);
   const [layout, setLayout] = useState<RenderLayout>('center_crop');
   const [normalizeLoudness, setNormalizeLoudness] = useState(true);
+  const [burnSubtitles, setBurnSubtitles] = useState(true);
   const [showCommand, setShowCommand] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -120,6 +122,7 @@ export function RenderPanel({
         aspect_ratio: aspectRatio,
         layout,
         normalize_loudness: normalizeLoudness,
+        burn_subtitles: burnSubtitles,
       });
       setJob(started);
     } catch (err) {
@@ -127,7 +130,7 @@ export function RenderPanel({
     } finally {
       setBusy(false);
     }
-  }, [projectId, reelId, aspectRatio, layout, normalizeLoudness]);
+  }, [projectId, reelId, aspectRatio, layout, normalizeLoudness, burnSubtitles]);
 
   const handleCancel = useCallback(async () => {
     if (!job) return;
@@ -201,6 +204,15 @@ export function RenderPanel({
               />
               <span>Normalizar audio</span>
             </label>
+            <label className="field field--inline field--checkbox">
+              <input
+                type="checkbox"
+                checked={burnSubtitles}
+                onChange={(e) => setBurnSubtitles(e.target.checked)}
+                disabled={active || busy}
+              />
+              <span>Quemar subtítulos</span>
+            </label>
             <div className="button-stack">
               {!active && (
                 <button type="button" onClick={() => void handleStart()} disabled={busy}>
@@ -221,8 +233,9 @@ export function RenderPanel({
           </div>
 
           <p className="muted">
-            Sin subtítulos ni pantalla final todavía. Los fragmentos se recodifican para que los
-            cortes sean exactos.
+            MP4 H.264 + AAC. Los subtítulos ASS se queman con libass cuando están activados en el
+            Reel y la pantalla final se añade siempre al terminar. Los fragmentos se recodifican
+            para cortes exactos.
           </p>
 
           {active && job && (

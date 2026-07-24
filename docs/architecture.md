@@ -77,6 +77,46 @@ Organización por capas para separar responsabilidades:
 - Frontend: `ReelEditor` con selección de transcripción, fórmula
   `A + B + C`, saltos visibles y vista previa lógica.
 
+### Subtítulos (ASS)
+
+- `services/subtitles/timeline.py` coloca cada ventana del Reel en el reloj de
+  salida (mismo criterio que FFmpeg: hard cut suma; crossfade resta el solape).
+- `services/subtitles/cues.py` selecciona palabras/segmentos que solapan cada
+  ventana, remapea tiempos y parte en cues (segmento / frase / palabra).
+- `services/subtitles/templates.py` define las cuatro plantillas; las opciones
+  del Reel (tamaño, posición, mayúsculas, etc.) se superponen al preset.
+- `services/subtitles/ass.py` escribe el documento ASS; `fonts.py` resuelve
+  fuentes del sistema y las prepara en `fontsdir` (sin descargas).
+- El render añade `[v]ass=…:fontsdir=…[vout]` al `filter_complex` y mapea
+  `[vout]`.
+- Frontend: `SubtitlePanel` personaliza el Reel y proyecta la vista previa sobre
+  el reproductor; `RenderPanel` puede activar/desactivar el quemado.
+
+### Pantalla final (obligatoria)
+
+- `models/end_card.py` guarda `EndCardSettings`. La fila con `project_id IS NULL`
+  son los valores globales; una fila con `project_id` los sobrescribe. La
+  resolución es `proyecto → global → constantes`, así que un proyecto siempre
+  tiene configuración usable: la pantalla no es opcional.
+- `services/endcard/layout.py` es **geometría pura** (zonas seguras, wrap,
+  reducción de fuente, recorte con «…», clamp de duración a 3–8 s). Recibe la
+  función que mide el ancho del texto, así que se testea con métricas
+  deterministas en lugar de fuentes reales.
+- `services/endcard/image.py` compone el PNG con **Pillow** (sin navegador). El
+  espacio vertical se reparte antes de dibujar: primero las bandas de portada, QR
+  y logo, y los párrafos se ajustan a lo que queda, descontando los huecos entre
+  ellos. Por eso nada se solapa ni desborda.
+- `services/endcard/service.py` resuelve/persiste la configuración y guarda los
+  archivos que aporta el usuario (logo, música) dentro de la carpeta del proyecto.
+- `services/endcard/pipeline.py` es el puente con el render: genera el PNG y
+  devuelve el `EndCardSpec` que necesita FFmpeg, degradando `continue_with_fade` a
+  silencio cuando al origen ya no le queda audio.
+- El grafo añade la imagen como entrada `-loop 1` y hace `concat` **después** del
+  filtro `ass`, de modo que los tiempos de los subtítulos siguen refiriéndose solo
+  al contenido principal.
+- Frontend: `EndCardPanel` configura todo, sube logo/música, muestra la vista
+  previa (PNG servido por el backend) y lleva la etiqueta `Obligatoria`.
+
 ### Render (FFmpeg)
 
 - `services/render/args.py` es una función **pura**: recibe las ventanas, el
