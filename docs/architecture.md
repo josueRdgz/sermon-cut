@@ -3,8 +3,8 @@
 Aplicación **local para macOS** y de **código abierto** para convertir videos de
 predicaciones en Shorts / Reels verticales con subtítulos y una pantalla final.
 
-> Esta es la **base** del proyecto. Todavía no hay transcripción, integración con
-> Gemini ni edición de video.
+> Gestión local de proyectos y transcripciones. Todavía no hay Gemini,
+> generación de clips ni renderizado final.
 
 ## Visión general
 
@@ -17,51 +17,64 @@ predicaciones en Shorts / Reels verticales con subtítulos y una pantalla final.
                                                              │
                                           ┌──────────────────┼───────────────────┐
                                           │                  │                   │
-                                    SQLAlchemy 2        FFmpeg/FFprobe        storage/
-                                    + Alembic            (del sistema)     projects/temp/exports
+                                    SQLAlchemy 2        FFmpeg/FFprobe     storage/projects/
+                                    + Alembic            (del sistema)       {uuid}/
                                           │
-                                     SQLite (archivo local)
+                                     SQLite (solo metadatos)
 ```
 
 ## Backend (`backend/`)
 
 Organización por capas para separar responsabilidades:
 
-- **`app/api/`** — routers de FastAPI. Se agregan en `api_router` y se montan con
-  el prefijo `/api`.
-- **`app/core/`** — configuración (`config.py`, con pydantic-settings) y rutas del
-  sistema de archivos (`paths.py`, todo con `pathlib`).
+- **`app/api/`** — routers de FastAPI (`health`, `projects`).
+- **`app/core/`** — configuración (`config.py`), rutas (`paths.py`), excepciones
+  estructuradas (`exceptions.py`).
 - **`app/db/`** — `Base` declarativa (SQLAlchemy 2), `engine` y `SessionLocal`.
-- **`app/models/`** — modelos ORM (aún vacío; punto único de registro para Alembic).
-- **`app/schemas/`** — contratos de entrada/salida con Pydantic 2.
-- **`app/services/`** — lógica reutilizable (p. ej. detección de FFmpeg/FFprobe).
-- **`app/workers/`** — trabajos en segundo plano (futuros). Sin Celery ni Redis:
-  se usarán tareas locales.
+- **`app/models/`** — modelos ORM (`Project` + `ProjectStatus`).
+- **`app/schemas/`** — contratos Pydantic 2.
+- **`app/services/`** — lógica: FFmpeg/FFprobe, storage, proyectos, parsers de
+  transcripción (SRT/VTT/JSON/TXT), validación y exportación.
+- **`app/workers/`** — trabajos en segundo plano (futuros). Sin Celery ni Redis.
+
+### Transcripciones
+
+- Modelo normalizado independiente del formato de origen:
+  `Transcript` → `TranscriptSegment` → `TranscriptWord`.
+- Una transcripción activa por proyecto (reemplazo al reimportar).
+- TXT sin tiempos → estado `unsynced`.
+- Video servido con `FileResponse` (Range) en
+  `GET /api/projects/{id}/media/video` para el `<video>` HTML5.
+
+- Metadatos en SQLite; video y portada en `storage/projects/{uuid}/`.
+- Nombres canónicos en disco: `original.<ext>`, `cover.<ext>`.
+- Subida con validación de extensión/MIME, límite `SERMON_CUT_MAX_UPLOAD_BYTES`,
+  saneado de nombres y bloqueo de path traversal.
+- Tras subir el video, FFprobe rellena duración, resolución, FPS y códecs.
+- Al borrar un proyecto se elimina también su carpeta local.
 
 ### Migraciones
 
-Alembic lee la URL de la base de datos y el `metadata` desde la propia aplicación
-(`alembic/env.py`), de modo que las migraciones siempre coinciden con la config de
-ejecución. Se usa `render_as_batch=True` por compatibilidad con SQLite.
+Alembic lee la URL y el `metadata` desde la app (`alembic/env.py`), con
+`render_as_batch=True` para SQLite.
 
 ## Frontend (`frontend/`)
 
-- **`src/api/`** — cliente HTTP tipado (`client.ts`) y llamadas concretas
-  (`health.ts`).
-- **`src/types/`** — tipos TypeScript que reflejan los schemas del backend.
-- **`src/hooks/`** — hooks de React (`useHealth`).
-- **`src/pages/`** — páginas (`HomePage`).
-- **`src/components/`** — componentes reutilizables.
-- **`src/features/`**, **`src/utils/`** — reservados para el crecimiento futuro.
+- **`src/api/`** — cliente HTTP (`client.ts`) con JSON + subidas con progreso (XHR).
+- **`src/types/`** — tipos que reflejan los schemas del backend.
+- **`src/hooks/`** — `useHealth`, `useProjects`.
+- **`src/pages/`** — inicio, listado, nueva predicación, detalle.
+- **`src/components/`** — tarjetas, diálogo de confirmación, barra de progreso.
+- **`src/utils/`** — formato de duración/fecha/estado.
+- Rutas con **react-router-dom**.
 
-En desarrollo, Vite hace *proxy* de `/api` hacia `http://127.0.0.1:8000`, así el
-frontend usa URLs relativas.
+En desarrollo, Vite hace *proxy* de `/api` hacia `http://127.0.0.1:8000`.
 
 ## Almacenamiento (`storage/`)
 
-- `projects/` — datos por proyecto.
-- `temp/` — archivos intermedios.
-- `exports/` — videos exportados.
+- `projects/{uuid}/` — media de cada proyecto.
+- `temp/` — archivos intermedios (futuro).
+- `exports/` — videos exportados (futuro).
 
 Las carpetas se versionan vacías (`.gitkeep`); su contenido está en `.gitignore`.
 
@@ -71,4 +84,5 @@ Las carpetas se versionan vacías (`.gitkeep`); su contenido está en `.gitignor
 - Ejecución **100% local**; sin servicios externos obligatorios.
 - Sin **Celery** ni **Redis**.
 - Rutas siempre con **`pathlib`**, nunca concatenando strings.
+- Sin blobs binarios en SQLite.
 - Dependencias mínimas y justificadas.

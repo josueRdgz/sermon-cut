@@ -1,3 +1,5 @@
+import { Link } from 'react-router-dom';
+
 import { StatusRow } from '../components/StatusRow';
 import { useHealth } from '../hooks/useHealth';
 
@@ -30,9 +32,14 @@ export function HomePage() {
         <StatusRow label="Versión de FFmpeg" value={ffmpegVersionValue} ok={ffmpegOk} />
       </section>
 
-      <button type="button" className="button" disabled title="Disponible próximamente">
-        Crear proyecto
-      </button>
+      <div className="button-stack">
+        <Link className="button" to="/projects/new">
+          Crear proyecto
+        </Link>
+        <Link className="button button--secondary" to="/projects">
+          Ver proyectos
+        </Link>
+      </div>
     </main>
   );
 }

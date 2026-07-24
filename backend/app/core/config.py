@@ -33,6 +33,9 @@ class Settings(BaseSettings):
         "http://127.0.0.1:5173",
     ]
 
+    # Maximum size for a single uploaded file (video or cover). Default: 4 GiB.
+    max_upload_bytes: int = 4 * 1024 * 1024 * 1024
+
 
 @lru_cache
 def get_settings() -> Settings:

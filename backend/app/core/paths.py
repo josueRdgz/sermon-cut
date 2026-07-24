@@ -7,6 +7,7 @@ path strings by hand. The target platform is macOS.
 from __future__ import annotations
 
 from pathlib import Path
+from uuid import UUID
 
 # .../backend/app/core/paths.py -> parents: [core, app, backend, <repo root>]
 BACKEND_DIR: Path = Path(__file__).resolve().parents[2]
@@ -31,3 +32,8 @@ def ensure_storage_dirs() -> None:
 def default_database_url() -> str:
     """Return the SQLite URL for the default on-disk database."""
     return f"sqlite:///{DATABASE_FILE.as_posix()}"
+
+
+def project_dir(project_id: UUID) -> Path:
+    """Return the on-disk directory for a given project UUID."""
+    return PROJECTS_DIR / str(project_id)

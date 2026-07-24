@@ -1,0 +1,34 @@
+{
+  "language": "es",
+  "segments": [
+    {
+      "start": 10.2,
+      "end": 14.8,
+      "text": "Texto del segmento",
+      "words": [
+        {
+          "start": 10.2,
+          "end": 10.5,
+          "text": "Texto",
+          "confidence": 0.98
+        },
+        {
+          "start": 10.5,
+          "end": 10.9,
+          "text": "del"
+        },
+        {
+          "start": 10.9,
+          "end": 14.8,
+          "text": "segmento"
+        }
+      ]
+    },
+    {
+      "start": 14.8,
+      "end": 18.0,
+      "text": "Segundo segmento",
+      "words": []
+    }
+  ]
+}

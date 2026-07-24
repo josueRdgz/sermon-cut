@@ -25,10 +25,13 @@ describe('App', () => {
     vi.unstubAllGlobals();
   });
 
-  it('renders the title and a disabled "Crear proyecto" button', () => {
+  it('renders the title and navigation to create a project', async () => {
     render(<App />);
     expect(screen.getByRole('heading', { name: 'Sermon Cut' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Crear proyecto' })).toBeDisabled();
+    expect(screen.getByRole('link', { name: 'Crear proyecto' })).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getByText('Conectado')).toBeInTheDocument();
+    });
   });
 
   it('shows backend and FFmpeg status once health loads', async () => {

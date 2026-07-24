@@ -5,10 +5,9 @@ de una predicación en **Shorts / Reels verticales**: importar la transcripción
 identificar los mejores fragmentos, componer un Reel con varios segmentos no
 consecutivos y exportar un video vertical con subtítulos y una pantalla final.
 
-> **Estado:** base del proyecto. Este commit inicial incluye únicamente el
-> esqueleto (health check, detección de FFmpeg, SQLite + Alembic y una página
-> inicial en React). **Todavía no** hay transcripción, integración con Gemini
-> ni edición de video.
+> **Estado actual:** proyectos locales + importación/normalización de
+> transcripciones (SRT, WebVTT, JSON interno, TXT) con editor y reproductor.
+> **Todavía no:** Gemini, generación de clips ni renderizado final.
 
 ## Requisitos (macOS)
 
@@ -19,122 +18,105 @@ consecutivos y exportar un video vertical con subtítulos y una pantalla final.
 - **FFmpeg** y **FFprobe** instalados y disponibles en el `PATH`
 - **git**
 
-Instala las dependencias del sistema con Homebrew:
-
 ```bash
 brew install python@3.12 node ffmpeg
+ffmpeg -version && ffprobe -version
 ```
-
-Verifica FFmpeg:
-
-```bash
-ffmpeg -version
-ffprobe -version
-```
-
-## Estructura
-
-```
-backend/    FastAPI + SQLAlchemy 2 + Alembic + SQLite
-frontend/   React + Vite + TypeScript
-storage/    projects/ temp/ exports/  (contenido ignorado por git)
-scripts/    scripts de arranque para macOS
-docs/       documentación de arquitectura
-```
-
-Detalles en [`docs/architecture.md`](docs/architecture.md).
 
 ## Puesta en marcha
 
-Copia las variables de entorno de ejemplo:
-
 ```bash
 cp .env.example .env
+./scripts/start-backend.sh   # terminal 1 (incluye migraciones si usas Option B)
+./scripts/start-frontend.sh  # terminal 2
 ```
 
-### Opción A — Scripts (recomendado)
+Backend manual: `cd backend && source .venv/bin/activate && alembic upgrade head && uvicorn app.main:app --reload --port 8000`
 
-En dos terminales:
+Abre <http://localhost:5173>.
 
-```bash
-./scripts/start-backend.sh
-./scripts/start-frontend.sh
-```
+## Cómo crear el primer proyecto
 
-### Opción B — Manual
+1. **Crear proyecto** → rellena título, iglesia, canal; sube video (y portada opcional).
+2. En el detalle del proyecto, importa una **transcripción** (SRT / VTT / JSON / TXT).
+3. Usa el buscador, edita segmentos y haz clic en uno para saltar en el video HTML5.
+4. Exporta a SRT, VTT o JSON interno cuando quieras.
 
-**Backend:**
+Los medios viven en `storage/projects/{uuid}/`. SQLite solo guarda metadatos.
 
-```bash
-cd backend
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -e ".[dev]"
-uvicorn app.main:app --reload --port 8000
-```
+## Formatos de transcripción compatibles
 
-**Frontend:**
+| Formato | Extensión | Tiempos | Notas |
+| ------ | --------- | ------- | ----- |
+| **SubRip** | `.srt` | Sí (segundos decimales) | Parser robusto; valida orden y solapes |
+| **WebVTT** | `.vtt` | Sí | Requiere cabecera `WEBVTT`; elimina tags `<c>` etc. |
+| **JSON interno** | `.json` | Opcional + palabras | Formato canónico de exportación (abajo) |
+| **Texto plano** | `.txt` | No | Se guarda como `unsynced` (sin sincronizar) |
 
-```bash
-cd frontend
-npm install
-npm run dev
-```
+Fuentes registradas: `uploaded_srt`, `uploaded_vtt`, `uploaded_json`,
+`uploaded_txt` (y reservadas para más adelante: `whisper`, `youtube`, `manual`).
 
-Luego abre <http://localhost:5173>. La página muestra el estado del backend, si
-FFmpeg está disponible y su versión. El botón **"Crear proyecto"** está
-deshabilitado (llegará en una fase posterior).
+Validaciones al importar (formatos con tiempo):
 
-## API
+- tiempos ≥ 0;
+- inicio < fin;
+- segmentos ordenados por inicio;
+- sin solapamientos inválidos (tocarse en el borde está permitido).
 
-| Método | Ruta          | Descripción                                             |
-| ------ | ------------- | ------------------------------------------------------- |
-| GET    | `/api/health` | Estado del backend y versiones de FFmpeg / FFprobe.     |
-
-Ejemplo de respuesta:
+### JSON interno (exportación / importación)
 
 ```json
 {
-  "status": "ok",
-  "app_name": "Sermon Cut",
-  "ffmpeg": { "available": true, "version": "8.1" },
-  "ffprobe": { "available": true, "version": "8.1" }
+  "language": "es",
+  "segments": [
+    {
+      "start": 10.2,
+      "end": 14.8,
+      "text": "Texto del segmento",
+      "words": [
+        { "start": 10.2, "end": 10.5, "text": "Texto" }
+      ]
+    }
+  ]
 }
 ```
 
-## Base de datos y migraciones
+Fixtures de ejemplo: `backend/tests/fixtures/transcripts/`.
 
-SQLite en `storage/sermon_cut.db`. Migraciones con Alembic (desde `backend/`):
+## API (extracto)
 
-```bash
-alembic revision --autogenerate -m "mensaje"
-alembic upgrade head
-```
+| Método | Ruta | Descripción |
+| ------ | ---- | ----------- |
+| GET | `/api/health` | Estado + FFmpeg/FFprobe |
+| CRUD | `/api/projects`… | Proyectos y media |
+| GET | `/api/projects/{id}/media/video` | Stream del video (Range / HTML5) |
+| POST | `/api/projects/{id}/transcript` | Subir/normalizar transcripción |
+| GET | `/api/projects/{id}/transcript` | Consultar transcripción |
+| DELETE | `/api/projects/{id}/transcript` | Eliminar transcripción |
+| PATCH | `/api/transcripts/segments/{id}` | Editar texto/inicio/fin |
+| GET | `/api/projects/{id}/transcript/export?format=srt\|vtt\|json` | Exportar |
+
+Errores de dominio: `{ "detail": "...", "code": "..." }`.
+
+## Configuración
+
+- `SERMON_CUT_MAX_UPLOAD_BYTES` — límite por archivo de media (default 4 GiB).
 
 ## Calidad
 
-**Backend** (desde `backend/`):
-
 ```bash
-pytest        # tests
-ruff check .  # linting
+# backend/
+pytest && ruff check .
+
+# frontend/
+npm run test && npm run lint && npx tsc --noEmit
 ```
 
-**Frontend** (desde `frontend/`):
+## Diseño
 
-```bash
-npm run test          # Vitest
-npm run lint          # ESLint
-npm run format:check  # Prettier
-```
-
-## Diseño y restricciones
-
-- Plataforma objetivo: **macOS**.
-- Ejecución **100% local**; sin servicios externos obligatorios.
-- **Sin Celery ni Redis.**
-- Rutas con **`pathlib`**, nunca concatenando strings.
-- CORS limitado al servidor de desarrollo local (`http://localhost:5173`).
+- macOS, 100% local, sin Celery/Redis.
+- Rutas con `pathlib`; sin blobs en SQLite.
+- El `<video>` usa la URL de stream; no se carga el archivo entero en memoria JS.
 
 ## Licencia
 

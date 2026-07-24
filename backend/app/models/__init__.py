@@ -1,5 +1,23 @@
 """ORM models.
 
-No models are defined yet. New models should be added here (or imported here)
-so Alembic autogenerate can pick them up via ``app.db.base.Base.metadata``.
+Import every model here so Alembic autogenerate and ``Base.metadata`` stay in sync.
 """
+
+from app.models.project import Project, ProjectStatus
+from app.models.transcript import (
+    Transcript,
+    TranscriptSegment,
+    TranscriptSource,
+    TranscriptStatus,
+    TranscriptWord,
+)
+
+__all__ = [
+    "Project",
+    "ProjectStatus",
+    "Transcript",
+    "TranscriptSegment",
+    "TranscriptSource",
+    "TranscriptStatus",
+    "TranscriptWord",
+]
