@@ -4,8 +4,8 @@ Aplicación **local para macOS** y de **código abierto** para convertir videos 
 predicaciones en Shorts / Reels verticales con subtítulos y una pantalla final.
 
 > Gestión local de proyectos, transcripciones (importadas o generadas con
-> faster-whisper). Todavía no hay Gemini, generación de clips ni renderizado
-> final.
+> faster-whisper) y Reels formados por fragmentos no consecutivos. Todavía no
+> hay Gemini, generación automática de clips ni renderizado final a archivo.
 
 ## Visión general
 
@@ -32,11 +32,13 @@ Organización por capas para separar responsabilidades:
 - **`app/core/`** — configuración (`config.py`), rutas (`paths.py`), excepciones
   estructuradas (`exceptions.py`).
 - **`app/db/`** — `Base` declarativa (SQLAlchemy 2), `engine` y `SessionLocal`.
-- **`app/models/`** — modelos ORM (`Project`, `Transcript*`, `TranscriptionJob`).
+- **`app/models/`** — modelos ORM (`Project`, `Transcript*`, `TranscriptionJob`,
+  `Reel` / `ReelSegment`).
 - **`app/schemas/`** — contratos Pydantic 2.
 - **`app/services/`** — lógica: FFmpeg/FFprobe, storage, proyectos, parsers de
-  transcripción (SRT/VTT/JSON/TXT), validación, exportación y `whisper/`
-  (dispositivo, extracción de audio, motor y administrador de trabajos).
+  transcripción (SRT/VTT/JSON/TXT), validación, exportación, `whisper/`
+  (dispositivo, extracción de audio, motor y administrador de trabajos) y
+  `reels/` (CRUD, validación de ventanas no contiguas, duración).
 - **`app/workers/`** — trabajos en segundo plano (futuros). Sin Celery ni Redis.
 
 ### Transcripción local (faster-whisper)
@@ -60,6 +62,19 @@ Organización por capas para separar responsabilidades:
 - Video servido con `FileResponse` (Range) en
   `GET /api/projects/{id}/media/video` para el `<video>` HTML5.
 - Fuente `whisper` para transcripciones generadas localmente.
+
+### Reels
+
+- `Reel` + `ReelSegment`: un Reel es una **lista ordenada de ventanas** sobre el
+  video fuente. La contigüidad **no** se exige; los huecos entre fragmentos son
+  intencionales y se muestran en la UI.
+- Validación en `services/reels/validate.py`: tiempos, duración mínima, límites
+  del video, orden denso `0..n-1`, reglas de transición.
+- Duración total = suma de ventanas + transiciones entre fragmentos.
+- API anidada bajo `/api/projects/{id}/reels`; creación auxiliar
+  `/reels/from-transcript`.
+- Frontend: `ReelEditor` con selección de transcripción, fórmula
+  `A + B + C`, saltos visibles y vista previa lógica (sin render a archivo).
 
 - Metadatos en SQLite; video y portada en `storage/projects/{uuid}/`.
 - Nombres canónicos en disco: `original.<ext>`, `cover.<ext>`.

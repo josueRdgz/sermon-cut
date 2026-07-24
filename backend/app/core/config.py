@@ -49,6 +49,10 @@ class Settings(BaseSettings):
     # being deleted once the job finishes.
     keep_temp_audio: bool = False
 
+    # Minimum duration (seconds) of a single ReelSegment. Configurable so short
+    # punchy cuts remain possible while accidental zero-length clips are rejected.
+    min_reel_segment_seconds: float = 0.1
+
 
 @lru_cache
 def get_settings() -> Settings:

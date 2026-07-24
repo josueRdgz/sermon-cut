@@ -3,6 +3,7 @@ import { Link, useNavigate, useParams } from 'react-router-dom';
 
 import { deleteProject, getProject } from '../api/projects';
 import { ConfirmDialog } from '../components/ConfirmDialog';
+import { ReelEditor } from '../components/ReelEditor';
 import { StatusRow } from '../components/StatusRow';
 import { TranscriptEditor } from '../components/TranscriptEditor';
 import type { Project } from '../types/project';
@@ -115,6 +116,12 @@ export function ProjectDetailPage() {
       </section>
 
       <TranscriptEditor projectId={project.id} hasVideo={project.has_video} />
+
+      <ReelEditor
+        projectId={project.id}
+        hasVideo={project.has_video}
+        videoDuration={project.duration_seconds}
+      />
 
       <button type="button" className="button button--danger" onClick={() => setConfirmOpen(true)}>
         Eliminar proyecto

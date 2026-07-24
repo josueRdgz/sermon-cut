@@ -28,6 +28,22 @@ export function formatDuration(seconds: number | null): string {
   return `${minutes}:${String(secs).padStart(2, '0')}`;
 }
 
+/** Precise source timecode for Reel segments (HH:MM:SS.cs). */
+export function formatTimecode(seconds: number | null | undefined, fractionDigits = 2): string {
+  if (seconds == null || Number.isNaN(seconds)) return '—';
+  const clamped = Math.max(0, seconds);
+  const hours = Math.floor(clamped / 3600);
+  const minutes = Math.floor((clamped % 3600) / 60);
+  const wholeSeconds = Math.floor(clamped % 60);
+  const fraction = clamped - Math.floor(clamped);
+  const frac = fraction.toFixed(fractionDigits).slice(1); // ".xx"
+  return (
+    `${String(hours).padStart(2, '0')}:` +
+    `${String(minutes).padStart(2, '0')}:` +
+    `${String(wholeSeconds).padStart(2, '0')}${frac}`
+  );
+}
+
 export function formatDate(iso: string): string {
   try {
     return new Date(iso).toLocaleString('es-ES', {

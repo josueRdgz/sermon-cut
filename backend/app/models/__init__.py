@@ -4,6 +4,14 @@ Import every model here so Alembic autogenerate and ``Base.metadata`` stay in sy
 """
 
 from app.models.project import Project, ProjectStatus
+from app.models.reel import (
+    AspectRatio,
+    Reel,
+    ReelSegment,
+    ReelStatus,
+    SubtitleStyle,
+    TransitionType,
+)
 from app.models.transcript import (
     Transcript,
     TranscriptSegment,
@@ -14,8 +22,13 @@ from app.models.transcript import (
 from app.models.transcription_job import TranscriptionJob, TranscriptionJobStatus
 
 __all__ = [
+    "AspectRatio",
     "Project",
     "ProjectStatus",
+    "Reel",
+    "ReelSegment",
+    "ReelStatus",
+    "SubtitleStyle",
     "Transcript",
     "TranscriptSegment",
     "TranscriptSource",
@@ -23,4 +36,5 @@ __all__ = [
     "TranscriptWord",
     "TranscriptionJob",
     "TranscriptionJobStatus",
+    "TransitionType",
 ]

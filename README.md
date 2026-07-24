@@ -7,9 +7,9 @@ consecutivos y exportar un video vertical con subtítulos y una pantalla final.
 
 > **Estado actual:** proyectos locales + importación/normalización de
 > transcripciones (SRT, WebVTT, JSON interno, TXT) + **transcripción local con
-> faster-whisper** (segmentos y palabras con tiempos, progreso y cancelación),
-> con editor y reproductor.
-> **Todavía no:** Gemini, generación de clips ni renderizado final.
+> faster-whisper** + **Reels compuestos por varios fragmentos no consecutivos**
+> (línea de tiempo, vista previa lógica, sin renderizado aún).
+> **Todavía no:** Gemini, generación automática de clips ni renderizado final a archivo.
 
 ## Requisitos (macOS)
 
@@ -43,7 +43,12 @@ Abre <http://localhost:5173>.
 2. En el detalle del proyecto, **transcribe localmente** (elige modelo e idioma)
    o importa una **transcripción** existente (SRT / VTT / JSON / TXT).
 3. Usa el buscador, edita segmentos y haz clic en uno para saltar en el video HTML5.
-4. Exporta a SRT, VTT o JSON interno cuando quieras.
+4. En **Reels**, selecciona uno o más segmentos de la transcripción (pueden no ser
+   contiguos) y pulsa **Crear Reel desde selección**. Añade más fragmentos con
+   **Añadir otro fragmento** o **Añadir selección al Reel actual**.
+5. Ajusta inicio/fin con precisión decimal (±1 s / ±0.1 s) y usa **Vista previa
+   lógica** para reproducir fragmento → salto → fragmento (sin generar un archivo).
+6. Exporta la transcripción a SRT, VTT o JSON interno cuando quieras.
 
 Los medios viven en `storage/projects/{uuid}/`. SQLite solo guarda metadatos.
 
@@ -166,13 +171,37 @@ Fixtures de ejemplo: `backend/tests/fixtures/transcripts/`.
 | GET | `/api/projects/{id}/transcription` | Último trabajo (para polling) |
 | GET | `/api/transcription-jobs/{id}` | Estado de un trabajo |
 | POST | `/api/transcription-jobs/{id}/cancel` | Cancelar un trabajo |
+| CRUD | `/api/projects/{id}/reels`… | Reels y metadatos |
+| POST | `/api/projects/{id}/reels/from-transcript` | Crear/añadir desde segmentos de transcripción |
+| POST/PATCH/DELETE | `/api/projects/{id}/reels/{reelId}/segments`… | Fragmentos del Reel |
+| PUT | `/api/projects/{id}/reels/{reelId}/segments/order` | Reordenar fragmentos |
 
 Errores de dominio: `{ "detail": "...", "code": "..." }`.
 
-Cuerpo para iniciar: `{ "model_name": "small", "language": "auto" }`
-(`model_name`: `tiny|base|small|medium|large-v3`; `language`: `auto|es|en`).
-El frontend hace **polling cada 1.5 s** y muestra etapa, porcentaje, tiempo
-procesado / duración total, dispositivo y errores.
+Transcripción local: cuerpo `{ "model_name": "small", "language": "auto" }`
+(`tiny|base|small|medium|large-v3`; `auto|es|en`). El frontend hace polling
+cada 1.5 s.
+
+## Reels (fragmentos no consecutivos)
+
+Un Reel **no** es un único intervalo `inicio–fin`. Es una lista ordenada de
+ventanas sobre el video original, por ejemplo:
+
+```
+00:10:20–00:10:42
++
+00:11:05–00:11:29
++
+00:12:01–00:12:18
+```
+
+- Aspectos: `9:16`, `1:1`, `16:9`.
+- Transiciones entre fragmentos: `hard_cut`, `short_crossfade`, `dip_to_black`.
+- Validaciones: inicio &lt; fin, duración mínima (`SERMON_CUT_MIN_REEL_SEGMENT_SECONDS`),
+  dentro de la duración del video, orden `0..n-1` denso.
+- Duración final = suma de ventanas + ms de transición entre fragmentos (la del último se ignora).
+- La UI muestra cada **salto** en la línea de tiempo y una vista previa lógica
+  (reproduce, salta al siguiente, se detiene). **No renderiza** un archivo todavía.
 
 ## Configuración
 
@@ -181,6 +210,7 @@ procesado / duración total, dispositivo y errores.
 - `SERMON_CUT_WHISPER_DEVICE` — `auto|cuda|cpu` (default `auto`).
 - `SERMON_CUT_WHISPER_COMPUTE_TYPE` — `auto|int8|float16|…` (default `auto`).
 - `SERMON_CUT_KEEP_TEMP_AUDIO` — conservar el WAV temporal (default `false`).
+- `SERMON_CUT_MIN_REEL_SEGMENT_SECONDS` — duración mínima de un fragmento (default `0.1`).
 
 ## Calidad
 

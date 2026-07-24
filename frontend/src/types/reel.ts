@@ -1,0 +1,85 @@
+export type AspectRatio = '9:16' | '1:1' | '16:9';
+export type TransitionType = 'hard_cut' | 'short_crossfade' | 'dip_to_black';
+export type SubtitleStyle = 'default' | 'bold' | 'caption';
+export type ReelStatus = 'draft' | 'ready' | 'rendering' | 'completed' | 'failed';
+
+export interface ReelSegment {
+  id: string;
+  reel_id: string;
+  order: number;
+  source_start_seconds: number;
+  source_end_seconds: number;
+  transcript_text: string | null;
+  transition_type: TransitionType;
+  transition_duration_ms: number;
+  duration_seconds: number;
+}
+
+export interface Reel {
+  id: string;
+  project_id: string;
+  title: string;
+  hook: string | null;
+  description: string | null;
+  editorial_score: number | null;
+  subtitle_style: SubtitleStyle;
+  aspect_ratio: AspectRatio;
+  status: ReelStatus;
+  created_at: string;
+  updated_at: string;
+  segments: ReelSegment[];
+  content_duration_seconds: number;
+  total_duration_seconds: number;
+}
+
+export interface ReelListResponse {
+  items: Reel[];
+  total: number;
+}
+
+export interface ReelSegmentCreatePayload {
+  source_start_seconds: number;
+  source_end_seconds: number;
+  transcript_text?: string | null;
+  transition_type?: TransitionType;
+  transition_duration_ms?: number;
+  order?: number | null;
+}
+
+export interface ReelCreatePayload {
+  title: string;
+  hook?: string | null;
+  description?: string | null;
+  editorial_score?: number | null;
+  subtitle_style?: SubtitleStyle;
+  aspect_ratio?: AspectRatio;
+  status?: ReelStatus;
+  segments?: ReelSegmentCreatePayload[];
+}
+
+export interface ReelUpdatePayload {
+  title?: string;
+  hook?: string | null;
+  description?: string | null;
+  editorial_score?: number | null;
+  subtitle_style?: SubtitleStyle;
+  aspect_ratio?: AspectRatio;
+  status?: ReelStatus;
+}
+
+export interface ReelSegmentUpdatePayload {
+  source_start_seconds?: number;
+  source_end_seconds?: number;
+  transcript_text?: string | null;
+  transition_type?: TransitionType;
+  transition_duration_ms?: number;
+}
+
+export interface ReelFromTranscriptPayload {
+  title?: string;
+  transcript_segment_ids: string[];
+  aspect_ratio?: AspectRatio;
+  reel_id?: string | null;
+  transition_type?: TransitionType;
+  transition_duration_ms?: number;
+}

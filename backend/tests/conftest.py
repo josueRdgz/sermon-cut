@@ -26,12 +26,12 @@ def storage_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 
 
 @pytest.fixture()
-def client(
+def db_session_factory(
     tmp_path: Path,
     storage_root: Path,  # noqa: ARG001 — ensures storage is patched
     monkeypatch: pytest.MonkeyPatch,
-) -> Generator[TestClient, None, None]:
-    """HTTP client bound to an isolated SQLite database and storage tree."""
+) -> Generator[sessionmaker, None, None]:
+    """Isolated SQLite session factory shared by the TestClient."""
     db_path = tmp_path / "test.db"
     url = f"sqlite:///{db_path.as_posix()}"
     monkeypatch.setenv("SERMON_CUT_DATABASE_URL", url)
@@ -46,8 +46,21 @@ def client(
     TestingSessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
     Base.metadata.create_all(bind=engine)
 
+    yield TestingSessionLocal
+
+    Base.metadata.drop_all(bind=engine)
+    engine.dispose()
+    get_settings.cache_clear()
+
+
+@pytest.fixture()
+def client(
+    db_session_factory: sessionmaker,
+) -> Generator[TestClient, None, None]:
+    """HTTP client bound to an isolated SQLite database and storage tree."""
+
     def _override_get_db() -> Generator[Session, None, None]:
-        db = TestingSessionLocal()
+        db = db_session_factory()
         try:
             yield db
         finally:
@@ -60,6 +73,3 @@ def client(
         yield test_client
 
     app.dependency_overrides.clear()
-    Base.metadata.drop_all(bind=engine)
-    engine.dispose()
-    get_settings.cache_clear()

@@ -1,0 +1,143 @@
+"""CRUD endpoints for Reels and their non-consecutive segments."""
+
+from __future__ import annotations
+
+from uuid import UUID
+
+from fastapi import APIRouter, Depends
+from sqlalchemy.orm import Session
+
+from app.db.session import get_db
+from app.schemas.reel import (
+    ReelCreate,
+    ReelFromTranscriptRequest,
+    ReelListResponse,
+    ReelResponse,
+    ReelSegmentCreate,
+    ReelSegmentReorderRequest,
+    ReelSegmentUpdate,
+    ReelUpdate,
+)
+from app.services.reels import service as reels_service
+
+router = APIRouter(tags=["reels"])
+
+
+@router.get("/projects/{project_id}/reels", response_model=ReelListResponse)
+def list_reels(project_id: UUID, db: Session = Depends(get_db)) -> ReelListResponse:
+    reels = reels_service.list_reels(db, project_id)
+    items = [reels_service.to_response(r) for r in reels]
+    return ReelListResponse(items=items, total=len(items))
+
+
+@router.post(
+    "/projects/{project_id}/reels",
+    response_model=ReelResponse,
+    status_code=201,
+)
+def create_reel(
+    project_id: UUID,
+    payload: ReelCreate,
+    db: Session = Depends(get_db),
+) -> ReelResponse:
+    reel = reels_service.create_reel(db, project_id, payload)
+    return reels_service.to_response(reel)
+
+
+@router.post(
+    "/projects/{project_id}/reels/from-transcript",
+    response_model=ReelResponse,
+    status_code=201,
+)
+def create_reel_from_transcript(
+    project_id: UUID,
+    payload: ReelFromTranscriptRequest,
+    db: Session = Depends(get_db),
+) -> ReelResponse:
+    """Create a Reel (or append to one) from selected transcript segments."""
+    reel = reels_service.create_or_append_from_transcript(db, project_id, payload)
+    return reels_service.to_response(reel)
+
+
+@router.get("/projects/{project_id}/reels/{reel_id}", response_model=ReelResponse)
+def get_reel(
+    project_id: UUID,
+    reel_id: UUID,
+    db: Session = Depends(get_db),
+) -> ReelResponse:
+    reel = reels_service.get_reel_for_project(db, project_id, reel_id)
+    return reels_service.to_response(reel)
+
+
+@router.patch("/projects/{project_id}/reels/{reel_id}", response_model=ReelResponse)
+def update_reel(
+    project_id: UUID,
+    reel_id: UUID,
+    payload: ReelUpdate,
+    db: Session = Depends(get_db),
+) -> ReelResponse:
+    reel = reels_service.update_reel(db, project_id, reel_id, payload)
+    return reels_service.to_response(reel)
+
+
+@router.delete("/projects/{project_id}/reels/{reel_id}", status_code=204)
+def delete_reel(project_id: UUID, reel_id: UUID, db: Session = Depends(get_db)) -> None:
+    reels_service.delete_reel(db, project_id, reel_id)
+
+
+@router.post(
+    "/projects/{project_id}/reels/{reel_id}/segments",
+    response_model=ReelResponse,
+    status_code=201,
+)
+def add_segment(
+    project_id: UUID,
+    reel_id: UUID,
+    payload: ReelSegmentCreate,
+    db: Session = Depends(get_db),
+) -> ReelResponse:
+    reel = reels_service.add_segment(db, project_id, reel_id, payload)
+    return reels_service.to_response(reel)
+
+
+@router.patch(
+    "/projects/{project_id}/reels/{reel_id}/segments/{segment_id}",
+    response_model=ReelResponse,
+)
+def update_segment(
+    project_id: UUID,
+    reel_id: UUID,
+    segment_id: UUID,
+    payload: ReelSegmentUpdate,
+    db: Session = Depends(get_db),
+) -> ReelResponse:
+    reel = reels_service.update_segment(db, project_id, reel_id, segment_id, payload)
+    return reels_service.to_response(reel)
+
+
+@router.delete(
+    "/projects/{project_id}/reels/{reel_id}/segments/{segment_id}",
+    response_model=ReelResponse,
+)
+def delete_segment(
+    project_id: UUID,
+    reel_id: UUID,
+    segment_id: UUID,
+    db: Session = Depends(get_db),
+) -> ReelResponse:
+    reel = reels_service.delete_segment(db, project_id, reel_id, segment_id)
+    return reels_service.to_response(reel)
+
+
+@router.put(
+    "/projects/{project_id}/reels/{reel_id}/segments/order",
+    response_model=ReelResponse,
+)
+def reorder_segments(
+    project_id: UUID,
+    reel_id: UUID,
+    payload: ReelSegmentReorderRequest,
+    db: Session = Depends(get_db),
+) -> ReelResponse:
+    reel = reels_service.reorder_segments(db, project_id, reel_id, payload)
+    return reels_service.to_response(reel)

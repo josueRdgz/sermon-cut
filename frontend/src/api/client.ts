@@ -55,6 +55,16 @@ export async function apiDelete(path: string): Promise<void> {
   if (!response.ok) throw await parseError(response);
 }
 
+export async function apiDeleteJson<T>(path: string): Promise<T> {
+  const response = await fetch(`${API_BASE_URL}${path}`, {
+    method: 'DELETE',
+    headers: { Accept: 'application/json' },
+  });
+  if (!response.ok) throw await parseError(response);
+  if (response.status === 204) return undefined as T;
+  return (await response.json()) as T;
+}
+
 export async function apiForm<T>(path: string, form: FormData): Promise<T> {
   const response = await fetch(`${API_BASE_URL}${path}`, {
     method: 'POST',
