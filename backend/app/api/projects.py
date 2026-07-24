@@ -30,6 +30,13 @@ _VIDEO_MEDIA_TYPES: dict[str, str] = {
     ".webm": "video/webm",
 }
 
+_COVER_MEDIA_TYPES: dict[str, str] = {
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".png": "image/png",
+    ".webp": "image/webp",
+}
+
 
 async def _upload_chunks(upload: UploadFile) -> AsyncIterator[bytes]:
     """Yield the upload body in chunks without loading it all into memory."""
@@ -140,5 +147,25 @@ def stream_project_video(project_id: UUID, db: Session = Depends(get_db)) -> Fil
         path,
         media_type=media_type,
         filename=project.video_filename,
+        content_disposition_type="inline",
+    )
+
+
+@router.get("/{project_id}/media/cover")
+def stream_project_cover(project_id: UUID, db: Session = Depends(get_db)) -> FileResponse:
+    """Serve the project cover image (used as a thumbnail in the library)."""
+    project = projects_service.get_project(db, project_id)
+    if not project.cover_filename:
+        raise NotFoundError("Project has no cover.", code="cover_not_found")
+
+    path = storage.resolve_inside_project(project.id, project.cover_filename)
+    if not path.is_file():
+        raise NotFoundError("Cover file is missing on disk.", code="cover_not_found")
+
+    media_type = _COVER_MEDIA_TYPES.get(Path(project.cover_filename).suffix.lower(), "image/jpeg")
+    return FileResponse(
+        path,
+        media_type=media_type,
+        filename=project.cover_filename,
         content_disposition_type="inline",
     )

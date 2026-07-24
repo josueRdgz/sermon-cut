@@ -1,8 +1,12 @@
 import type { Project, ProjectCreatePayload, ProjectListResponse } from '../types/project';
-import { apiDelete, apiGet, apiJson, uploadWithProgress } from './client';
+import { API_BASE_URL, apiDelete, apiGet, apiJson, uploadWithProgress } from './client';
 
 export function listProjects(): Promise<ProjectListResponse> {
   return apiGet<ProjectListResponse>('/api/projects');
+}
+
+export function projectCoverUrl(id: string): string {
+  return `${API_BASE_URL}/api/projects/${id}/media/cover`;
 }
 
 export function getProject(id: string): Promise<Project> {

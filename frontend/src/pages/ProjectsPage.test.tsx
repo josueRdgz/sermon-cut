@@ -4,6 +4,17 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { ProjectsPage } from './ProjectsPage';
 
+const healthPayload = {
+  status: 'ok',
+  app_name: 'Sermon Cut',
+  version: '0.1.0',
+  ffmpeg: { available: true, version: '8.1' },
+  ffprobe: { available: true, version: '8.1' },
+  whisper: { available: false, version: null },
+  gemini: { available: false, version: null },
+  storage: { bytes_used: 0, project_count: 0 },
+};
+
 const projectsPayload = {
   items: [
     {
@@ -38,9 +49,10 @@ describe('ProjectsPage', () => {
   beforeEach(() => {
     vi.stubGlobal(
       'fetch',
-      vi.fn().mockResolvedValue({
-        ok: true,
-        json: async () => projectsPayload,
+      vi.fn((input: RequestInfo | URL) => {
+        const url = String(input);
+        const body = url.includes('/api/projects') ? projectsPayload : healthPayload;
+        return Promise.resolve({ ok: true, json: async () => body });
       }),
     );
   });
@@ -49,7 +61,7 @@ describe('ProjectsPage', () => {
     vi.unstubAllGlobals();
   });
 
-  it('lists projects with duration, resolution and status', async () => {
+  it('lists projects with duration, status and open action', async () => {
     render(
       <MemoryRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
         <ProjectsPage />
@@ -60,9 +72,8 @@ describe('ProjectsPage', () => {
       expect(screen.getByText('La gracia de Dios')).toBeInTheDocument();
     });
     expect(screen.getByText('2:05')).toBeInTheDocument();
-    expect(screen.getByText('1920x1080')).toBeInTheDocument();
     expect(screen.getByText('Listo')).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: 'Abrir' })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: /Abrir/ })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Eliminar' })).toBeInTheDocument();
   });
 });

@@ -26,8 +26,17 @@ def test_health_returns_ok() -> None:
 def test_health_reports_tools_shape() -> None:
     body = client.get("/api/health").json()
 
-    for tool in ("ffmpeg", "ffprobe"):
+    for tool in ("ffmpeg", "ffprobe", "whisper", "gemini"):
         assert tool in body
         assert isinstance(body[tool]["available"], bool)
         # version is either a string or null.
         assert body[tool]["version"] is None or isinstance(body[tool]["version"], str)
+
+
+def test_health_reports_version_and_storage() -> None:
+    body = client.get("/api/health").json()
+
+    assert isinstance(body["version"], str) and body["version"]
+    storage = body["storage"]
+    assert isinstance(storage["bytes_used"], int)
+    assert isinstance(storage["project_count"], int)

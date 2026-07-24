@@ -1,12 +1,21 @@
+import { Clapperboard, Plus } from 'lucide-react';
 import { useState } from 'react';
-import { Link } from 'react-router-dom';
 
 import { ConfirmDialog } from '../components/ConfirmDialog';
-import { ProjectCard } from '../components/ProjectCard';
+import { AppLayout } from '../components/layout/AppLayout';
+import { Sidebar } from '../components/layout/Sidebar';
+import { StatusBar } from '../components/layout/StatusBar';
+import { TopBar } from '../components/layout/TopBar';
+import { ProjectGrid } from '../components/ProjectGrid';
+import { EmptyState } from '../components/ui/EmptyState';
+import { PrimaryButton } from '../components/ui/PrimaryButton';
+import { SectionHeader } from '../components/ui/SectionHeader';
 import { useProjects } from '../hooks/useProjects';
+import { useSystemStatus } from '../hooks/useSystemStatus';
 import type { Project } from '../types/project';
 
 export function ProjectsPage() {
+  const system = useSystemStatus();
   const { projects, loading, error, remove } = useProjects();
   const [pendingDelete, setPendingDelete] = useState<Project | null>(null);
   const [deleting, setDeleting] = useState(false);
@@ -27,40 +36,56 @@ export function ProjectsPage() {
   }
 
   return (
-    <main className="page page--wide">
-      <header className="page__header page__header--row">
-        <div>
-          <p className="eyebrow">
-            <Link to="/">Sermon Cut</Link>
-          </p>
-          <h1>Proyectos</h1>
-          <p>Predicaciones locales listas para convertir en Shorts y Reels.</p>
-        </div>
-        <Link className="button button--inline" to="/projects/new">
-          Nueva predicación
-        </Link>
-      </header>
+    <>
+      <AppLayout
+        header={
+          <TopBar
+            indicators={system.indicators}
+            actions={
+              <PrimaryButton to="/projects/new" size="sm" icon={Plus}>
+                Nuevo proyecto
+              </PrimaryButton>
+            }
+          />
+        }
+        sidebar={<Sidebar />}
+        footer={
+          <StatusBar
+            projectCount={projects.length}
+            storageUsed={system.storageUsed}
+            version={system.version}
+            overall={system.overall}
+            overallLabel={system.overallLabel}
+          />
+        }
+      >
+        <SectionHeader
+          title="Proyectos"
+          subtitle="Predicaciones locales listas para convertir en Shorts y Reels."
+        />
 
-      {loading && <p className="muted">Cargando proyectos…</p>}
-      {error && <p className="error">{error}</p>}
+        {loading ? <p className="muted">Cargando proyectos…</p> : null}
+        {error ? <p className="error">{error}</p> : null}
 
-      {!loading && !error && projects.length === 0 && (
-        <section className="card empty-state">
-          <h2>Aún no hay proyectos</h2>
-          <p>Crea tu primera predicación para empezar.</p>
-          <Link className="button" to="/projects/new">
-            Nueva predicación
-          </Link>
-        </section>
-      )}
+        {!loading && !error && projects.length === 0 ? (
+          <EmptyState
+            icon={Clapperboard}
+            title="Aún no hay proyectos"
+            description="Crea tu primer proyecto a partir de un video local o una URL de YouTube."
+            action={
+              <PrimaryButton to="/projects/new" icon={Plus}>
+                Nuevo proyecto
+              </PrimaryButton>
+            }
+          />
+        ) : null}
 
-      <div className="project-grid">
-        {projects.map((project) => (
-          <ProjectCard key={project.id} project={project} onDelete={setPendingDelete} />
-        ))}
-      </div>
+        {projects.length > 0 ? <ProjectGrid projects={projects} onDelete={setPendingDelete} /> : null}
 
-      {pendingDelete && (
+        {deleteError ? <p className="error">{deleteError}</p> : null}
+      </AppLayout>
+
+      {pendingDelete ? (
         <ConfirmDialog
           title="Eliminar proyecto"
           message={`¿Seguro que quieres eliminar «${pendingDelete.title}»? Se borrarán también el video y la portada del disco.`}
@@ -73,8 +98,7 @@ export function ProjectsPage() {
             }
           }}
         />
-      )}
-      {deleteError && <p className="error">{deleteError}</p>}
-    </main>
+      ) : null}
+    </>
   );
 }

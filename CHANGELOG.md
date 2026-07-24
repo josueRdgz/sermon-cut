@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- Professional dark home screen redesign (DaVinci/OBS/Cursor aesthetic):
+  `AppLayout` + `TopBar` + `Sidebar` + `StatusBar`, Inter Variable typography,
+  lucide-react icons, CSS Modules design system (`PrimaryButton`,
+  `StatusIndicator`, `ProjectCard`, `EmptyState`, `MetricCard`, …). Health
+  endpoint now reports Whisper/Gemini availability, app version and storage
+  usage; covers are served via `/api/projects/{id}/media/cover`.
 - Tauri 2 desktop shell (local FastAPI on `127.0.0.1`, system FFmpeg).
 - `docs/PRIVACY.md`, `docs/LICENSING.md`, `docs/DESKTOP.md`, `docs/PENDING.md`.
 - Startup reconciliation of orphaned render/transcription/analysis jobs.

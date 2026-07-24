@@ -1,8 +1,10 @@
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 
+import '@fontsource-variable/inter';
 import { prepareApiBaseUrl } from './api/client';
 import App from './App';
+import './styles/tokens.css';
 import './index.css';
 
 async function boot(): Promise<void> {
