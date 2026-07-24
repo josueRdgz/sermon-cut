@@ -1,7 +1,7 @@
 # Sermon Cut
 
-Aplicación **local** y de **código abierto** para convertir un video de una
-predicación en **Shorts / Reels verticales**: importar la transcripción,
+Aplicación **local para macOS** y de **código abierto** para convertir un video
+de una predicación en **Shorts / Reels verticales**: importar la transcripción,
 identificar los mejores fragmentos, componer un Reel con varios segmentos no
 consecutivos y exportar un video vertical con subtítulos y una pantalla final.
 
@@ -10,12 +10,20 @@ consecutivos y exportar un video vertical con subtítulos y una pantalla final.
 > inicial en React). **Todavía no** hay transcripción, integración con Gemini
 > ni edición de video.
 
-## Requisitos
+## Requisitos (macOS)
 
+- **macOS** (plataforma objetivo)
+- **Homebrew** (recomendado para instalar dependencias del sistema)
 - **Python 3.12+**
 - **Node.js 18+** (probado con 20) y **npm**
-- **FFmpeg** y **FFprobe** instalados en el sistema y disponibles en el `PATH`
-- **git** (y opcionalmente **GitHub CLI** para publicar)
+- **FFmpeg** y **FFprobe** instalados y disponibles en el `PATH`
+- **git**
+
+Instala las dependencias del sistema con Homebrew:
+
+```bash
+brew install python@3.12 node ffmpeg
+```
 
 Verifica FFmpeg:
 
@@ -24,19 +32,13 @@ ffmpeg -version
 ffprobe -version
 ```
 
-Instalación de FFmpeg:
-
-- **macOS:** `brew install ffmpeg`
-- **Debian/Ubuntu:** `sudo apt install ffmpeg`
-- **Windows:** `winget install Gyan.FFmpeg` (o `choco install ffmpeg`)
-
 ## Estructura
 
 ```
 backend/    FastAPI + SQLAlchemy 2 + Alembic + SQLite
 frontend/   React + Vite + TypeScript
 storage/    projects/ temp/ exports/  (contenido ignorado por git)
-scripts/    scripts de arranque (macOS/Linux/Windows)
+scripts/    scripts de arranque para macOS
 docs/       documentación de arquitectura
 ```
 
@@ -50,20 +52,13 @@ Copia las variables de entorno de ejemplo:
 cp .env.example .env
 ```
 
-### Opción A — Scripts
+### Opción A — Scripts (recomendado)
 
-**macOS / Linux** (dos terminales):
+En dos terminales:
 
 ```bash
 ./scripts/start-backend.sh
 ./scripts/start-frontend.sh
-```
-
-**Windows (PowerShell)**:
-
-```powershell
-./scripts/start-backend.ps1
-./scripts/start-frontend.ps1
 ```
 
 ### Opción B — Manual
@@ -73,7 +68,7 @@ cp .env.example .env
 ```bash
 cd backend
 python3 -m venv .venv
-source .venv/bin/activate        # Windows: .venv\Scripts\Activate.ps1
+source .venv/bin/activate
 pip install -e ".[dev]"
 uvicorn app.main:app --reload --port 8000
 ```
@@ -135,6 +130,7 @@ npm run format:check  # Prettier
 
 ## Diseño y restricciones
 
+- Plataforma objetivo: **macOS**.
 - Ejecución **100% local**; sin servicios externos obligatorios.
 - **Sin Celery ni Redis.**
 - Rutas con **`pathlib`**, nunca concatenando strings.

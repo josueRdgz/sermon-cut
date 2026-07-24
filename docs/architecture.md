@@ -1,7 +1,7 @@
 # Arquitectura de Sermon Cut
 
-Aplicación **local** y de **código abierto** para convertir videos de predicaciones
-en Shorts / Reels verticales con subtítulos y una pantalla final.
+Aplicación **local para macOS** y de **código abierto** para convertir videos de
+predicaciones en Shorts / Reels verticales con subtítulos y una pantalla final.
 
 > Esta es la **base** del proyecto. Todavía no hay transcripción, integración con
 > Gemini ni edición de video.
@@ -67,6 +67,7 @@ Las carpetas se versionan vacías (`.gitkeep`); su contenido está en `.gitignor
 
 ## Principios
 
+- Plataforma objetivo: **macOS**.
 - Ejecución **100% local**; sin servicios externos obligatorios.
 - Sin **Celery** ni **Redis**.
 - Rutas siempre con **`pathlib`**, nunca concatenando strings.

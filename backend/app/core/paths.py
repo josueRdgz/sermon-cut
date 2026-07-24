@@ -1,8 +1,7 @@
 """Centralized filesystem paths built with pathlib.
 
 Every path in the project is derived from this module so we never concatenate
-path strings by hand. This keeps the code portable across macOS, Linux and
-Windows.
+path strings by hand. The target platform is macOS.
 """
 
 from __future__ import annotations

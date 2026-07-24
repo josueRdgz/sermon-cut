@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Start the Sermon Cut backend (FastAPI) on macOS / Linux.
+# Start the Sermon Cut backend (FastAPI) on macOS.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
