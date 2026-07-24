@@ -36,6 +36,19 @@ class Settings(BaseSettings):
     # Maximum size for a single uploaded file (video or cover). Default: 4 GiB.
     max_upload_bytes: int = 4 * 1024 * 1024 * 1024
 
+    # ---- Local transcription (faster-whisper) ----
+    # Default model. "small" is a good balance for modest machines; use "medium"
+    # for higher quality on stronger hardware.
+    whisper_model: str = "small"
+    # Device preference: "auto" (CUDA if available, else CPU), "cuda" or "cpu".
+    whisper_device: str = "auto"
+    # ctranslate2 compute type: "auto" resolves per device (float16 on CUDA,
+    # int8 on CPU). Can be pinned e.g. to "int8", "int8_float16", "float16".
+    whisper_compute_type: str = "auto"
+    # When true, the extracted temporary WAV is kept for debugging instead of
+    # being deleted once the job finishes.
+    keep_temp_audio: bool = False
+
 
 @lru_cache
 def get_settings() -> Settings:

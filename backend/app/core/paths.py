@@ -37,3 +37,8 @@ def default_database_url() -> str:
 def project_dir(project_id: UUID) -> Path:
     """Return the on-disk directory for a given project UUID."""
     return PROJECTS_DIR / str(project_id)
+
+
+def job_temp_dir(job_id: UUID) -> Path:
+    """Return the temp working directory for a transcription job."""
+    return TEMP_DIR / f"transcription-{job_id}"

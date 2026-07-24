@@ -15,6 +15,11 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+# Local speech-to-text. Heavy (pulls ctranslate2 + model downloads on first use).
+# Install explicitly with:  pip install -e ".[whisper]"
+whisper = [
+    "faster-whisper>=1.0",
+]
 dev = [
     "pytest>=8.2",
     "httpx>=0.27",

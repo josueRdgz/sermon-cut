@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 
 import { ApiError } from '../api/client';
 import {
@@ -12,6 +12,7 @@ import {
 import type { Transcript, TranscriptSegment } from '../types/transcript';
 import { formatDuration } from '../utils/format';
 import { ConfirmDialog } from './ConfirmDialog';
+import { TranscriptionPanel } from './TranscriptionPanel';
 
 interface TranscriptEditorProps {
   projectId: string;
@@ -36,18 +37,14 @@ export function TranscriptEditor({ projectId, hasVideo }: TranscriptEditorProps)
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [language, setLanguage] = useState('es');
 
-  useEffect(() => {
-    let cancelled = false;
+  const loadTranscript = useCallback(() => {
     setLoading(true);
-    getTranscript(projectId)
+    return getTranscript(projectId)
       .then((data) => {
-        if (!cancelled) {
-          setTranscript(data);
-          setError(null);
-        }
+        setTranscript(data);
+        setError(null);
       })
       .catch((err: unknown) => {
-        if (cancelled) return;
         if (err instanceof ApiError && err.status === 404) {
           setTranscript(null);
           setError(null);
@@ -56,12 +53,13 @@ export function TranscriptEditor({ projectId, hasVideo }: TranscriptEditorProps)
         }
       })
       .finally(() => {
-        if (!cancelled) setLoading(false);
+        setLoading(false);
       });
-    return () => {
-      cancelled = true;
-    };
   }, [projectId]);
+
+  useEffect(() => {
+    void loadTranscript();
+  }, [loadTranscript]);
 
   const filteredSegments = useMemo(() => {
     if (!transcript) return [];
@@ -159,6 +157,12 @@ export function TranscriptEditor({ projectId, hasVideo }: TranscriptEditorProps)
       {!hasVideo && (
         <p className="muted">Sube un video al proyecto para sincronizar la reproducción.</p>
       )}
+
+      <TranscriptionPanel
+        projectId={projectId}
+        hasVideo={hasVideo}
+        onCompleted={() => void loadTranscript()}
+      />
 
       <div className="transcript-toolbar">
         <label className="field field--inline">

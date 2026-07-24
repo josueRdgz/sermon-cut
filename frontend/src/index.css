@@ -290,9 +290,34 @@ a:hover {
 .badge--transcribing,
 .badge--analyzing,
 .badge--editing,
-.badge--rendering {
+.badge--rendering,
+.badge--queued,
+.badge--running,
+.badge--cancelling {
   background: #1e3a8a;
   color: #bfdbfe;
+}
+
+.badge--cancelled {
+  background: #4b5563;
+  color: #e5e7eb;
+}
+
+.transcription-panel {
+  margin: 1rem 0;
+}
+
+.transcription-progress {
+  margin-top: 0.75rem;
+}
+
+.notice {
+  margin-top: 0.5rem;
+  padding: 0.6rem 0.8rem;
+  border-radius: 8px;
+  background: #422006;
+  color: #fde68a;
+  font-size: 0.9rem;
 }
 
 .empty-state {

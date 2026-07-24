@@ -3,8 +3,9 @@
 Aplicación **local para macOS** y de **código abierto** para convertir videos de
 predicaciones en Shorts / Reels verticales con subtítulos y una pantalla final.
 
-> Gestión local de proyectos y transcripciones. Todavía no hay Gemini,
-> generación de clips ni renderizado final.
+> Gestión local de proyectos, transcripciones (importadas o generadas con
+> faster-whisper). Todavía no hay Gemini, generación de clips ni renderizado
+> final.
 
 ## Visión general
 
@@ -31,11 +32,24 @@ Organización por capas para separar responsabilidades:
 - **`app/core/`** — configuración (`config.py`), rutas (`paths.py`), excepciones
   estructuradas (`exceptions.py`).
 - **`app/db/`** — `Base` declarativa (SQLAlchemy 2), `engine` y `SessionLocal`.
-- **`app/models/`** — modelos ORM (`Project` + `ProjectStatus`).
+- **`app/models/`** — modelos ORM (`Project`, `Transcript*`, `TranscriptionJob`).
 - **`app/schemas/`** — contratos Pydantic 2.
 - **`app/services/`** — lógica: FFmpeg/FFprobe, storage, proyectos, parsers de
-  transcripción (SRT/VTT/JSON/TXT), validación y exportación.
+  transcripción (SRT/VTT/JSON/TXT), validación, exportación y `whisper/`
+  (dispositivo, extracción de audio, motor y administrador de trabajos).
 - **`app/workers/`** — trabajos en segundo plano (futuros). Sin Celery ni Redis.
+
+### Transcripción local (faster-whisper)
+
+- `services/whisper/device.py` resuelve el dispositivo: `cuda` si hay GPU NVIDIA,
+  si no `cpu`. Apple Silicon corre en CPU (Metal no soportado) con aviso claro.
+- `services/whisper/audio.py` extrae audio a WAV mono 16 kHz con FFmpeg.
+- `services/whisper/engine.py` define un contrato `TranscriptionEngine` (para
+  poder simularlo en tests) y su implementación real perezosa con faster-whisper.
+- `services/whisper/manager.py` es un `JobManager` con `ThreadPoolExecutor`
+  (un worker) y **cancelación cooperativa** vía `threading.Event`. El estado del
+  trabajo (`TranscriptionJob`) se **persiste en SQLite** y el frontend lo consulta
+  por *polling*. Sin Celery ni Redis.
 
 ### Transcripciones
 
@@ -45,6 +59,7 @@ Organización por capas para separar responsabilidades:
 - TXT sin tiempos → estado `unsynced`.
 - Video servido con `FileResponse` (Range) en
   `GET /api/projects/{id}/media/video` para el `<video>` HTML5.
+- Fuente `whisper` para transcripciones generadas localmente.
 
 - Metadatos en SQLite; video y portada en `storage/projects/{uuid}/`.
 - Nombres canónicos en disco: `original.<ext>`, `cover.<ext>`.

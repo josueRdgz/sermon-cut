@@ -11,6 +11,7 @@ from app.models.transcript import (
     TranscriptStatus,
     TranscriptWord,
 )
+from app.models.transcription_job import TranscriptionJob, TranscriptionJobStatus
 
 __all__ = [
     "Project",
@@ -20,4 +21,6 @@ __all__ = [
     "TranscriptSource",
     "TranscriptStatus",
     "TranscriptWord",
+    "TranscriptionJob",
+    "TranscriptionJobStatus",
 ]

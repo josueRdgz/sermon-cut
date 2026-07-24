@@ -13,6 +13,7 @@ from app.models.project import ProjectStatus
 from app.models.transcript import (
     Transcript,
     TranscriptSegment,
+    TranscriptSource,
     TranscriptStatus,
     TranscriptWord,
 )
@@ -135,19 +136,19 @@ def _build_orm_from_parsed(
     return transcript
 
 
-def import_transcript(
+def replace_transcript_from_parsed(
     db: Session,
     project_id: UUID,
     *,
-    filename: str | None,
-    content: str,
-    language: str | None = None,
+    source: TranscriptSource,
+    parsed: ParsedTranscript,
+    commit: bool = True,
 ) -> Transcript:
-    """Parse, validate and persist a transcript for a project (replacing any existing one)."""
+    """Persist a parsed transcript for a project, replacing any existing one.
+
+    Shared by file import and by the local whisper engine.
+    """
     project = projects_service.get_project(db, project_id)
-    source, parsed = parse_transcript_file(filename, content)
-    if language:
-        parsed.language = language
 
     existing = db.scalars(select(Transcript).where(Transcript.project_id == project_id)).first()
     if existing is not None:
@@ -157,10 +158,34 @@ def import_transcript(
     transcript = _build_orm_from_parsed(project_id=project_id, source=source, parsed=parsed)
     db.add(transcript)
 
-    if project.status in {ProjectStatus.created, ProjectStatus.ready, ProjectStatus.importing}:
+    if project.status in {
+        ProjectStatus.created,
+        ProjectStatus.ready,
+        ProjectStatus.importing,
+        ProjectStatus.transcribing,
+    }:
         project.status = ProjectStatus.ready
 
-    db.commit()
+    if commit:
+        db.commit()
+    return transcript
+
+
+def import_transcript(
+    db: Session,
+    project_id: UUID,
+    *,
+    filename: str | None,
+    content: str,
+    language: str | None = None,
+) -> Transcript:
+    """Parse, validate and persist a transcript for a project (replacing any existing one)."""
+    projects_service.get_project(db, project_id)
+    source, parsed = parse_transcript_file(filename, content)
+    if language:
+        parsed.language = language
+
+    replace_transcript_from_parsed(db, project_id, source=source, parsed=parsed)
     return get_transcript_for_project(db, project_id)
 
 
