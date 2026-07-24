@@ -49,4 +49,6 @@ ignore = ["B008"]
 
 [tool.ruff.lint.per-file-ignores]
 "alembic/env.py" = ["E402", "I001"]
+# Migrations follow Alembic's generated template (import order, long sa.Enum lines).
+"alembic/versions/**" = ["E501", "I001"]
 "tests/**" = ["E501"]

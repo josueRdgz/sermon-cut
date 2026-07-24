@@ -8,8 +8,10 @@ consecutivos y exportar un video vertical con subtítulos y una pantalla final.
 > **Estado actual:** proyectos locales + importación/normalización de
 > transcripciones (SRT, WebVTT, JSON interno, TXT) + **transcripción local con
 > faster-whisper** + **Reels compuestos por varios fragmentos no consecutivos**
-> (línea de tiempo, vista previa lógica, sin renderizado aún).
-> **Todavía no:** Gemini, generación automática de clips ni renderizado final a archivo.
+> (línea de tiempo, vista previa lógica) + **render real a MP4 con FFmpeg**
+> (corta, une y normaliza los fragmentos).
+> **Todavía no:** subtítulos quemados, pantalla final, Gemini ni generación
+> automática de clips.
 
 ## Requisitos (macOS)
 
@@ -24,6 +26,30 @@ consecutivos y exportar un video vertical con subtítulos y una pantalla final.
 brew install python@3.12 node ffmpeg
 ffmpeg -version && ffprobe -version
 ```
+
+### FFmpeg: qué necesita el render
+
+El render de Reels usa el binario `ffmpeg` del sistema (nunca `shell=True`; los
+argumentos se pasan siempre como lista explícita a `subprocess`). El build de
+Homebrew incluye todo lo necesario:
+
+- **FFmpeg 5.0 o superior** (probado con 6.x y 7.x). Se requiere ≥ 4.3 por el
+  filtro `xfade`, usado en las transiciones con fundido.
+- **`libx264`** habilitado (`--enable-libx264`) para el video H.264.
+- **Codificador AAC** — el nativo de FFmpeg (`aac`) es suficiente.
+- **Filtros**: `scale`, `crop`, `overlay`, `gblur`, `fps`, `concat`, `xfade`,
+  `afade`, `acrossfade`, `aresample`, `loudnorm`, y `lavfi`/`anullsrc` para
+  generar silencio cuando el video original no tiene pista de audio.
+
+Comprobación rápida:
+
+```bash
+ffmpeg -hide_banner -encoders | grep -E 'libx264|\baac\b'
+ffmpeg -hide_banner -filters  | grep -E 'xfade|gblur|loudnorm|acrossfade'
+```
+
+Si `ffmpeg` no está en el `PATH`, el endpoint de render responde `503` con
+`code: "ffmpeg_missing"`.
 
 ## Puesta en marcha
 
@@ -175,6 +201,12 @@ Fixtures de ejemplo: `backend/tests/fixtures/transcripts/`.
 | POST | `/api/projects/{id}/reels/from-transcript` | Crear/añadir desde segmentos de transcripción |
 | POST/PATCH/DELETE | `/api/projects/{id}/reels/{reelId}/segments`… | Fragmentos del Reel |
 | PUT | `/api/projects/{id}/reels/{reelId}/segments/order` | Reordenar fragmentos |
+| POST | `/api/projects/{id}/reels/{reelId}/render` | Iniciar render con FFmpeg (202) |
+| GET | `/api/projects/{id}/reels/{reelId}/render` | Último render (para polling) |
+| GET | `/api/projects/{id}/reels/{reelId}/renders` | Historial de renders del Reel |
+| GET | `/api/render-jobs/{id}` | Estado de un render |
+| POST | `/api/render-jobs/{id}/cancel` | Cancelar un render |
+| GET | `/api/render-jobs/{id}/output?download=true` | Reproducir o descargar el MP4 |
 
 Errores de dominio: `{ "detail": "...", "code": "..." }`.
 
@@ -201,7 +233,68 @@ ventanas sobre el video original, por ejemplo:
   dentro de la duración del video, orden `0..n-1` denso.
 - Duración final = suma de ventanas + ms de transición entre fragmentos (la del último se ignora).
 - La UI muestra cada **salto** en la línea de tiempo y una vista previa lógica
-  (reproduce, salta al siguiente, se detiene). **No renderiza** un archivo todavía.
+  (reproduce, salta al siguiente, se detiene).
+
+## Render de un Reel (FFmpeg)
+
+Desde el editor de Reels, el panel **«Exportar video»** produce un **MP4
+H.264 + AAC** real: corta cada ventana del video original, las une y normaliza
+el resultado. Todavía **sin subtítulos ni pantalla final**.
+
+**Salida y lienzo**
+
+| Aspecto | Resolución |
+| ------- | ---------- |
+| `9:16`  | 1080 × 1920 |
+| `1:1`   | 1080 × 1080 |
+| `16:9`  | 1920 × 1080 |
+
+**Encuadres** (`layout`):
+
+- `center_crop` — escala para cubrir el lienzo y recorta el centro.
+- `blurred_background` — rellena el lienzo con una copia **desenfocada** y coloca
+  el video original completo, visible y **centrado** encima. Útil para llevar un
+  sermón horizontal a 9:16 sin perder los bordes del cuadro.
+
+**Cómo se garantiza la calidad del corte**
+
+- Cada fragmento entra como una entrada propia con `-accurate_seek -ss … -t …`:
+  FFmpeg busca el keyframe anterior y descarta cuadros hasta el instante exacto,
+  así que los cortes son precisos al fotograma. **Siempre se recodifica**; nunca
+  se usa solo `-c copy`.
+- Todos los fragmentos se normalizan en `filter_complex` a la **misma
+  resolución, FPS constante, `yuv420p` y audio estéreo 48 kHz** antes de unirse,
+  que es lo que hace seguro concatenar ventanas arbitrarias.
+- Se aplica un **fade de audio de ~15 ms** en cada borde para que los empalmes no
+  produzcan clics.
+- `hard_cut` usa `concat`; `short_crossfade` y `dip_to_black` usan `xfade` +
+  `acrossfade` con **la misma duración**, de modo que audio y video se acortan
+  exactamente igual y no se desincronizan.
+- Con `Normalizar audio` activo se aplica `loudnorm` (≈ −16 LUFS) a la mezcla final.
+
+**Casos que se manejan automáticamente**
+
+- **Sin pista de audio**: se genera silencio con `anullsrc` para que la salida
+  siempre tenga un audio uniforme.
+- **Audio mono o multicanal**: se convierte a estéreo con `aformat`.
+- **FPS variable**: se fuerza un FPS constante con el filtro `fps` (12–60,
+  derivado del original; 30 si no se puede determinar).
+- **Rotación en metadatos**: FFmpeg aplica la matriz de rotación al decodificar,
+  así que un video grabado de lado se orienta bien sin `transpose` manual.
+- **Videos verticales originales**: se escalan al lienzo sin recorte innecesario.
+
+**Progreso, cancelación y archivos**
+
+- El progreso se obtiene parseando `-progress pipe:1` y se guarda en SQLite; el
+  frontend hace polling cada 1.5 s (etapa, porcentaje, tiempo procesado, velocidad).
+- **Cancelar** termina el proceso de FFmpeg y no deja archivo de salida.
+- Los temporales viven **dentro de la carpeta del proyecto**
+  (`storage/projects/{id}/renders/.tmp/`) y se borran al finalizar.
+- El resultado se guarda en `storage/projects/{id}/renders/` con un nombre
+  derivado del título del Reel. **Nunca se sobrescribe** un render anterior: se
+  añade un sufijo numérico (`mi-reel.mp4`, `mi-reel-2.mp4`, …).
+- El comando FFmpeg **saneado** (con comillas, copiable a la terminal) se
+  registra en el log y puede verse en la UI para depuración.
 
 ## Configuración
 
@@ -221,6 +314,11 @@ pytest && ruff check .
 # frontend/
 npm run test && npm run lint && npx tsc --noEmit
 ```
+
+`backend/tests/test_render_args.py` cubre el generador de argumentos FFmpeg y el
+parseo de `-progress`. `test_render_api.py` incluye una **prueba de integración
+opcional** que genera un clip sintético y lo renderiza con el FFmpeg real; se
+omite automáticamente (`skipif`) si `ffmpeg` no está instalado.
 
 ## Diseño
 

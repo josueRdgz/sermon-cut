@@ -17,6 +17,7 @@ import type { AspectRatio, Reel, ReelSegment, TransitionType } from '../types/re
 import type { TranscriptSegment } from '../types/transcript';
 import { formatDuration, formatTimecode } from '../utils/format';
 import { ConfirmDialog } from './ConfirmDialog';
+import { RenderPanel } from './RenderPanel';
 
 interface ReelEditorProps {
   projectId: string;
@@ -746,6 +747,13 @@ export function ReelEditor({ projectId, hasVideo, videoDuration }: ReelEditorPro
               );
             })}
           </ol>
+
+          <RenderPanel
+            projectId={projectId}
+            reelId={activeReel.id}
+            reelAspectRatio={activeReel.aspect_ratio}
+            segmentCount={activeReel.segments.length}
+          />
         </>
       )}
 

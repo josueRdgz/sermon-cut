@@ -33,12 +33,13 @@ Organización por capas para separar responsabilidades:
   estructuradas (`exceptions.py`).
 - **`app/db/`** — `Base` declarativa (SQLAlchemy 2), `engine` y `SessionLocal`.
 - **`app/models/`** — modelos ORM (`Project`, `Transcript*`, `TranscriptionJob`,
-  `Reel` / `ReelSegment`).
+  `Reel` / `ReelSegment`, `RenderJob`).
 - **`app/schemas/`** — contratos Pydantic 2.
 - **`app/services/`** — lógica: FFmpeg/FFprobe, storage, proyectos, parsers de
   transcripción (SRT/VTT/JSON/TXT), validación, exportación, `whisper/`
-  (dispositivo, extracción de audio, motor y administrador de trabajos) y
-  `reels/` (CRUD, validación de ventanas no contiguas, duración).
+  (dispositivo, extracción de audio, motor y administrador de trabajos),
+  `reels/` (CRUD, validación de ventanas no contiguas, duración) y `render/`
+  (generador de argumentos FFmpeg, ejecución y administrador de trabajos).
 - **`app/workers/`** — trabajos en segundo plano (futuros). Sin Celery ni Redis.
 
 ### Transcripción local (faster-whisper)
@@ -74,7 +75,37 @@ Organización por capas para separar responsabilidades:
 - API anidada bajo `/api/projects/{id}/reels`; creación auxiliar
   `/reels/from-transcript`.
 - Frontend: `ReelEditor` con selección de transcripción, fórmula
-  `A + B + C`, saltos visibles y vista previa lógica (sin render a archivo).
+  `A + B + C`, saltos visibles y vista previa lógica.
+
+### Render (FFmpeg)
+
+- `services/render/args.py` es una función **pura**: recibe las ventanas, el
+  aspecto y el encuadre y devuelve un `RenderPlan` con la lista explícita de
+  argumentos, el `filter_complex` y la duración esperada. Al no ejecutar nada, se
+  puede testear a fondo sin tocar disco ni FFmpeg.
+- El grafo normaliza cada fragmento (resolución, FPS constante, `yuv420p`, audio
+  estéreo 48 kHz) **antes** de unirlos, requisito para que `concat` y `xfade`
+  funcionen con ventanas arbitrarias. Los cortes son precisos porque cada
+  fragmento se recodifica tras un `-accurate_seek`; nunca se usa solo `-c copy`.
+- Los empalmes llevan un fade de audio de ~15 ms. Las transiciones con fundido
+  usan `xfade` + `acrossfade` con **idéntica duración**, de modo que audio y
+  video se acortan por igual y la sincronía se conserva.
+- `services/render/progress.py` acumula los pares `key=value` de
+  `-progress pipe:1` y emite una actualización por bloque (`progress=continue`).
+- `services/render/runner.py` ejecuta `subprocess.Popen` con la lista de
+  argumentos (nunca `shell=True`), envía `stderr` a un log para no bloquear la
+  tubería y termina el proceso cuando se solicita cancelación.
+- `services/render/manager.py` replica el patrón del `JobManager` de whisper:
+  `ThreadPoolExecutor` de un worker, estado en SQLite (`RenderJob`) para
+  *polling*, y limpieza de temporales. Consulta FFprobe para saber si el origen
+  tiene audio y a qué FPS venía. Los temporales viven dentro de la carpeta del
+  proyecto y la salida se coloca en `renders/` con un nombre libre, sin
+  sobrescribir nada.
+- El comando saneado (`shlex.join`) se registra en el log y se guarda en el
+  trabajo para depuración.
+- Frontend: `RenderPanel` (dentro de `ReelEditor`) elige aspecto/encuadre, hace
+  polling del progreso y, al terminar, reproduce el MP4 vía
+  `GET /api/render-jobs/{id}/output` y ofrece descarga.
 
 - Metadatos en SQLite; video y portada en `storage/projects/{uuid}/`.
 - Nombres canónicos en disco: `original.<ext>`, `cover.<ext>`.
@@ -103,7 +134,9 @@ En desarrollo, Vite hace *proxy* de `/api` hacia `http://127.0.0.1:8000`.
 ## Almacenamiento (`storage/`)
 
 - `projects/{uuid}/` — media de cada proyecto.
-- `temp/` — archivos intermedios (futuro).
+- `projects/{uuid}/renders/` — Reels renderizados (MP4), con `.tmp/` para los
+  archivos intermedios de FFmpeg.
+- `temp/` — archivos intermedios de transcripción.
 - `exports/` — videos exportados (futuro).
 
 Las carpetas se versionan vacías (`.gitkeep`); su contenido está en `.gitignore`.

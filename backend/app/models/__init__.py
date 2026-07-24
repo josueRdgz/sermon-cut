@@ -12,6 +12,7 @@ from app.models.reel import (
     SubtitleStyle,
     TransitionType,
 )
+from app.models.render_job import RenderJob, RenderJobStatus
 from app.models.transcript import (
     Transcript,
     TranscriptSegment,
@@ -28,6 +29,8 @@ __all__ = [
     "Reel",
     "ReelSegment",
     "ReelStatus",
+    "RenderJob",
+    "RenderJobStatus",
     "SubtitleStyle",
     "Transcript",
     "TranscriptSegment",

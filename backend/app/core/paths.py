@@ -42,3 +42,13 @@ def project_dir(project_id: UUID) -> Path:
 def job_temp_dir(job_id: UUID) -> Path:
     """Return the temp working directory for a transcription job."""
     return TEMP_DIR / f"transcription-{job_id}"
+
+
+def project_renders_dir(project_id: UUID) -> Path:
+    """Return the directory holding rendered reels for a project."""
+    return project_dir(project_id) / "renders"
+
+
+def project_render_temp_dir(project_id: UUID) -> Path:
+    """Temp working directory for renders, kept inside the project folder."""
+    return project_dir(project_id) / "renders" / ".tmp"

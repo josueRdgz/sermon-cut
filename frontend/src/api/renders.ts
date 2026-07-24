@@ -1,0 +1,31 @@
+import type { RenderJob, RenderJobListResponse, StartRenderPayload } from '../types/render';
+import { API_BASE_URL, apiGet, apiJson } from './client';
+
+export function startRender(
+  projectId: string,
+  reelId: string,
+  payload: StartRenderPayload,
+): Promise<RenderJob> {
+  return apiJson<RenderJob>(`/api/projects/${projectId}/reels/${reelId}/render`, 'POST', payload);
+}
+
+export function getLatestRender(projectId: string, reelId: string): Promise<RenderJob> {
+  return apiGet<RenderJob>(`/api/projects/${projectId}/reels/${reelId}/render`);
+}
+
+export function listRenders(projectId: string, reelId: string): Promise<RenderJobListResponse> {
+  return apiGet<RenderJobListResponse>(`/api/projects/${projectId}/reels/${reelId}/renders`);
+}
+
+export function getRenderJob(jobId: string): Promise<RenderJob> {
+  return apiGet<RenderJob>(`/api/render-jobs/${jobId}`);
+}
+
+export function cancelRenderJob(jobId: string): Promise<RenderJob> {
+  return apiJson<RenderJob>(`/api/render-jobs/${jobId}/cancel`, 'POST', {});
+}
+
+export function renderOutputUrl(jobId: string, download = false): string {
+  const suffix = download ? '?download=true' : '';
+  return `${API_BASE_URL}/api/render-jobs/${jobId}/output${suffix}`;
+}
