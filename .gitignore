@@ -71,7 +71,9 @@ storage/**/*.{mp4,mov,mkv,avi,webm,m4a,mp3,wav,flac,aac,ogg}
 *.pth
 *.onnx
 *.gguf
-models/
+# Only the repo-root / storage model caches — NOT backend/app/models/ (ORM).
+/models/
+storage/**/models/
 whisper-models/
 **/huggingface/
 .cache/
