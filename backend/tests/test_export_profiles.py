@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
 from app.core.exceptions import AppError
 from app.models.export_profile import ExportPlatform, ExportProfile, ExportQuality, FpsMode
 from app.services.export_profiles.estimate import estimate_size

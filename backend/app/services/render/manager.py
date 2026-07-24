@@ -563,6 +563,9 @@ class RenderManager:
             frag_note = fragmentation_note(profile, plan.expected_duration_seconds)
 
             sanitized = format_command_for_log(plan.args)
+            from app.services.storage import redact_local_paths
+
+            sanitized = redact_local_paths(sanitized)
             logger.info("Render %s FFmpeg command: %s", job_id, sanitized)
 
             job.ffmpeg_command = sanitized[:8000]

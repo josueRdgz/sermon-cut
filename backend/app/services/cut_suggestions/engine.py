@@ -20,6 +20,19 @@ from app.services.cut_suggestions.intensity import IntensityProfile
 from app.services.cut_suggestions.silence import SilenceInterval
 
 
+def _silence_cut_message(
+    kind: CutSuggestionKind,
+    duration: float,
+    removed: float,
+    residual: float,
+) -> str:
+    label = "Pausa larga" if kind == CutSuggestionKind.long_pause else "Silencio interno"
+    return (
+        f"{label} de {duration:.2f}s. Se sugiere reducir ~{removed:.2f}s "
+        f"dejando {residual:.2f}s y un crossfade corto."
+    )
+
+
 @dataclass(frozen=True)
 class SegmentInput:
     index: int  # 1-based
@@ -176,10 +189,8 @@ def _silence_suggestions(
                 segment_uuid=segment.uuid,
                 region_start=silence.start,
                 region_end=silence.end,
-                message=(
-                    f"{'Pausa larga' if kind == CutSuggestionKind.long_pause else 'Silencio interno'} "
-                    f"de {silence.duration:.2f}s. Se sugiere reducir ~{removed:.2f}s "
-                    f"dejando {profile.residual_silence:.2f}s y un crossfade corto."
+                message=_silence_cut_message(
+                    kind, silence.duration, removed, profile.residual_silence
                 ),
                 recommendation=(
                     "Al aceptar se parte el fragmento, se aplica un fundido corto y "

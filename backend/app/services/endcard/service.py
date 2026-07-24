@@ -197,6 +197,8 @@ async def _attach_asset(
     stem: str,
     extensions: frozenset[str],
     mime_types: frozenset[str],
+    max_bytes: int,
+    magic_kind: str,
 ) -> EndCardSettings:
     """Store a user-provided end card asset inside the project folder."""
     if db.get(Project, project_id) is None:
@@ -206,7 +208,6 @@ async def _attach_asset(
     extension = storage.validate_extension(safe_name, extensions)
     storage.validate_mime(content_type, mime_types)
 
-    settings = get_settings()
     destination = storage.resolve_inside_project(project_id, f"{stem}{extension}")
     # Replace any previously uploaded asset of the same kind.
     for existing in extensions:
@@ -214,7 +215,8 @@ async def _attach_asset(
         if previous != destination and previous.is_file():
             previous.unlink(missing_ok=True)
 
-    await storage.save_upload_stream(destination, chunks, max_bytes=settings.max_upload_bytes)
+    await storage.save_upload_stream(destination, chunks, max_bytes=max_bytes)
+    storage.assert_file_magic(destination, kind=magic_kind)
     return upsert(db, project_id=project_id, values={field: destination.name})
 
 
@@ -226,6 +228,7 @@ async def attach_logo(
     content_type: str | None,
     chunks: AsyncIterator[bytes],
 ) -> EndCardSettings:
+    settings = get_settings()
     return await _attach_asset(
         db,
         project_id,
@@ -236,6 +239,8 @@ async def attach_logo(
         stem="end-card-logo",
         extensions=LOGO_EXTENSIONS,
         mime_types=LOGO_MIME_TYPES,
+        max_bytes=settings.max_cover_upload_bytes,
+        magic_kind="image",
     )
 
 
@@ -248,6 +253,7 @@ async def attach_music(
     chunks: AsyncIterator[bytes],
 ) -> EndCardSettings:
     """Store the user's own music. Nothing is ever fetched from the internet."""
+    settings = get_settings()
     return await _attach_asset(
         db,
         project_id,
@@ -258,6 +264,8 @@ async def attach_music(
         stem="end-card-music",
         extensions=MUSIC_EXTENSIONS,
         mime_types=MUSIC_MIME_TYPES,
+        max_bytes=settings.max_music_upload_bytes,
+        magic_kind="audio",
     )
 
 

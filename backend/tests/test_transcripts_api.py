@@ -122,18 +122,19 @@ def test_upload_corrupt_srt_returns_structured_error(client: TestClient) -> None
 def test_stream_video_endpoint(client: TestClient, storage_root: Path) -> None:
     project = _create_project(client)
     project_id = project["id"]
+    fake_mp4 = b"\x00\x00\x00\x18ftypisom\x00\x00\x00\x00isomiso2mp41"
 
     with patch("app.services.projects.probe_video", return_value=FAKE_METADATA):
         upload = client.post(
             f"/api/projects/{project_id}/video",
-            files={"file": ("sermon.mp4", b"\x00\x00fake-video", "video/mp4")},
+            files={"file": ("sermon.mp4", fake_mp4, "video/mp4")},
         )
     assert upload.status_code == 200
 
     streamed = client.get(f"/api/projects/{project_id}/media/video")
     assert streamed.status_code == 200
     assert streamed.headers["content-type"].startswith("video/")
-    assert streamed.content == b"\x00\x00fake-video"
+    assert streamed.content == fake_mp4
     assert (storage_root / project_id / "original.mp4").is_file()
 
 

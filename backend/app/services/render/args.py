@@ -23,6 +23,10 @@ from __future__ import annotations
 import shlex
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from app.services.background_music.ffmpeg_filters import BackgroundMusicSpec
 
 # Canvas size per aspect ratio.
 CANVAS_SIZES: dict[str, tuple[int, int]] = {
@@ -429,7 +433,7 @@ def build_render_command(
     ass_path: Path | None = None,
     fonts_dir: Path | None = None,
     end_card: EndCardSpec | None = None,
-    background_music: "BackgroundMusicSpec | None" = None,
+    background_music: BackgroundMusicSpec | None = None,
     loudness: LoudnessSpec | None = None,
 ) -> RenderPlan:
     """Build the full FFmpeg argument list for one reel render.
@@ -446,7 +450,6 @@ def build_render_command(
     from app.models.background_music import BackgroundMusicScope
     from app.services.background_music.ffmpeg_filters import (
         ALIMITER,
-        BackgroundMusicSpec,
         build_background_music_graph,
         build_loudnorm_filter,
     )
@@ -455,6 +458,19 @@ def build_render_command(
         raise ValueError("A render needs at least one segment.")
     if layout not in LAYOUTS:
         raise ValueError(f"Unsupported layout: {layout!r}")
+    allowed_presets = {
+        "ultrafast",
+        "superfast",
+        "veryfast",
+        "faster",
+        "fast",
+        "medium",
+        "slow",
+        "slower",
+        "veryslow",
+    }
+    if preset not in allowed_presets:
+        preset = "medium"
     for index, segment in enumerate(segments):
         if segment.duration <= 0:
             raise ValueError(f"Segment {index + 1} has a non-positive duration.")

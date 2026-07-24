@@ -145,6 +145,7 @@ async def attach_video(
             chunks,
             max_bytes=settings.max_upload_bytes,
         )
+        storage.assert_file_magic(destination, kind="video")
         metadata = probe_video(destination)
     except Exception as exc:
         project.status = ProjectStatus.failed
@@ -196,8 +197,9 @@ async def attach_cover(
     await storage.save_upload_stream(
         destination,
         chunks,
-        max_bytes=settings.max_upload_bytes,
+        max_bytes=settings.max_cover_upload_bytes,
     )
+    storage.assert_file_magic(destination, kind="image")
 
     if project.cover_filename and project.cover_filename != stored_name:
         old = storage.resolve_inside_project(project.id, project.cover_filename)

@@ -623,6 +623,7 @@ El flujo en navegador (`start-backend` + `start-frontend`) sigue disponible.
 - Escritorio / Tauri: [docs/DESKTOP.md](docs/DESKTOP.md).
 - Privacidad: [docs/PRIVACY.md](docs/PRIVACY.md).
 - Licencias de terceros / FFmpeg: [docs/LICENSING.md](docs/LICENSING.md).
+- Pendientes / checklist: [docs/PENDING.md](docs/PENDING.md).
 
 ## Comunidad
 

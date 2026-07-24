@@ -10,7 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ### Added
 
 - Tauri 2 desktop shell (local FastAPI on `127.0.0.1`, system FFmpeg).
-- `docs/PRIVACY.md`, `docs/LICENSING.md`, `docs/DESKTOP.md`.
+- `docs/PRIVACY.md`, `docs/LICENSING.md`, `docs/DESKTOP.md`, `docs/PENDING.md`.
 - Startup reconciliation of orphaned render/transcription/analysis jobs.
 - SQLite `foreign_keys=ON`, WAL, and `busy_timeout`.
 - Pastoral / privacy disclaimers in export and Gemini UI.
@@ -24,6 +24,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - ASS karaoke encodes pauses between words; crossfade cues no longer double-stack.
 - Subtitle / end-card font candidates for Windows and Linux.
 - README claim of missing subtitles/end card; “100% local” wording clarified.
+- Separate size limits for cover/logo/music uploads; magic-byte sniffing.
+- Render reports and reveal responses no longer expose absolute filesystem paths.
+- x264 `-preset` values whitelisted.
 
 ### Changed
 

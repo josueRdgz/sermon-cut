@@ -64,7 +64,8 @@ def build_render_report(
         },
         "output": {
             "filename": output_filename,
-            "path": str(output_path.resolve()),
+            # Basename only — never leak absolute paths / usernames in shared reports.
+            "path": output_filename,
             "sha256": sha256,
             "size_bytes": size_bytes,
             "duration_seconds": duration_seconds,
@@ -90,7 +91,9 @@ def build_render_report(
         },
     }
     if ffmpeg_command:
-        payload["ffmpeg_command"] = ffmpeg_command[:4000]
+        from app.services.storage import redact_local_paths
+
+        payload["ffmpeg_command"] = redact_local_paths(ffmpeg_command)[:4000]
     if extra:
         payload["extra"] = extra
     return payload

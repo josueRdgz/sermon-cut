@@ -12,10 +12,10 @@ from app.core.exceptions import NotFoundError, ValidationAppError
 from app.core.paths import project_renders_dir
 from app.db.session import get_db
 from app.schemas.render_job import (
-    RevealResponse,
     RenderJobListResponse,
     RenderJobResponse,
     RenderStartRequest,
+    RevealResponse,
 )
 from app.services.export_profiles.reveal import reveal_in_file_manager
 from app.services.render.manager import RenderManager, get_render_manager

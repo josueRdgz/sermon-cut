@@ -98,7 +98,7 @@ def test_local_music_mode_requires_an_uploaded_file(client: TestClient) -> None:
 
     uploaded = client.post(
         f"/api/projects/{project_id}/end-card/music",
-        files={"file": ("bed.mp3", b"\x00\x01fake-audio", "audio/mpeg")},
+        files={"file": ("bed.mp3", b"ID3\x03\x00\x00\x00\x00\x00\x00fake-audio", "audio/mpeg")},
     )
     assert uploaded.status_code == 200, uploaded.text
     assert uploaded.json()["music_filename"] == "end-card-music.mp3"

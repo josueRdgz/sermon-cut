@@ -9,10 +9,11 @@ from pathlib import Path
 from app.core.exceptions import AppError, ValidationAppError
 
 
-def reveal_in_file_manager(path: Path) -> dict[str, str]:
+def reveal_in_file_manager(path: Path) -> dict[str, str | bool]:
     """Open the folder containing ``path``, selecting the file when possible.
 
-    Does not upload or publish — local filesystem only.
+    Does not upload or publish — local filesystem only. The API response avoids
+    leaking absolute paths (username / home directory) to the webview.
     """
     resolved = path.resolve()
     if not resolved.exists():
@@ -28,6 +29,7 @@ def reveal_in_file_manager(path: Path) -> dict[str, str]:
             )
             method = "open -R"
         elif system == "Windows":
+            # Quoting via list argv; /select,path works for spaces when not split.
             subprocess.Popen(  # noqa: S603
                 ["explorer", f"/select,{resolved}"],
                 stdout=subprocess.DEVNULL,
@@ -35,7 +37,6 @@ def reveal_in_file_manager(path: Path) -> dict[str, str]:
             )
             method = "explorer /select"
         else:
-            # Linux / other: open the parent directory.
             parent = str(resolved.parent)
             subprocess.Popen(  # noqa: S603
                 ["xdg-open", parent],
@@ -51,8 +52,8 @@ def reveal_in_file_manager(path: Path) -> dict[str, str]:
         ) from exc
 
     return {
-        "path": str(resolved),
-        "directory": str(resolved.parent),
+        "filename": resolved.name,
+        "opened": True,
         "platform": system,
         "method": method,
     }

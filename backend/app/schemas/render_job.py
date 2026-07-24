@@ -83,7 +83,7 @@ class RenderJobListResponse(BaseModel):
 
 
 class RevealResponse(BaseModel):
-    path: str
-    directory: str
+    filename: str
+    opened: bool = True
     platform: str
     method: str

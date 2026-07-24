@@ -49,8 +49,11 @@ class Settings(BaseSettings):
         ]
     )
 
-    # Maximum size for a single uploaded file (video or cover). Default: 4 GiB.
+    # Maximum size for a single uploaded *video*. Default: 4 GiB.
     max_upload_bytes: int = 4 * 1024 * 1024 * 1024
+    # Covers / logos / music must stay much smaller (disk DoS + decode cost).
+    max_cover_upload_bytes: int = 20 * 1024 * 1024
+    max_music_upload_bytes: int = 100 * 1024 * 1024
 
     # ---- Local transcription (faster-whisper) ----
     whisper_model: str = "small"

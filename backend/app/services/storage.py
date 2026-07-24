@@ -135,3 +135,66 @@ async def save_upload_stream(
             destination.unlink(missing_ok=True)
         raise
     return written
+
+
+def assert_file_magic(path: Path, *, kind: str) -> None:
+    """Reject uploads whose on-disk bytes do not match the declared media kind.
+
+    ``kind`` is one of ``video``, ``image``, ``audio``. This is a cheap first
+    bytes check — not a full container parse (FFprobe still validates video).
+    """
+    if not path.is_file():
+        raise ValidationAppError("Uploaded file is missing.", code="file_missing")
+    header = path.read_bytes()[:64]
+    if not header:
+        raise ValidationAppError("Uploaded file is empty.", code="file_empty")
+
+    ok = False
+    if kind == "image":
+        ok = (
+            header.startswith(b"\xff\xd8\xff")  # JPEG
+            or header.startswith(b"\x89PNG\r\n\x1a\n")  # PNG
+            or (header.startswith(b"RIFF") and header[8:12] == b"WEBP")
+        )
+    elif kind == "audio":
+        ok = (
+            header.startswith(b"ID3")
+            or header[:2] in {b"\xff\xfb", b"\xff\xf3", b"\xff\xf2"}  # MPEG frame
+            or (header.startswith(b"RIFF") and header[8:12] == b"WAVE")
+            or header[4:8] == b"ftyp"  # M4A
+            or header.startswith(b"OggS")
+        )
+    elif kind == "video":
+        ok = (
+            header[4:8] == b"ftyp"  # MP4 / MOV
+            or header.startswith(b"\x1a\x45\xdf\xa3")  # Matroska / WebM
+            or header.startswith(b"RIFF")  # rare AVI; we don't allow .avi but cheap
+        )
+    else:
+        raise ValidationAppError(f"Unknown media kind '{kind}'.", code="invalid_media_kind")
+
+    if not ok:
+        path.unlink(missing_ok=True)
+        raise ValidationAppError(
+            f"File content does not look like a valid {kind} upload.",
+            code="invalid_file_content",
+        )
+
+
+def redact_local_paths(text: str) -> str:
+    """Replace user home / profile paths in log/API strings with ``<path>``.
+
+    Leaves short system temp prefixes (``/tmp/...``) alone so tests and local
+    tooling can still assert on filenames under the storage tree.
+    """
+    if not text:
+        return text
+    # Windows user profile paths.
+    redacted = re.sub(r"(?i)[a-z]:\\Users\\[^\s\"']+", "<path>", text)
+    # macOS / Linux home directories (and legacy /private/var/folders user caches).
+    redacted = re.sub(
+        r"(?<![A-Za-z0-9_])/(?:Users|home)/[^\s\"']+",
+        "<path>",
+        redacted,
+    )
+    return redacted

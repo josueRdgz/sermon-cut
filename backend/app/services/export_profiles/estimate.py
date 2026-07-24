@@ -41,7 +41,9 @@ def estimate_size(
     duration = max(0.5, duration_seconds)
     frame_rate = max(12.0, min(fps, 60.0))
     resolved_crf = crf if crf is not None else crf_for(profile, quality)
-    audio_k = audio_bitrate_k if audio_bitrate_k is not None else audio_bitrate_for(profile, quality)
+    audio_k = (
+        audio_bitrate_k if audio_bitrate_k is not None else audio_bitrate_for(profile, quality)
+    )
 
     bpp = _BPP_BY_QUALITY.get(quality, 0.055)
     # Higher CRF → fewer bits; scale relative to CRF 23.

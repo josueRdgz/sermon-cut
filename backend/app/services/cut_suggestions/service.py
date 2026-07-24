@@ -19,11 +19,11 @@ from app.models.reel import Reel, TransitionType
 from app.models.transcript import Transcript
 from app.schemas.cut_suggestions import (
     CutIntensity,
-    CutSuggestRequest,
     CutSuggestion,
     CutSuggestionActionResponse,
-    CutSuggestionStatus,
     CutSuggestionsReport,
+    CutSuggestionStatus,
+    CutSuggestRequest,
 )
 from app.schemas.reel import ReelSegmentCreate, ReelSegmentUpdate
 from app.services import projects as projects_service

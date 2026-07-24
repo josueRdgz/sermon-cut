@@ -18,6 +18,10 @@ SAMPLE_PROJECT = {
     "full_sermon_url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
 }
 
+# Minimal ISO BMFF / JPEG headers that pass assert_file_magic (probe is mocked).
+FAKE_MP4 = b"\x00\x00\x00\x18ftypisom\x00\x00\x00\x00isomiso2mp41"
+FAKE_JPEG = b"\xff\xd8\xff\xe0\x00\x10JFIF" + b"\x00" * 8
+
 FAKE_METADATA = VideoMetadata(
     duration_seconds=125.5,
     width=1920,
@@ -87,7 +91,7 @@ def test_upload_video_and_cover(client: TestClient, storage_root: Path) -> None:
     with patch("app.services.projects.probe_video", return_value=FAKE_METADATA):
         video_response = client.post(
             f"/api/projects/{project_id}/video",
-            files={"file": ("sermon.mp4", b"\x00\x00fake-video-bytes", "video/mp4")},
+            files={"file": ("sermon.mp4", FAKE_MP4, "video/mp4")},
         )
     assert video_response.status_code == 200, video_response.text
     video_body = video_response.json()
@@ -103,7 +107,7 @@ def test_upload_video_and_cover(client: TestClient, storage_root: Path) -> None:
 
     cover_response = client.post(
         f"/api/projects/{project_id}/cover",
-        files={"file": ("portada.jpg", b"\xff\xd8\xfffake-jpeg", "image/jpeg")},
+        files={"file": ("portada.jpg", FAKE_JPEG, "image/jpeg")},
     )
     assert cover_response.status_code == 200, cover_response.text
     cover_body = cover_response.json()
@@ -141,7 +145,7 @@ def test_upload_rejects_path_traversal_filename(client: TestClient, storage_root
     with patch("app.services.projects.probe_video", return_value=FAKE_METADATA):
         response = client.post(
             f"/api/projects/{project_id}/video",
-            files={"file": ("../../evil.mp4", b"data", "video/mp4")},
+            files={"file": ("../../evil.mp4", FAKE_MP4, "video/mp4")},
         )
     assert response.status_code == 200
     # Stored under the project folder with a sanitized canonical name.

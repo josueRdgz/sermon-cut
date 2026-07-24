@@ -9,9 +9,9 @@ from sqlalchemy.orm import Session
 
 from app.db.session import get_db
 from app.schemas.cut_suggestions import (
-    CutSuggestRequest,
     CutSuggestionActionResponse,
     CutSuggestionsReport,
+    CutSuggestRequest,
 )
 from app.services.cut_suggestions import service as cut_service
 

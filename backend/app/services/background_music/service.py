@@ -210,7 +210,10 @@ async def attach_music(
         if previous != destination and previous.is_file():
             previous.unlink(missing_ok=True)
 
-    await storage.save_upload_stream(destination, chunks, max_bytes=settings.max_upload_bytes)
+    await storage.save_upload_stream(
+        destination, chunks, max_bytes=settings.max_music_upload_bytes
+    )
+    storage.assert_file_magic(destination, kind="audio")
 
     row = ensure_row(db, project_id)
     row.music_filename = destination.name
