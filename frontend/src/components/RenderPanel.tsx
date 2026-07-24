@@ -8,24 +8,29 @@ import {
   renderOutputUrl,
   startRender,
 } from '../api/renders';
-import type { AspectRatio } from '../types/reel';
+import type { CoherenceReport } from '../types/coherence';
+import type { AspectRatio, Reel, ReelSegment } from '../types/reel';
 import type { RenderJob, RenderLayout } from '../types/render';
 import { ACTIVE_RENDER_STATUSES } from '../types/render';
 import { formatDuration } from '../utils/format';
+import { CoherencePanel } from './CoherencePanel';
 import { ProgressBar } from './ProgressBar';
 
 interface RenderPanelProps {
   projectId: string;
   reelId: string;
   reelAspectRatio: AspectRatio;
-  segmentCount: number;
+  segments: ReelSegment[];
+  onReelChange: (reel: Reel) => void;
 }
 
 const POLL_INTERVAL_MS = 1500;
 
 const LAYOUT_OPTIONS: { value: RenderLayout; label: string }[] = [
+  { value: 'auto_track', label: 'Seguimiento automático' },
   { value: 'center_crop', label: 'Recorte centrado' },
   { value: 'blurred_background', label: 'Fondo desenfocado' },
+  { value: 'manual', label: 'Posición manual' },
 ];
 
 const ASPECT_OPTIONS: { value: AspectRatio; label: string }[] = [
@@ -60,7 +65,8 @@ export function RenderPanel({
   projectId,
   reelId,
   reelAspectRatio,
-  segmentCount,
+  segments,
+  onReelChange,
 }: RenderPanelProps) {
   const [job, setJob] = useState<RenderJob | null>(null);
   const [aspectRatio, setAspectRatio] = useState<AspectRatio>(reelAspectRatio);
@@ -70,7 +76,9 @@ export function RenderPanel({
   const [showCommand, setShowCommand] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [coherence, setCoherence] = useState<CoherenceReport | null>(null);
   const previousReelRef = useRef<string>(reelId);
+  const segmentCount = segments.length;
 
   useEffect(() => {
     setAspectRatio(reelAspectRatio);
@@ -115,6 +123,14 @@ export function RenderPanel({
   }, [job]);
 
   const handleStart = useCallback(async () => {
+    if (coherence && !coherence.can_render) {
+      setError(
+        coherence.severity === 'blocked'
+          ? 'Corrige los problemas bloqueantes de coherencia antes de renderizar.'
+          : 'Revisa o ignora las advertencias de unión antes de renderizar.',
+      );
+      return;
+    }
     setBusy(true);
     setError(null);
     try {
@@ -130,7 +146,7 @@ export function RenderPanel({
     } finally {
       setBusy(false);
     }
-  }, [projectId, reelId, aspectRatio, layout, normalizeLoudness, burnSubtitles]);
+  }, [projectId, reelId, aspectRatio, layout, normalizeLoudness, burnSubtitles, coherence]);
 
   const handleCancel = useCallback(async () => {
     if (!job) return;
@@ -147,10 +163,18 @@ export function RenderPanel({
   const active = isActive(job);
   const percent = job ? Math.round(job.progress * 100) : 0;
   const stageLabel = job?.stage ? (STAGE_LABELS[job.stage] ?? job.stage) : '—';
-  const canRender = segmentCount > 0;
+  const canRender = segmentCount > 0 && coherence != null && coherence.can_render;
 
   return (
     <div className="render-panel">
+      <CoherencePanel
+        projectId={projectId}
+        reelId={reelId}
+        segments={segments}
+        onReelChange={onReelChange}
+        onReportChange={setCoherence}
+      />
+
       <div className="reel-editor__section-header">
         <h4>Exportar video (MP4 H.264 + AAC)</h4>
         {job && (
@@ -160,11 +184,17 @@ export function RenderPanel({
         )}
       </div>
 
-      {!canRender && (
+      {!canRender && segmentCount === 0 && (
         <p className="muted">Añade al menos un fragmento al Reel para poder exportarlo.</p>
       )}
 
-      {canRender && (
+      {segmentCount > 0 && coherence && !coherence.can_render && (
+        <p className="error">
+          Resuelve o ignora las advertencias de la validación de unión antes del render final.
+        </p>
+      )}
+
+      {segmentCount > 0 && (
         <>
           <div className="transcript-toolbar">
             <label className="field field--inline">
@@ -215,7 +245,7 @@ export function RenderPanel({
             </label>
             <div className="button-stack">
               {!active && (
-                <button type="button" onClick={() => void handleStart()} disabled={busy}>
+                <button type="button" onClick={() => void handleStart()} disabled={busy || !canRender}>
                   {busy ? 'Iniciando…' : 'Renderizar'}
                 </button>
               )}

@@ -16,6 +16,8 @@ class RenderLayout(enum.StrEnum):
 
     center_crop = "center_crop"
     blurred_background = "blurred_background"
+    auto_track = "auto_track"
+    manual = "manual"
 
 
 class RenderStartRequest(BaseModel):

@@ -8,6 +8,12 @@ from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
+from app.schemas.coherence import (
+    CoherenceDismissRequest,
+    CoherenceExpandContextRequest,
+    CoherenceReport,
+    CoherenceValidateRequest,
+)
 from app.schemas.reel import (
     ReelCreate,
     ReelFromTranscriptRequest,
@@ -18,6 +24,7 @@ from app.schemas.reel import (
     ReelSegmentUpdate,
     ReelUpdate,
 )
+from app.services.coherence import service as coherence_service
 from app.services.reels import service as reels_service
 
 router = APIRouter(tags=["reels"])
@@ -140,4 +147,47 @@ def reorder_segments(
     db: Session = Depends(get_db),
 ) -> ReelResponse:
     reel = reels_service.reorder_segments(db, project_id, reel_id, payload)
+    return reels_service.to_response(reel)
+
+
+@router.post(
+    "/projects/{project_id}/reels/{reel_id}/validate",
+    response_model=CoherenceReport,
+)
+def validate_reel_coherence(
+    project_id: UUID,
+    reel_id: UUID,
+    payload: CoherenceValidateRequest = CoherenceValidateRequest(),
+    db: Session = Depends(get_db),
+) -> CoherenceReport:
+    """Detect incoherent or misleading joins before the final render."""
+    return coherence_service.validate_reel(db, project_id, reel_id, payload)
+
+
+@router.post(
+    "/projects/{project_id}/reels/{reel_id}/validate/dismiss",
+    response_model=CoherenceReport,
+)
+def dismiss_coherence_warning(
+    project_id: UUID,
+    reel_id: UUID,
+    payload: CoherenceDismissRequest,
+    db: Session = Depends(get_db),
+) -> CoherenceReport:
+    """Ignore a non-blocking coherence warning for this Reel."""
+    return coherence_service.dismiss_warning(db, project_id, reel_id, payload)
+
+
+@router.post(
+    "/projects/{project_id}/reels/{reel_id}/validate/expand-context",
+    response_model=ReelResponse,
+)
+def expand_coherence_context(
+    project_id: UUID,
+    reel_id: UUID,
+    payload: CoherenceExpandContextRequest,
+    db: Session = Depends(get_db),
+) -> ReelResponse:
+    """Widen a fragment by neighbouring seconds to restore cut context."""
+    reel = coherence_service.expand_segment_context(db, project_id, reel_id, payload)
     return reels_service.to_response(reel)

@@ -17,9 +17,16 @@ import type { AspectRatio, Reel, ReelSegment, TransitionType } from '../types/re
 import type { TranscriptSegment } from '../types/transcript';
 import { formatDuration, formatTimecode } from '../utils/format';
 import { ConfirmDialog } from './ConfirmDialog';
+import { CutSuggestionMarkers, CutSuggestionsPanel } from './CutSuggestionsPanel';
 import { EndCardPanel } from './EndCardPanel';
+import { FramingPanel } from './FramingPanel';
 import { RenderPanel } from './RenderPanel';
 import { SubtitlePanel } from './SubtitlePanel';
+import type { CutSuggestion, CutSuggestionsReport } from '../types/cutSuggestions';
+import {
+  acceptCutSuggestion,
+  rejectCutSuggestion,
+} from '../api/cutSuggestions';
 
 interface ReelEditorProps {
   projectId: string;
@@ -67,6 +74,8 @@ export function ReelEditor({ projectId, hasVideo, hasCover, videoDuration }: Ree
   const [previewing, setPreviewing] = useState(false);
   const [previewIndex, setPreviewIndex] = useState(0);
   const [sourceTime, setSourceTime] = useState<number | null>(null);
+  const [cutReport, setCutReport] = useState<CutSuggestionsReport | null>(null);
+  const [cutBusy, setCutBusy] = useState(false);
   const previewIndexRef = useRef(0);
   const previewingRef = useRef(false);
 
@@ -114,6 +123,35 @@ export function ReelEditor({ projectId, hasVideo, hasCover, videoDuration }: Ree
       return next;
     });
     setActiveReelId(updated.id);
+  }
+
+  async function handleAcceptCut(suggestion: CutSuggestion) {
+    if (!activeReel) return;
+    setCutBusy(true);
+    setError(null);
+    try {
+      const result = await acceptCutSuggestion(projectId, activeReel.id, suggestion.id);
+      replaceReel(result.reel);
+      setCutReport(result.report);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'No se pudo aceptar el corte');
+    } finally {
+      setCutBusy(false);
+    }
+  }
+
+  async function handleRejectCut(suggestion: CutSuggestion) {
+    if (!activeReel) return;
+    setCutBusy(true);
+    setError(null);
+    try {
+      const result = await rejectCutSuggestion(projectId, activeReel.id, suggestion.id);
+      setCutReport(result.report);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'No se pudo rechazar el corte');
+    } finally {
+      setCutBusy(false);
+    }
   }
 
   function toggleTranscript(id: string) {
@@ -595,6 +633,21 @@ export function ReelEditor({ projectId, hasVideo, hasCover, videoDuration }: Ree
             onReelUpdated={replaceReel}
           />
 
+          <FramingPanel
+            projectId={projectId}
+            reel={activeReel}
+            sourceTime={sourceTime}
+            onReelChange={replaceReel}
+          />
+
+          <CutSuggestionsPanel
+            projectId={projectId}
+            reelId={activeReel.id}
+            segmentIds={orderedSegments.map((segment) => segment.id)}
+            onReelChange={replaceReel}
+            onReportChange={setCutReport}
+          />
+
           <ol className="reel-timeline">
             {orderedSegments.map((segment, index) => {
               const next = orderedSegments[index + 1];
@@ -647,6 +700,14 @@ export function ReelEditor({ projectId, hasVideo, hasCover, videoDuration }: Ree
                   {segment.transcript_text && (
                     <p className="reel-timeline__text">{segment.transcript_text}</p>
                   )}
+
+                  <CutSuggestionMarkers
+                    suggestions={cutReport?.suggestions ?? []}
+                    segmentUuid={segment.id}
+                    busy={cutBusy || busy}
+                    onAccept={(suggestion) => void handleAcceptCut(suggestion)}
+                    onReject={(suggestion) => void handleRejectCut(suggestion)}
+                  />
 
                   {isEditing && (
                     <div className="reel-segment-edit">
@@ -775,7 +836,8 @@ export function ReelEditor({ projectId, hasVideo, hasCover, videoDuration }: Ree
             projectId={projectId}
             reelId={activeReel.id}
             reelAspectRatio={activeReel.aspect_ratio}
-            segmentCount={activeReel.segments.length}
+            segments={activeReel.segments}
+            onReelChange={replaceReel}
           />
         </>
       )}

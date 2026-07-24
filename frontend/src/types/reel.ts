@@ -5,6 +5,7 @@ export type SubtitleStyle =
 export type SubtitleGranularity = 'auto' | 'segment' | 'phrase' | 'word';
 export type SubtitlePosition = 'bottom' | 'center' | 'top';
 export type ReelStatus = 'draft' | 'ready' | 'rendering' | 'completed' | 'failed';
+export type FramingMode = 'auto_track' | 'center_crop' | 'blurred_background' | 'manual';
 
 export interface ReelSegment {
   id: string;
@@ -16,6 +17,9 @@ export interface ReelSegment {
   transition_type: TransitionType;
   transition_duration_ms: number;
   duration_seconds: number;
+  manual_crop_x?: number | null;
+  manual_crop_y?: number | null;
+  manual_crop_zoom?: number | null;
 }
 
 export interface Reel {
@@ -37,11 +41,13 @@ export interface Reel {
   subtitle_bible_reference: string | null;
   aspect_ratio: AspectRatio;
   status: ReelStatus;
+  framing_mode?: FramingMode | string;
   created_at: string;
   updated_at: string;
   segments: ReelSegment[];
   content_duration_seconds: number;
   total_duration_seconds: number;
+  coherence_dismissals?: { code: string; segment_id: number; segment_uuid?: string | null }[];
 }
 
 export interface ReelListResponse {

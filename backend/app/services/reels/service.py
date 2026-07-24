@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from datetime import UTC, datetime
 from uuid import UUID
 
@@ -60,7 +61,21 @@ def _segment_response(segment: ReelSegment) -> ReelSegmentResponse:
         transition_type=segment.transition_type,
         transition_duration_ms=segment.transition_duration_ms,
         duration_seconds=segment.source_end_seconds - segment.source_start_seconds,
+        manual_crop_x=getattr(segment, "manual_crop_x", None),
+        manual_crop_y=getattr(segment, "manual_crop_y", None),
+        manual_crop_zoom=getattr(segment, "manual_crop_zoom", None),
     )
+
+
+def _coherence_dismissals(reel: Reel) -> list[dict]:
+    raw = getattr(reel, "coherence_dismissals_json", None)
+    if not raw:
+        return []
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError:
+        return []
+    return data if isinstance(data, list) else []
 
 
 def to_response(reel: Reel) -> ReelResponse:
@@ -85,11 +100,13 @@ def to_response(reel: Reel) -> ReelResponse:
         subtitle_bible_reference=reel.subtitle_bible_reference,
         aspect_ratio=reel.aspect_ratio,
         status=reel.status,
+        framing_mode=getattr(reel, "framing_mode", None) or "center_crop",
         created_at=reel.created_at,
         updated_at=reel.updated_at,
         segments=[_segment_response(s) for s in ordered],
         content_duration_seconds=content_duration_seconds(timings),
         total_duration_seconds=total_duration_seconds(timings),
+        coherence_dismissals=_coherence_dismissals(reel),
     )
 
 

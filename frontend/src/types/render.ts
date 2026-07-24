@@ -1,7 +1,7 @@
 export type RenderJobStatus =
   'queued' | 'running' | 'cancelling' | 'cancelled' | 'completed' | 'failed';
 
-export type RenderLayout = 'center_crop' | 'blurred_background';
+export type RenderLayout = 'center_crop' | 'blurred_background' | 'auto_track' | 'manual';
 
 export interface RenderJob {
   id: string;

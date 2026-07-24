@@ -153,6 +153,10 @@ class RenderManager:
                 code="reel_empty",
             )
 
+        from app.services.coherence.service import assert_render_allowed
+
+        assert_render_allowed(db, project_id, reel_id)
+
         active = db.scalars(
             select(RenderJob).where(
                 RenderJob.reel_id == reel_id,
@@ -323,6 +327,50 @@ class RenderManager:
                 )
                 for item in sorted(reel.segments, key=lambda s: s.order)
             ]
+
+            # Optional vertical reframing from subject tracking / manual boxes.
+            try:
+                from app.services.tracking.crop_ffmpeg import build_piecewise_expr
+                from app.services.tracking.geometry import decimate_keyframes
+                from app.services.tracking.service import build_crop_plans_for_reel
+                from app.services.tracking.types import FramingMode
+
+                layout_for_plans = job.layout
+                plans = build_crop_plans_for_reel(
+                    session, job.project_id, job.reel_id, layout_override=layout_for_plans
+                )
+                enriched: list[RenderSegmentSpec] = []
+                for spec, plan in zip(segments, plans, strict=False):
+                    override = plan.mode.value
+                    crop_x = plan.static_x
+                    crop_y = plan.static_y
+                    x_expr = y_expr = None
+                    if plan.mode == FramingMode.auto_track and plan.keyframes:
+                        keys = decimate_keyframes(list(plan.keyframes))
+                        x_expr = build_piecewise_expr(keys, axis="x")
+                        y_expr = build_piecewise_expr(keys, axis="y")
+                        crop_x = crop_y = None
+                    if plan.unstable or plan.mode == FramingMode.blurred_background:
+                        override = FramingMode.blurred_background.value
+                        x_expr = y_expr = None
+                        crop_x = crop_y = None
+                    enriched.append(
+                        RenderSegmentSpec(
+                            start=spec.start,
+                            end=spec.end,
+                            transition_type=spec.transition_type,
+                            transition_duration_ms=spec.transition_duration_ms,
+                            layout_override=override,
+                            crop_x=crop_x,
+                            crop_y=crop_y,
+                            crop_x_expr=x_expr,
+                            crop_y_expr=y_expr,
+                        )
+                    )
+                segments = enriched
+            except Exception as exc:  # noqa: BLE001 — tracking must never block render
+                logger = __import__("logging").getLogger(__name__)
+                logger.warning("Framing plans unavailable, using layout=%s: %s", job.layout, exc)
 
             renders_dir = project_renders_dir(job.project_id)
             temp_dir = project_render_temp_dir(job.project_id)

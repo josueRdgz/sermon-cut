@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 
 import { deleteProject, getProject } from '../api/projects';
+import { AnalysisPanel } from '../components/AnalysisPanel';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { ReelEditor } from '../components/ReelEditor';
 import { StatusRow } from '../components/StatusRow';
@@ -116,6 +117,8 @@ export function ProjectDetailPage() {
       </section>
 
       <TranscriptEditor projectId={project.id} hasVideo={project.has_video} />
+
+      <AnalysisPanel projectId={project.id} />
 
       <ReelEditor
         projectId={project.id}

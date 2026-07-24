@@ -37,6 +37,9 @@ class ReelSegmentUpdate(BaseModel):
     transcript_text: str | None = None
     transition_type: TransitionType | None = None
     transition_duration_ms: int | None = Field(default=None, ge=0, le=5000)
+    manual_crop_x: float | None = Field(default=None, ge=0.0, le=1.0)
+    manual_crop_y: float | None = Field(default=None, ge=0.0, le=1.0)
+    manual_crop_zoom: float | None = Field(default=None, ge=0.8, le=2.0)
 
 
 class ReelSegmentReorderItem(BaseModel):
@@ -93,6 +96,7 @@ class ReelUpdate(BaseModel):
     subtitle_bible_reference: str | None = Field(default=None, max_length=200)
     aspect_ratio: AspectRatio | None = None
     status: ReelStatus | None = None
+    framing_mode: str | None = None
 
 
 class ReelSegmentResponse(BaseModel):
@@ -107,6 +111,9 @@ class ReelSegmentResponse(BaseModel):
     transition_type: TransitionType
     transition_duration_ms: int
     duration_seconds: float
+    manual_crop_x: float | None = None
+    manual_crop_y: float | None = None
+    manual_crop_zoom: float | None = None
 
 
 class ReelResponse(BaseModel):
@@ -132,6 +139,7 @@ class ReelResponse(BaseModel):
     subtitle_bible_reference: str | None
     aspect_ratio: AspectRatio
     status: ReelStatus
+    framing_mode: str = "center_crop"
     created_at: datetime
     updated_at: datetime
     segments: list[ReelSegmentResponse]
@@ -139,6 +147,8 @@ class ReelResponse(BaseModel):
     content_duration_seconds: float
     # Assembled output duration (matches FFmpeg / subtitle timeline).
     total_duration_seconds: float
+    # Ignored coherence warnings (code + segment), persisted on the Reel.
+    coherence_dismissals: list[dict] = Field(default_factory=list)
 
 
 class ReelListResponse(BaseModel):

@@ -3,6 +3,12 @@
 Import every model here so Alembic autogenerate and ``Base.metadata`` stay in sync.
 """
 
+from app.models.analysis import (
+    AnalysisCandidate,
+    AnalysisCandidateStatus,
+    AnalysisJob,
+    AnalysisJobStatus,
+)
 from app.models.end_card import (
     EndCardAudioMode,
     EndCardLayout,
@@ -30,6 +36,10 @@ from app.models.transcript import (
 from app.models.transcription_job import TranscriptionJob, TranscriptionJobStatus
 
 __all__ = [
+    "AnalysisCandidate",
+    "AnalysisCandidateStatus",
+    "AnalysisJob",
+    "AnalysisJobStatus",
     "AspectRatio",
     "EndCardAudioMode",
     "EndCardLayout",

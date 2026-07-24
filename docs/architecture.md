@@ -4,8 +4,10 @@ Aplicación **local para macOS** y de **código abierto** para convertir videos 
 predicaciones en Shorts / Reels verticales con subtítulos y una pantalla final.
 
 > Gestión local de proyectos, transcripciones (importadas o generadas con
-> faster-whisper) y Reels formados por fragmentos no consecutivos. Todavía no
-> hay Gemini, generación automática de clips ni renderizado final a archivo.
+> faster-whisper), Reels formados por fragmentos no consecutivos, render FFmpeg
+> con subtítulos ASS y pantalla final, y **análisis editorial opcional**
+> (Gemini o mock). Los candidatos de IA nunca se renderizan solos: el usuario
+> debe aceptarlos.
 
 ## Visión general
 
@@ -33,13 +35,15 @@ Organización por capas para separar responsabilidades:
   estructuradas (`exceptions.py`).
 - **`app/db/`** — `Base` declarativa (SQLAlchemy 2), `engine` y `SessionLocal`.
 - **`app/models/`** — modelos ORM (`Project`, `Transcript*`, `TranscriptionJob`,
-  `Reel` / `ReelSegment`, `RenderJob`).
+  `AnalysisJob` / `AnalysisCandidate`, `Reel` / `ReelSegment`, `RenderJob`,
+  `EndCardSettings`).
 - **`app/schemas/`** — contratos Pydantic 2.
 - **`app/services/`** — lógica: FFmpeg/FFprobe, storage, proyectos, parsers de
   transcripción (SRT/VTT/JSON/TXT), validación, exportación, `whisper/`
   (dispositivo, extracción de audio, motor y administrador de trabajos),
-  `reels/` (CRUD, validación de ventanas no contiguas, duración) y `render/`
-  (generador de argumentos FFmpeg, ejecución y administrador de trabajos).
+  `ai/` (proveedores Gemini/mock), `analysis/` (chunking, validación, jobs),
+  `reels/` (CRUD y validación de ventanas no contiguas), `subtitles/`,
+  `endcard/`, `render/` (argumentos FFmpeg, ejecución y administrador).
 - **`app/workers/`** — trabajos en segundo plano (futuros). Sin Celery ni Redis.
 
 ### Transcripción local (faster-whisper)
@@ -71,11 +75,55 @@ Organización por capas para separar responsabilidades:
   intencionales y se muestran en la UI.
 - Validación en `services/reels/validate.py`: tiempos, duración mínima, límites
   del video, orden denso `0..n-1`, reglas de transición.
+- **Validación de coherencia de unión** en `services/coherence/`: reglas
+  deterministas (corte de palabra, conectores sueltos, finales incompletos,
+  pronombres sin referente, cambio abrupto de tema, referencias huérfanas,
+  pausas artificiales) más sondas opcionales de volumen/silencio/plano vía
+  FFmpeg y una revisión opcional con Gemini del guion unido (JSON, sin
+  reescritura). Severidades: `valid` / `warning` / `blocked`. Las advertencias
+  se pueden ignorar (`coherence_dismissals_json`); los bloqueos no. El render
+  se demora en UI y en servidor si quedan bloqueos activos.
 - Duración total = suma de ventanas + transiciones entre fragmentos.
 - API anidada bajo `/api/projects/{id}/reels`; creación auxiliar
-  `/reels/from-transcript`.
+  `/reels/from-transcript`; validación
+  `POST …/reels/{reelId}/validate` (+ dismiss / expand-context).
 - Frontend: `ReelEditor` con selección de transcripción, fórmula
-  `A + B + C`, saltos visibles y vista previa lógica.
+  `A + B + C`, saltos visibles, `CoherencePanel` antes del render y vista
+  previa lógica.
+- **Cortes técnicos opcionales** (`services/cut_suggestions/`):
+  `silencedetect`, pausas largas, reducción de silencios con margen natural,
+  muletillas/repeticiones/falsos comienzos desde la transcripción (sin borrar
+  usos con sentido real). Intensidades `conservative` (default) /
+  `balanced` / `aggressive`. Nada se aplica sin aceptar; al aceptar se puede
+  partir el fragmento con `short_crossfade` y se refresca `transcript_text`
+  para que los subtítulos se recalculen. UI: `CutSuggestionsPanel` + marcadores
+  en la línea de tiempo.
+- **Encuadre vertical opcional** (`services/tracking/`): interfaz
+  `SubjectTracker` + OpenCV local (MediaPipe opcional, no recomendado por
+  peso). Muestrea fotogramas a baja frecuencia vía FFmpeg stills, interpola,
+  suaviza y limita velocidad/aceleración; zona segura para subtítulos. Modos:
+  `auto_track`, `center_crop`, `blurred_background`, `manual` (cuadro por
+  fragmento). Caché en `storage/projects/{id}/tracking/`. El MP4 final lo
+  construye FFmpeg con `crop` (expresiones); si el tracking es inestable se
+  degrada a fondo desenfocado. UI: `FramingPanel` con vista previa.
+
+### Análisis editorial (IA opcional)
+
+- `services/ai/` define una interfaz `AIProvider` con dos implementaciones:
+  `GeminiProvider` (SDK oficial `google-genai`, JSON estructurado, timeout y
+  reintentos acotados) y `MockAIProvider` (determinista, sin red).
+- `resolve_provider()` elige Gemini solo si hay `SERMON_CUT_GEMINI_API_KEY`; si
+  no, usa el mock. La app permanece usable sin Gemini.
+- `services/analysis/chunking.py` parte transcripciones largas conservando
+  tiempos absolutos; `manager.py` analiza cada bloque y llama a
+  `merge_candidates` como etapa final.
+- `services/analysis/validate.py` es la puerta: exige evidencia de `exact_text`
+  en el intervalo, ajusta a límites de palabra y rechaza intervalos ilegales o
+  solapes. Las advertencias de baja confianza se muestran al usuario.
+- Modelos `AnalysisJob` / `AnalysisCandidate`: los candidatos nacen en
+  `pending`. Aceptar crea un Reel vía `reels_service.create_reel`; **nunca**
+  dispara un render.
+- Frontend: `AnalysisPanel` (preferencias, polling, aceptar/descartar).
 
 ### Subtítulos (ASS)
 

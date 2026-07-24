@@ -10,8 +10,9 @@ consecutivos y exportar un video vertical con subtítulos y una pantalla final.
 > faster-whisper** + **Reels compuestos por varios fragmentos no consecutivos**
 > + **render real a MP4 con FFmpeg** + **subtítulos ASS incrustados** (plantillas
 > y quemado con libass) + **pantalla final obligatoria** (3 diseños generados con
-> Pillow).
-> **Todavía no:** Gemini ni generación automática de clips.
+> Pillow) + **análisis editorial opcional** (Gemini o mock).
+> **Todavía no:** generación automática de clips sin revisión humana ni Gemini
+> obligatorio.
 
 ## Requisitos (macOS)
 
@@ -117,6 +118,8 @@ vas a transcribir localmente:
 cd backend
 source .venv/bin/activate
 pip install -e ".[whisper]"
+# Opcional — encuadre vertical con OpenCV:
+pip install -e ".[tracking]"
 ```
 
 ### Dispositivo (CUDA / CPU) y Apple Silicon
@@ -203,6 +206,18 @@ Fixtures de ejemplo: `backend/tests/fixtures/transcripts/`.
 | POST | `/api/projects/{id}/reels/from-transcript` | Crear/añadir desde segmentos de transcripción |
 | POST/PATCH/DELETE | `/api/projects/{id}/reels/{reelId}/segments`… | Fragmentos del Reel |
 | PUT | `/api/projects/{id}/reels/{reelId}/segments/order` | Reordenar fragmentos |
+| POST | `/api/projects/{id}/reels/{reelId}/validate` | Validar coherencia de la unión |
+| POST | `/api/projects/{id}/reels/{reelId}/validate/dismiss` | Ignorar una advertencia |
+| POST | `/api/projects/{id}/reels/{reelId}/validate/expand-context` | Ampliar un fragmento con contexto |
+| POST | `/api/projects/{id}/reels/{reelId}/cut-suggestions` | Generar sugerencias de corte técnico |
+| GET | `/api/projects/{id}/reels/{reelId}/cut-suggestions` | Listar sugerencias pendientes/aceptadas/rechazadas |
+| POST | `/api/projects/{id}/reels/{reelId}/cut-suggestions/{sid}/accept` | Aceptar una sugerencia (única vía que muta) |
+| POST | `/api/projects/{id}/reels/{reelId}/cut-suggestions/{sid}/reject` | Rechazar una sugerencia |
+| GET/PUT | `/api/projects/{id}/reels/{reelId}/framing` | Modo de encuadre vertical |
+| POST/DELETE | `/api/projects/{id}/reels/{reelId}/framing/track` | Calcular o borrar tracking (caché) |
+| PUT | `/api/projects/{id}/reels/{reelId}/segments/{sid}/manual-crop` | Cuadro manual por fragmento |
+| GET | `/api/projects/{id}/reels/{reelId}/framing/preview` | Metadatos de vista previa del crop |
+| GET | `/api/framing/mediapipe` | Compatibilidad MediaPipe (opcional) |
 | GET | `/api/subtitle-templates` | Plantillas ASS disponibles |
 | GET | `/api/projects/{id}/reels/{reelId}/subtitle-preview` | Cues remapeados (vista previa) |
 | GET | `/api/end-card/layouts` | Diseños de pantalla final |
@@ -211,6 +226,13 @@ Fixtures de ejemplo: `backend/tests/fixtures/transcripts/`.
 | POST | `/api/projects/{id}/end-card/logo` | Subir logo opcional |
 | POST | `/api/projects/{id}/end-card/music` | Subir música local del usuario |
 | GET | `/api/projects/{id}/end-card/preview` | PNG de la pantalla final (vista previa) |
+| GET | `/api/analysis/provider` | Estado del proveedor (Gemini opcional / mock) |
+| POST | `/api/projects/{id}/analysis` | Iniciar análisis editorial (202) |
+| GET | `/api/projects/{id}/analysis` | Último trabajo de análisis (polling) |
+| POST | `/api/analysis-jobs/{jobId}/cancel` | Cancelar análisis |
+| GET | `/api/projects/{id}/analysis/candidates` | Candidatos pendientes/aceptados/descartados |
+| POST | `/api/projects/{id}/analysis/candidates/{cid}/accept` | Aceptar → crea Reel (sin render) |
+| POST | `/api/projects/{id}/analysis/candidates/{cid}/reject` | Descartar candidato |
 | POST | `/api/projects/{id}/reels/{reelId}/render` | Iniciar render con FFmpeg (202) |
 | GET | `/api/projects/{id}/reels/{reelId}/render` | Último render (para polling) |
 | GET | `/api/projects/{id}/reels/{reelId}/renders` | Historial de renders del Reel |
@@ -241,6 +263,22 @@ ventanas sobre el video original, por ejemplo:
 - Transiciones entre fragmentos: `hard_cut`, `short_crossfade`, `dip_to_black`.
 - Validaciones: inicio &lt; fin, duración mínima (`SERMON_CUT_MIN_REEL_SEGMENT_SECONDS`),
   dentro de la duración del video, orden `0..n-1` denso.
+- **Coherencia de unión** (antes del render): reglas deterministas + sondas de
+  audio/plano + revisión opcional con Gemini del guion unido (sin reescribir).
+  Resultados `valid` / `warning` / `blocked`. Cada hallazgo trae `code`,
+  `message`, `segment_id` y recomendación. Puedes ignorar advertencias, editar
+  tiempos, añadir contexto o eliminar el fragmento; los bloqueos no se ignoran.
+- **Cortes técnicos opcionales**: análisis de silencios (`silencedetect`),
+  pausas largas y muletillas/repeticiones/falsos comienzos. Intensidad por
+  defecto `conservative`. Las sugerencias aparecen en la línea de tiempo; solo
+  se aplican al **aceptar** (nunca solas). Al aceptar se mantiene margen de
+  respiración, se usa un crossfade corto si hay división, y los subtítulos se
+  recalculan desde las nuevas ventanas.
+- **Encuadre vertical opcional**: seguimiento de rostro/persona (OpenCV;
+  MediaPipe evaluado como opcional). Modos: seguimiento automático, recorte
+  central, fondo desenfocado, posición manual por fragmento. Vista previa del
+  crop; caché borrable/recalculable. FFmpeg aplica el `crop` final (OpenCV no
+  renderiza el MP4). Tracking inestable → degradación a fondo desenfocado.
 - Duración final = suma de ventanas + ms de transición entre fragmentos (la del último se ignora).
 - La UI muestra cada **salto** en la línea de tiempo y una vista previa lógica
   (reproduce, salta al siguiente, se detiene).
@@ -388,6 +426,52 @@ global o volver a heredarla.
 **después** de quemar los subtítulos, así que los tiempos de los cues siguen
 siendo relativos al contenido principal.
 
+## Análisis editorial opcional (Gemini)
+
+La aplicación **sigue funcionando sin Gemini**. Si no hay clave, el análisis usa
+un `MockAIProvider` determinista (útil para tests y demos offline).
+
+```bash
+cd backend
+source .venv/bin/activate
+pip install -e ".[gemini]"   # SDK oficial google-genai
+# En .env (nunca en Git):
+# SERMON_CUT_GEMINI_API_KEY=...
+# SERMON_CUT_AI_PROVIDER=auto   # auto | mock | gemini
+```
+
+**Arquitectura** (`backend/app/services/ai/`):
+
+| Archivo | Rol |
+| ------- | --- |
+| `base.py` | Interfaz abstracta `AIProvider` |
+| `schemas.py` | Request/response Pydantic (`clips` con segmentos no consecutivos) |
+| `prompts.py` | Prompt editorial reformado + merge global |
+| `gemini_provider.py` | SDK `google-genai`, JSON estructurado, timeout y reintentos acotados |
+| `mock_provider.py` | Proveedor determinista para tests |
+
+El proveedor recibe metadatos del sermón, transcripción sincronizada, duración,
+preferencias (máx. Reels, duración min/máx, orientación doctrinal, instrucciones
+adicionales) y devuelve JSON validado por Pydantic.
+
+**Pipeline:**
+
+1. Dividir transcripciones largas en bloques conservando tiempos absolutos.
+2. Analizar cada bloque.
+3. Etapa final `merge_candidates` que combina y ordena candidatos globales.
+4. Validación local obligatoria:
+   - `exact_text` debe existir aproximadamente en el intervalo;
+   - tiempos ajustados a límites reales de palabras;
+   - rechazo de intervalos fuera del video, invertidos, solapes inválidos o sin
+     evidencia;
+   - advertencias si la confianza es baja.
+5. Persistir candidatos en `pending`. **Nunca se renderiza automáticamente.**
+6. El usuario acepta (crea un Reel en borrador) o descarta cada candidato.
+
+La clave de API solo se lee de `SERMON_CUT_GEMINI_API_KEY` (entorno / `.env`
+local). Los reintentos se limitan a errores transitorios (máx. 3) con backoff;
+si la API expone métricas de tokens, se registran en el trabajo.
+
 ## Configuración
 
 - `SERMON_CUT_MAX_UPLOAD_BYTES` — límite por archivo de media (default 4 GiB).
@@ -396,6 +480,11 @@ siendo relativos al contenido principal.
 - `SERMON_CUT_WHISPER_COMPUTE_TYPE` — `auto|int8|float16|…` (default `auto`).
 - `SERMON_CUT_KEEP_TEMP_AUDIO` — conservar el WAV temporal (default `false`).
 - `SERMON_CUT_MIN_REEL_SEGMENT_SECONDS` — duración mínima de un fragmento (default `0.1`).
+- `SERMON_CUT_AI_PROVIDER` — `auto|mock|gemini` (default `auto`).
+- `SERMON_CUT_GEMINI_API_KEY` — clave local; nunca en el repositorio.
+- `SERMON_CUT_GEMINI_MODEL` — modelo Gemini (default `gemini-2.5-flash`).
+- `SERMON_CUT_GEMINI_TIMEOUT_SECONDS` / `SERMON_CUT_GEMINI_MAX_ATTEMPTS`.
+- `SERMON_CUT_AI_CHUNK_CHAR_LIMIT` — presupuesto de caracteres por bloque.
 
 ## Calidad
 
@@ -418,6 +507,9 @@ con «…»), el recorte de la duración a 3–8 s y el cableado de la pantalla 
 el grafo FFmpeg, incluida la degradación de los modos de audio.
 `test_end_card_api.py` cubre la configuración global vs. por proyecto, las
 subidas de logo/música y la vista previa PNG.
+`test_analysis.py` / `test_analysis_api.py` cubren el mock determinista, el
+ajuste de tiempos, el rechazo de texto inventado y el flujo aceptar/descartar
+sin render automático.
 
 ## Diseño
 

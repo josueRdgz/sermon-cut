@@ -121,6 +121,15 @@ class Reel(Base):
         default=ReelStatus.draft,
     )
 
+    # JSON list of ignored coherence warnings: [{code, segment_id, segment_uuid?}].
+    coherence_dismissals_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Last generated technical cut suggestions (pending / accepted / rejected).
+    cut_suggestions_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Vertical framing mode for renders: center_crop | blurred_background | auto_track | manual.
+    framing_mode: Mapped[str] = mapped_column(
+        String(32), nullable=False, default="center_crop"
+    )
+
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=_utc_now
     )
@@ -165,5 +174,10 @@ class ReelSegment(Base):
         default=TransitionType.hard_cut,
     )
     transition_duration_ms: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
+    # Optional manual crop (normalized subject center 0–1) for framing_mode=manual.
+    manual_crop_x: Mapped[float | None] = mapped_column(Float, nullable=True)
+    manual_crop_y: Mapped[float | None] = mapped_column(Float, nullable=True)
+    manual_crop_zoom: Mapped[float | None] = mapped_column(Float, nullable=True)
 
     reel: Mapped[Reel] = relationship(back_populates="segments")

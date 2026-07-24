@@ -53,6 +53,19 @@ class Settings(BaseSettings):
     # punchy cuts remain possible while accidental zero-length clips are rejected.
     min_reel_segment_seconds: float = 0.1
 
+    # ---- Optional AI analysis (Gemini) ----
+    # "auto" uses Gemini when SERMON_CUT_GEMINI_API_KEY is set, else the mock.
+    # "mock" always uses the deterministic offline provider.
+    # "gemini" requires a key and the google-genai extra.
+    ai_provider: str = "auto"
+    # API key: environment / local .env only — never commit real keys.
+    gemini_api_key: str | None = None
+    gemini_model: str = "gemini-2.5-flash"
+    gemini_timeout_seconds: float = 90.0
+    gemini_max_attempts: int = 3
+    # Approximate character budget per chunk before calling the model.
+    ai_chunk_char_limit: int = 48_000
+
 
 @lru_cache
 def get_settings() -> Settings:

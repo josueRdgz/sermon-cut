@@ -33,7 +33,14 @@ CANVAS_SIZES: dict[str, tuple[int, int]] = {
 
 LAYOUT_CENTER_CROP = "center_crop"
 LAYOUT_BLURRED_BACKGROUND = "blurred_background"
-LAYOUTS: tuple[str, ...] = (LAYOUT_CENTER_CROP, LAYOUT_BLURRED_BACKGROUND)
+LAYOUT_AUTO_TRACK = "auto_track"
+LAYOUT_MANUAL = "manual"
+LAYOUTS: tuple[str, ...] = (
+    LAYOUT_CENTER_CROP,
+    LAYOUT_BLURRED_BACKGROUND,
+    LAYOUT_AUTO_TRACK,
+    LAYOUT_MANUAL,
+)
 
 # xfade transition name per domain transition type.
 _XFADE_TRANSITIONS: dict[str, str] = {
@@ -60,6 +67,12 @@ class RenderSegmentSpec:
     end: float
     transition_type: str = "hard_cut"
     transition_duration_ms: int = 0
+    # Optional per-segment framing (from subject tracking / manual crop).
+    layout_override: str | None = None
+    crop_x: float | None = None
+    crop_y: float | None = None
+    crop_x_expr: str | None = None
+    crop_y_expr: str | None = None
 
     @property
     def duration(self) -> float:
@@ -116,11 +129,22 @@ def _fmt(value: float) -> str:
     return f"{value:.6f}".rstrip("0").rstrip(".") or "0"
 
 
-def _video_chain(index: int, *, layout: str, width: int, height: int, fps: float) -> list[str]:
+def _video_chain(
+    index: int,
+    *,
+    layout: str,
+    width: int,
+    height: int,
+    fps: float,
+    segment: RenderSegmentSpec | None = None,
+) -> list[str]:
     """Per-segment video normalization chain, ending in label ``[v{index}]``."""
     common = f"setsar=1,fps={_fmt(fps)},format=yuv420p,setpts=PTS-STARTPTS"
+    effective = layout
+    if segment is not None and segment.layout_override:
+        effective = segment.layout_override
 
-    if layout == LAYOUT_BLURRED_BACKGROUND:
+    if effective == LAYOUT_BLURRED_BACKGROUND:
         return [
             f"[{index}:v]split=2[bgsrc{index}][fgsrc{index}]",
             (
@@ -135,14 +159,32 @@ def _video_chain(index: int, *, layout: str, width: int, height: int, fps: float
             (f"[bg{index}][fg{index}]overlay=(W-w)/2:(H-h)/2:shortest=1,{common}[v{index}]"),
         ]
 
-    # center_crop: scale to cover the canvas, then crop the centre.
+    crop = _crop_filter(width=width, height=height, segment=segment)
     return [
         (
             f"[{index}:v]scale={width}:{height}"
             f":force_original_aspect_ratio=increase,"
-            f"crop={width}:{height},{common}[v{index}]"
+            f"{crop},{common}[v{index}]"
         )
     ]
+
+
+def _crop_filter(
+    *,
+    width: int,
+    height: int,
+    segment: RenderSegmentSpec | None,
+) -> str:
+    """Build a crop filter using static offsets or time expressions from tracking."""
+    if segment is not None and segment.crop_x_expr and segment.crop_y_expr:
+        return (
+            f"crop={width}:{height}"
+            f":'{segment.crop_x_expr}':'{segment.crop_y_expr}'"
+        )
+    if segment is not None and segment.crop_x is not None and segment.crop_y is not None:
+        return f"crop={width}:{height}:{_fmt(segment.crop_x)}:{_fmt(segment.crop_y)}"
+    # Default FFmpeg centre crop.
+    return f"crop={width}:{height}"
 
 
 def _audio_chain(stream: str, index: int, duration: float) -> str:
@@ -403,7 +445,14 @@ def build_render_command(
 
     filters: list[str] = []
     for index, segment in enumerate(segments):
-        filters += _video_chain(index, layout=layout, width=width, height=height, fps=output_fps)
+        filters += _video_chain(
+            index,
+            layout=layout,
+            width=width,
+            height=height,
+            fps=output_fps,
+            segment=segment,
+        )
         audio_stream = f"{index}:a" if has_audio else f"{count + index}:a"
         filters.append(_audio_chain(audio_stream, index, segment.duration))
 
