@@ -1,0 +1,39 @@
+# ---- Python / backend ----
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+env/
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# ---- Node / frontend ----
+node_modules/
+dist/
+coverage/
+*.local
+*.tsbuildinfo
+
+# ---- Databases ----
+*.db
+*.sqlite
+*.sqlite3
+
+# ---- Storage (generated media; keep folder structure only) ----
+storage/projects/*
+storage/temp/*
+storage/exports/*
+!storage/**/.gitkeep
+
+# ---- Environment ----
+.env
+.env.*
+!.env.example
+
+# ---- OS / editor ----
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
