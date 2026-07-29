@@ -101,6 +101,7 @@ def to_response(reel: Reel) -> ReelResponse:
         aspect_ratio=reel.aspect_ratio,
         status=reel.status,
         framing_mode=getattr(reel, "framing_mode", None) or "center_crop",
+        audio_offset_ms=getattr(reel, "audio_offset_ms", 0) or 0,
         created_at=reel.created_at,
         updated_at=reel.updated_at,
         segments=[_segment_response(s) for s in ordered],
@@ -194,6 +195,7 @@ def create_reel(db: Session, project_id: UUID, payload: ReelCreate) -> Reel:
         subtitle_bible_reference=payload.subtitle_bible_reference,
         aspect_ratio=payload.aspect_ratio,
         status=payload.status,
+        audio_offset_ms=payload.audio_offset_ms,
     )
 
     for index, seg in enumerate(payload.segments):

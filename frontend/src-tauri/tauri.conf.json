@@ -39,6 +39,12 @@
     ],
     "category": "Productivity",
     "shortDescription": "Convierte predicaciones en Shorts/Reels locales",
-    "longDescription": "Sermon Cut empaqueta la UI React y arranca FastAPI solo en 127.0.0.1. Usa FFmpeg instalado en el sistema; no incluye binarios FFmpeg en el bundle."
+    "longDescription": "Sermon Cut empaqueta la UI React y arranca FastAPI solo en 127.0.0.1. Usa FFmpeg instalado en el sistema; no incluye binarios FFmpeg en el bundle.",
+    "resources": {
+      "../../backend/dist/sermon-cut-backend/": "backend/"
+    },
+    "macOS": {
+      "minimumSystemVersion": "12.0"
+    }
   }
 }

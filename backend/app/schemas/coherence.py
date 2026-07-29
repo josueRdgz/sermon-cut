@@ -7,6 +7,8 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field
 
+from app.schemas.reel import ReelResponse
+
 
 class CoherenceSeverity(StrEnum):
     valid = "valid"
@@ -51,6 +53,12 @@ class CoherenceExpandContextRequest(BaseModel):
     after_seconds: float = Field(default=1.5, ge=0.0, le=15.0)
 
 
+class CoherenceAutoFixRequest(BaseModel):
+    """Options for the automatic, non-destructive correction pass."""
+
+    include_media_probes: bool = True
+
+
 class CoherenceReport(BaseModel):
     """Aggregate result shown before the final render."""
 
@@ -61,3 +69,12 @@ class CoherenceReport(BaseModel):
     media_probed: bool = False
     can_render: bool = True
     summary: str = ""
+
+
+class CoherenceAutoFixResponse(BaseModel):
+    """Updated Reel plus the validation result after applying corrections."""
+
+    reel: ReelResponse
+    report: CoherenceReport
+    fixes: list[str] = Field(default_factory=list)
+    remaining_issues: int = 0

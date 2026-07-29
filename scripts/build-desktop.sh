@@ -15,7 +15,15 @@ if ! command -v cargo >/dev/null 2>&1; then
   exit 1
 fi
 
-npm run desktop:build
+"$ROOT/scripts/build-backend-sidecar.sh"
+if [[ "$(uname -s)" == "Darwin" ]]; then
+  # Build the DMG first (its script removes the temporary .app), then leave a
+  # standalone .app alongside it for direct local use.
+  npm run desktop:build -- --bundles dmg
+  npm run desktop:build -- --bundles app
+else
+  npm run desktop:build
+fi
 echo
 echo "Artifacts under: frontend/src-tauri/target/release/bundle/"
-echo "The app still expects backend/.venv (or SERMON_CUT_PYTHON) and system FFmpeg."
+echo "The .app contains Python/FastAPI. FFmpeg and FFprobe remain system dependencies."

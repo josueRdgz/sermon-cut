@@ -28,21 +28,21 @@ router = APIRouter(tags=["end-card"])
 _LAYOUTS: tuple[EndCardLayoutInfo, ...] = (
     EndCardLayoutInfo(
         id=EndCardLayout.cover_full,
-        label="Portada completa",
-        description="La portada llena la pantalla con un oscurecimiento para legibilidad.",
+        label="Imagen de fondo",
+        description="La portada ocupa todo el fondo, sin márgenes ni franjas.",
         needs_cover=True,
     ),
     EndCardLayoutInfo(
         id=EndCardLayout.cover_card,
         label="Portada en tarjeta",
-        description="La portada aparece dentro de una tarjeta con esquinas redondeadas.",
+        description="Muestra la imagen completa dentro de una tarjeta con esquinas redondeadas.",
         needs_cover=True,
     ),
     EndCardLayoutInfo(
         id=EndCardLayout.minimal,
         label="Minimalista",
-        description="Fondo limpio con logo y título; no necesita portada.",
-        needs_cover=False,
+        description="Muestra la imagen completa en un formato más compacto y sobrio.",
+        needs_cover=True,
     ),
 )
 

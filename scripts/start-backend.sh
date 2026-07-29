@@ -31,5 +31,13 @@ if ! python -m app.cli migrate; then
   echo "AVISO: migración falló; el servidor arrancará igual (auto_migrate en create_app)."
 fi
 
-echo "Iniciando FastAPI en http://127.0.0.1:8000 …"
-exec uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
+UVICORN_ARGS=(app.main:app --host 127.0.0.1 --port 8000)
+if [[ "${SERMON_CUT_RELOAD:-false}" == "true" ]]; then
+  # Keep .venv outside the watcher. Installing faster-whisper while uvicorn
+  # watches all of backend/ otherwise restarts active in-process jobs.
+  UVICORN_ARGS+=(--reload --reload-dir app)
+  echo "Iniciando FastAPI con autoreload limitado a backend/app/ …"
+else
+  echo "Iniciando FastAPI en http://127.0.0.1:8000 (sin autoreload) …"
+fi
+exec uvicorn "${UVICORN_ARGS[@]}"

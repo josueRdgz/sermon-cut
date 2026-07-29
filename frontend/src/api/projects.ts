@@ -1,5 +1,12 @@
 import type { Project, ProjectCreatePayload, ProjectListResponse } from '../types/project';
-import { API_BASE_URL, apiDelete, apiGet, apiJson, uploadWithProgress } from './client';
+import {
+  API_BASE_URL,
+  apiDelete,
+  apiDeleteJson,
+  apiGet,
+  apiJson,
+  uploadWithProgress,
+} from './client';
 
 export function listProjects(): Promise<ProjectListResponse> {
   return apiGet<ProjectListResponse>('/api/projects');
@@ -19,6 +26,10 @@ export function createProject(payload: ProjectCreatePayload): Promise<Project> {
 
 export function deleteProject(id: string): Promise<void> {
   return apiDelete(`/api/projects/${id}`);
+}
+
+export function deleteProjectVideo(id: string): Promise<Project> {
+  return apiDeleteJson<Project>(`/api/projects/${id}/video`);
 }
 
 export function uploadProjectVideo(

@@ -25,6 +25,7 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     """Reconcile stale jobs on boot; cancel workers on shutdown."""
     from app.db.session import SessionLocal
     from app.services.job_recovery import reconcile_stale_jobs
+    from app.services.storage import prune_empty_project_dirs
 
     db = SessionLocal()
     try:
@@ -33,6 +34,13 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         logger.exception("Failed to reconcile stale jobs on startup")
     finally:
         db.close()
+
+    try:
+        removed = prune_empty_project_dirs()
+        if removed:
+            logger.info("Removed %d empty project storage directories", removed)
+    except Exception:  # noqa: BLE001 — storage cleanup must not block startup
+        logger.exception("Failed to prune empty project directories on startup")
 
     yield
 

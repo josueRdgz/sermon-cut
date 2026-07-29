@@ -9,9 +9,10 @@ from uuid import UUID
 from sqlalchemy.orm import Session
 
 from app.core.exceptions import NotFoundError, ValidationAppError
-from app.models.reel import Reel, ReelSegment
+from app.models.reel import Reel, ReelSegment, TransitionType
 from app.models.transcript import Transcript
 from app.schemas.coherence import (
+    CoherenceAutoFixRequest,
     CoherenceDismissRequest,
     CoherenceExpandContextRequest,
     CoherenceIssue,
@@ -160,6 +161,8 @@ def _build_segment_views(
                 end=segment.source_end_seconds,
                 text=text,
                 gap_before=gap,
+                transition_type=segment.transition_type.value,
+                transition_duration_ms=segment.transition_duration_ms,
             )
         )
         if prev_end is not None and gap > 0.05:
@@ -434,6 +437,189 @@ def expand_segment_context(
             transcript_text=refreshed or segment.transcript_text,
         ),
     )
+
+
+_NEEDS_CONTEXT_BEFORE = {
+    "DANGLING_CONNECTOR",
+    "MISSING_ANTECEDENT",
+    "DANGLING_REFERENCE",
+    "ABRUPT_TOPIC_CHANGE",
+}
+_NEEDS_CONTEXT_AFTER = {
+    "INCOMPLETE_ENDING",
+    "UNANSWERED_QUESTION",
+}
+_NEEDS_SOFT_TRANSITION = {
+    "ARTIFICIAL_PAUSE",
+    "VOLUME_JUMP",
+    "JOIN_NOISE_OR_SILENCE",
+    "FRAMING_JUMP",
+}
+
+
+def _timed_transcript_segments(transcript: Transcript | None) -> list:
+    if transcript is None:
+        return []
+    return [
+        item
+        for item in sorted(transcript.segments, key=lambda item: item.order)
+        if item.start_seconds is not None
+        and item.end_seconds is not None
+        and item.end_seconds > item.start_seconds
+    ]
+
+
+def _previous_context_start(timed: list, start: float) -> float:
+    """Return the start of the transcript span immediately before an edge."""
+    overlapping = [
+        item
+        for item in timed
+        if item.start_seconds < start and item.end_seconds >= start - 0.05
+    ]
+    if overlapping:
+        return float(overlapping[-1].start_seconds)
+    previous = [item for item in timed if item.end_seconds <= start + 0.05]
+    if previous:
+        return float(previous[-1].start_seconds)
+    return max(0.0, start - 2.0)
+
+
+def _next_context_end(timed: list, end: float, video_duration: float | None) -> float:
+    """Return the end of the transcript span immediately after an edge."""
+    overlapping = [
+        item
+        for item in timed
+        if item.start_seconds <= end + 0.05 and item.end_seconds > end
+    ]
+    if overlapping:
+        value = float(overlapping[0].end_seconds)
+    else:
+        following = [item for item in timed if item.start_seconds >= end - 0.05]
+        value = float(following[0].end_seconds) if following else end + 2.0
+    return min(value, video_duration) if video_duration is not None else value
+
+
+def _snap_word_edges(
+    segment: ReelSegment,
+    words: list[TranscriptWordView],
+) -> tuple[float, float, bool]:
+    start = segment.source_start_seconds
+    end = segment.source_end_seconds
+    changed = False
+    for word in words:
+        if word.start + 0.04 < start < word.end - 0.04:
+            start = max(0.0, word.start)
+            changed = True
+        if word.start + 0.04 < end < word.end - 0.04:
+            end = word.end
+            changed = True
+    return start, end, changed
+
+
+def auto_fix_reel(
+    db: Session,
+    project_id: UUID,
+    reel_id: UUID,
+    options: CoherenceAutoFixRequest | None = None,
+) -> tuple[Reel, CoherenceReport, list[str]]:
+    """Apply safe timing/context/transition repairs, then revalidate.
+
+    The pass is deliberately non-destructive: it never deletes a fragment or
+    dismisses a finding. Semantic issues that cannot be repaired by restoring
+    nearby transcript context remain visible for editorial review.
+    """
+    options = options or CoherenceAutoFixRequest()
+    project = projects_service.get_project(db, project_id)
+    reel = reels_service.get_reel_for_project(db, project_id, reel_id)
+    try:
+        transcript = transcripts_service.get_transcript_for_project(db, project_id)
+    except NotFoundError:
+        transcript = None
+    timed = _timed_transcript_segments(transcript)
+    words = _collect_words(transcript)
+    fixes: list[str] = []
+
+    # Three bounded passes let restored transcript context resolve a second
+    # related finding without allowing an unbounded expansion of the Reel.
+    for _ in range(3):
+        report = validate_reel(
+            db,
+            project_id,
+            reel_id,
+            CoherenceValidateRequest(
+                include_ai_review=False,
+                include_media_probes=options.include_media_probes,
+            ),
+        )
+        active = [issue for issue in report.issues if not issue.dismissed]
+        if not active:
+            break
+
+        ordered = sorted(reel.segments, key=lambda item: item.order)
+        by_segment: dict[int, set[str]] = {}
+        for issue in active:
+            by_segment.setdefault(issue.segment_id, set()).add(issue.code)
+        changed = False
+
+        for segment_id, codes in by_segment.items():
+            if segment_id < 1 or segment_id > len(ordered):
+                continue
+            segment = ordered[segment_id - 1]
+            start = segment.source_start_seconds
+            end = segment.source_end_seconds
+
+            if "WORD_CUT" in codes:
+                start, end, snapped = _snap_word_edges(segment, words)
+                if snapped:
+                    fixes.append(f"Fragmento {segment_id}: bordes alineados a palabras completas.")
+
+            if codes & _NEEDS_CONTEXT_BEFORE:
+                expanded_start = _previous_context_start(timed, start)
+                if expanded_start < start - 0.01:
+                    start = expanded_start
+                    fixes.append(f"Fragmento {segment_id}: contexto previo restaurado.")
+
+            if codes & _NEEDS_CONTEXT_AFTER:
+                expanded_end = _next_context_end(timed, end, project.duration_seconds)
+                if expanded_end > end + 0.01:
+                    end = expanded_end
+                    fixes.append(f"Fragmento {segment_id}: final de la idea restaurado.")
+
+            if start != segment.source_start_seconds or end != segment.source_end_seconds:
+                segment.source_start_seconds = start
+                segment.source_end_seconds = end
+                refreshed = _text_in_window(transcript, start, end)
+                if refreshed:
+                    segment.transcript_text = refreshed
+                changed = True
+
+            if codes & _NEEDS_SOFT_TRANSITION and segment_id > 1:
+                previous = ordered[segment_id - 2]
+                if previous.transition_type == TransitionType.hard_cut:
+                    previous.transition_type = TransitionType.short_crossfade
+                    previous.transition_duration_ms = 220
+                    fixes.append(
+                        f"Empalme {segment_id - 1}→{segment_id}: fundido corto aplicado."
+                    )
+                    changed = True
+
+        if not changed:
+            break
+        reel.coherence_dismissals_json = None
+        reels_service._touch(reel)  # noqa: SLF001 — shared timestamp helper
+        db.commit()
+        reel = reels_service.get_reel_for_project(db, project_id, reel_id)
+
+    final_report = validate_reel(
+        db,
+        project_id,
+        reel_id,
+        CoherenceValidateRequest(
+            include_ai_review=False,
+            include_media_probes=options.include_media_probes,
+        ),
+    )
+    return reel, final_report, list(dict.fromkeys(fixes))
 
 
 def assert_render_allowed(db: Session, project_id: UUID, reel_id: UUID) -> None:

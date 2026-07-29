@@ -10,7 +10,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
-from app.core.exceptions import NotFoundError, ValidationAppError
+from app.core.exceptions import ConflictError, NotFoundError, ValidationAppError
 from app.models.project import Project, ProjectStatus
 from app.schemas.project import ProjectCreate, ProjectResponse, ProjectUpdate
 from app.services import storage
@@ -68,7 +68,7 @@ def get_project(db: Session, project_id: UUID) -> Project:
 
 
 def create_project(db: Session, payload: ProjectCreate) -> Project:
-    """Persist a new project and create its empty storage directory."""
+    """Persist metadata; storage is created lazily when the first file arrives."""
     project = Project(
         title=payload.title.strip(),
         preacher_name=payload.preacher_name.strip() if payload.preacher_name else None,
@@ -81,7 +81,6 @@ def create_project(db: Session, payload: ProjectCreate) -> Project:
     db.add(project)
     db.commit()
     db.refresh(project)
-    storage.ensure_project_dir(project.id)
     return project
 
 
@@ -111,6 +110,38 @@ def delete_project(db: Session, project_id: UUID) -> None:
     storage.delete_project_dir(project.id)
     db.delete(project)
     db.commit()
+
+
+def delete_video(db: Session, project_id: UUID) -> Project:
+    """Delete source videos while retaining transcript, Reel edits and exports."""
+    project = get_project(db, project_id)
+    if project.status in {
+        ProjectStatus.importing,
+        ProjectStatus.transcribing,
+        ProjectStatus.analyzing,
+        ProjectStatus.rendering,
+    }:
+        raise ConflictError(
+            "No se puede eliminar el video mientras hay un proceso activo.",
+            code="project_busy",
+        )
+    if not project.video_filename:
+        raise NotFoundError("Project has no video.", code="video_not_found")
+
+    storage.delete_project_video_files(project.id)
+    project.video_filename = None
+    project.duration_seconds = None
+    project.width = None
+    project.height = None
+    project.fps = None
+    project.video_codec = None
+    project.audio_codec = None
+    project.status = ProjectStatus.created
+    project.error_message = None
+    _touch(project)
+    db.commit()
+    db.refresh(project)
+    return project
 
 
 async def attach_video(
@@ -147,6 +178,7 @@ async def attach_video(
         )
         storage.assert_file_magic(destination, kind="video")
     except Exception as exc:
+        storage.remove_project_dir_if_empty(project.id)
         project.status = ProjectStatus.failed
         project.error_message = str(getattr(exc, "detail", exc))
         _touch(project)
@@ -156,6 +188,8 @@ async def attach_video(
     try:
         return finalize_project_video(db, project, stored_name)
     except Exception as exc:
+        destination.unlink(missing_ok=True)
+        storage.remove_project_dir_if_empty(project.id)
         project.status = ProjectStatus.failed
         project.error_message = str(getattr(exc, "detail", exc))
         _touch(project)

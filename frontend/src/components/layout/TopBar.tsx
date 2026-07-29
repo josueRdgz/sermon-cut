@@ -1,4 +1,3 @@
-import { Scissors } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 
@@ -16,7 +15,7 @@ export function TopBar({ indicators, actions }: TopBarProps) {
     <div className={styles.root}>
       <Link to="/" className={styles.brand} aria-label="SermonCut — Inicio">
         <span className={styles.mark} aria-hidden>
-          <Scissors size={16} strokeWidth={2.25} />
+          <img src="/sermon-cut-icon.png" alt="" />
         </span>
         <span className={styles.wordmark}>SermonCut</span>
       </Link>

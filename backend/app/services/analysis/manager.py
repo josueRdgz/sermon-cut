@@ -247,11 +247,14 @@ class AnalysisManager:
             transcript = transcripts_service.get_transcript_for_project(session, job.project_id)
             segments = _transcript_to_inputs(transcript)
             video_duration = float(project.duration_seconds or segments[-1].end)
+            settings = get_settings()
 
             preferences = AnalysisPreferences(
                 max_reels=job.max_reels,
                 min_duration_seconds=job.min_duration_seconds,
                 max_duration_seconds=job.max_duration_seconds,
+                max_segments_per_reel=settings.ai_max_segments_per_reel,
+                min_segment_seconds=settings.ai_min_segment_seconds,
                 additional_instructions=job.additional_instructions,
                 doctrinal_orientation=job.doctrinal_orientation
                 or "cristiano reformado: centralidad de Cristo, gracia, fe, santidad",
@@ -269,7 +272,6 @@ class AnalysisManager:
                 preferences=preferences,
             )
 
-            settings = get_settings()
             chunks = chunk_segments(segments, char_limit=settings.ai_chunk_char_limit)
             job.chunk_count = len(chunks)
             job.stage = "analysing"
@@ -324,7 +326,14 @@ class AnalysisManager:
                 merged.response,
                 segments=segments,
                 video_duration=video_duration,
-                min_segment_seconds=settings.min_reel_segment_seconds,
+                min_segment_seconds=max(
+                    settings.min_reel_segment_seconds,
+                    preferences.min_segment_seconds,
+                ),
+                max_segments_per_clip=preferences.max_segments_per_reel,
+                merge_gap_seconds=settings.ai_merge_gap_seconds,
+                min_clip_seconds=preferences.min_duration_seconds,
+                max_clip_seconds=preferences.max_duration_seconds,
             )
             # Cap to the requested maximum after validation.
             accepted = report.accepted[: job.max_reels]
@@ -338,7 +347,8 @@ class AnalysisManager:
                 job.notice = (
                     (job.notice + "\n" if job.notice else "")
                     + f"{len(report.rejected)} candidato(s) rechazados por falta "
-                    "de evidencia en la transcripción o intervalos inválidos."
+                    "de evidencia, duración insuficiente, exceso de cortes o "
+                    "intervalos inválidos."
                 )
             job.status = AnalysisJobStatus.completed
             job.stage = "completed"

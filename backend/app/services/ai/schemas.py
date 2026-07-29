@@ -11,6 +11,8 @@ class AnalysisPreferences(BaseModel):
     max_reels: int = Field(default=5, ge=1, le=20)
     min_duration_seconds: float = Field(default=20.0, ge=5.0, le=120.0)
     max_duration_seconds: float = Field(default=60.0, ge=10.0, le=180.0)
+    max_segments_per_reel: int = Field(default=3, ge=1, le=10)
+    min_segment_seconds: float = Field(default=8.0, ge=1.0, le=60.0)
     additional_instructions: str | None = Field(default=None, max_length=2000)
     # Doctrinal / editorial orientation (e.g. "reformed", "christocentric").
     doctrinal_orientation: str = Field(

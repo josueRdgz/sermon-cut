@@ -4,7 +4,7 @@ import type {
   BackgroundMusicPresetInfo,
   BackgroundMusicSettings,
 } from '../types/backgroundMusic';
-import { apiGet, apiJson, uploadWithProgress } from './client';
+import { API_BASE_URL, apiGet, apiJson, uploadWithProgress } from './client';
 
 export function listBackgroundMusicPresets(): Promise<{
   items: BackgroundMusicPresetInfo[];
@@ -39,4 +39,9 @@ export function uploadBackgroundMusic(
 
 export function getBackgroundMusicMeters(projectId: string): Promise<BackgroundMusicMeters> {
   return apiGet(`/api/projects/${projectId}/background-music/meters`);
+}
+
+export function backgroundMusicAudioUrl(projectId: string, cacheKey?: string): string {
+  const suffix = cacheKey ? `?v=${encodeURIComponent(cacheKey)}` : '';
+  return `${API_BASE_URL}/api/projects/${projectId}/background-music/audio${suffix}`;
 }

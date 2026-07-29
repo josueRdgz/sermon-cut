@@ -35,8 +35,8 @@ DEFAULT_TRUE_PEAK_DB = -1.5
 DEFAULT_LRA = 11.0
 
 # sidechaincompress tuned so preaching stays intelligible.
-DUCK_THRESHOLD = 0.03
-DUCK_RATIO = 7.0
+DUCK_THRESHOLD = 0.08
+DUCK_RATIO = 3.0
 DUCK_ATTACK_MS = 25.0
 DUCK_RELEASE_MS = 320.0
 # Soft ceiling after the mix to avoid inter-sample peaks into the encoder.
@@ -64,7 +64,7 @@ PRESET_VALUES: dict[BackgroundMusicPreset, dict] = {
     },
     BackgroundMusicPreset.very_soft_background: {
         "scope": BackgroundMusicScope.full_reel,
-        "volume": 0.10,
+        "volume": 0.18,
         "fade_in_ms": 1500,
         "fade_out_ms": 2000,
         "ducking_enabled": True,
@@ -110,7 +110,7 @@ def build_music_prep_filter(
     """Trim / fade / pad one music input to the target timeline length."""
     timeline = max(0.05, timeline_seconds)
     start = max(0.0, start_seconds)
-    parts: list[str] = [f"[{input_label}]"]
+    parts: list[str] = []
 
     if end_seconds is not None and end_seconds > start:
         parts.append(f"atrim={_fmt(start)}:{_fmt(end_seconds)}")
@@ -131,11 +131,11 @@ def build_music_prep_filter(
     parts.append(
         "aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo"
     )
-    # Pad (or rely on -stream_loop on the input) then hard-trim to the timeline.
+    # Pad with silence when the selected track ends; never repeat the track.
     parts.append(f"apad=whole_dur={_fmt(timeline)}")
     parts.append(f"atrim=0:{_fmt(timeline)}")
     parts.append("asetpts=PTS-STARTPTS")
-    return ",".join(parts) + f"[{output_label}]"
+    return f"[{input_label}]" + ",".join(parts) + f"[{output_label}]"
 
 
 def build_ducked_mix_filters(
@@ -147,11 +147,12 @@ def build_ducked_mix_filters(
 ) -> list[str]:
     """Keep voice dominant: optional sidechain ducking then ``amix``."""
     if not ducking:
-        # Weights favour voice (~1.0) over a quiet bed (~0.35 of already-low volume).
+        # ``volume`` already expresses the final user-selected bed gain. Do not
+        # attenuate it a second time inside amix.
         return [
             (
                 f"[{voice_label}][{music_label}]amix=inputs=2:duration=first:"
-                f"dropout_transition=2:normalize=0:weights=1 0.35[{output_label}]"
+                f"dropout_transition=2:normalize=0:weights=1 1[{output_label}]"
             )
         ]
 
@@ -165,7 +166,7 @@ def build_ducked_mix_filters(
         ),
         (
             f"[bgm_voice][bgm_ducked]amix=inputs=2:duration=first:"
-            f"dropout_transition=2:normalize=0:weights=1 0.45[{output_label}]"
+            f"dropout_transition=2:normalize=0:weights=1 1[{output_label}]"
         ),
     ]
 

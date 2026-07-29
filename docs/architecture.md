@@ -150,20 +150,17 @@ Organización por capas para separar responsabilidades:
   reducción de fuente, recorte con «…», clamp de duración a 3–8 s). Recibe la
   función que mide el ancho del texto, así que se testea con métricas
   deterministas en lugar de fuentes reales.
-- `services/endcard/image.py` compone el PNG con **Pillow** (sin navegador). El
-  espacio vertical se reparte antes de dibujar: primero las bandas de portada, QR
-  y logo, y los párrafos se ajustan a lo que queda, descontando los huecos entre
-  ellos. Por eso nada se solapa ni desborda.
+- `services/endcard/image.py` compone con **Pillow** un PNG deliberadamente
+  simple: portada y un único mensaje editable debajo.
 - `services/endcard/service.py` resuelve/persiste la configuración y guarda los
   archivos que aporta el usuario (logo, música) dentro de la carpeta del proyecto.
-- `services/endcard/pipeline.py` es el puente con el render: genera el PNG y
-  devuelve el `EndCardSpec` que necesita FFmpeg, degradando `continue_with_fade` a
-  silencio cuando al origen ya no le queda audio.
+- `services/endcard/pipeline.py` genera el PNG y devuelve un `EndCardSpec`
+  silencioso para FFmpeg.
 - El grafo añade la imagen como entrada `-loop 1` y hace `concat` **después** del
   filtro `ass`, de modo que los tiempos de los subtítulos siguen refiriéndose solo
   al contenido principal.
-- Frontend: `EndCardPanel` configura todo, sube logo/música, muestra la vista
-  previa (PNG servido por el backend) y lleva la etiqueta `Obligatoria`.
+- Frontend: `EndCardPanel` muestra la vista previa y solo permite editar el
+  mensaje inferior.
 
 ### Música de fondo (opcional)
 
@@ -171,10 +168,10 @@ Organización por capas para separar responsabilidades:
   (`background-music.<ext>`) y genera el grafo FFmpeg: preparación del bed,
   ducking con `sidechaincompress`, `amix` priorizando voz, `alimiter` y
   `loudnorm` (LUFS configurable, por defecto −16). Preset por defecto: `none`.
-- Alcance `full_reel` mezcla en la línea principal; `end_card_only` alimenta la
-  pantalla final cuando ésta no tiene música propia.
-- Frontend: `BackgroundMusicPanel` + medidores en `RenderPanel` antes de exportar.
-  Sin catálogos ni descargas; advertencia de derechos en la UI.
+- La pista se mezcla en la línea principal y, si termina, se rellena con silencio
+  en vez de repetirla.
+- Frontend: `BackgroundMusicPanel` abre la Biblioteca de audio de YouTube Studio
+  y permite seleccionar el MP3 descargado, con advertencia de atribución.
 
 ### Perfiles de exportación
 

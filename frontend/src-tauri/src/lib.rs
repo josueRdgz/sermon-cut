@@ -34,7 +34,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![get_api_base_url, get_backend_port])
         .setup(|app| {
             info!("Sermon Cut desktop starting…");
-            match backend::start_backend() {
+            match backend::start_backend(app.handle()) {
                 Ok(handle) => {
                     let handle = Arc::new(handle);
                     app.manage(AppState {

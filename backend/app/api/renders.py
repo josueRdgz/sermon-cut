@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 from app.core.exceptions import NotFoundError, ValidationAppError
 from app.core.paths import project_renders_dir
 from app.db.session import get_db
+from app.schemas.reel import ReelUpdate
 from app.schemas.render_job import (
     RenderJobListResponse,
     RenderJobResponse,
@@ -18,6 +19,7 @@ from app.schemas.render_job import (
     RevealResponse,
 )
 from app.services.export_profiles.reveal import reveal_in_file_manager
+from app.services.reels import service as reels_service
 from app.services.render.manager import RenderManager, get_render_manager
 
 router = APIRouter(tags=["renders"])
@@ -40,6 +42,14 @@ def start_render(
     Burns ASS subtitles when enabled and always appends the mandatory end card.
     Never auto-publishes — output stays local.
     """
+    if payload.audio_offset_ms is not None:
+        reels_service.update_reel(
+            db,
+            project_id,
+            reel_id,
+            ReelUpdate(audio_offset_ms=payload.audio_offset_ms),
+        )
+
     job = manager.start(
         db,
         project_id,
@@ -105,6 +115,16 @@ def cancel_render_job(
 ) -> RenderJobResponse:
     job = manager.cancel(db, job_id)
     return RenderJobResponse.model_validate(job)
+
+
+@router.delete("/render-jobs/{job_id}", status_code=204)
+def delete_render_job(
+    job_id: UUID,
+    db: Session = Depends(get_db),
+    manager: RenderManager = Depends(get_render_manager),
+) -> None:
+    """Delete a finished render, its MP4 and its JSON report."""
+    manager.delete(db, job_id)
 
 
 @router.get("/render-jobs/{job_id}/output")

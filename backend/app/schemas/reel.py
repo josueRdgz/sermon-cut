@@ -74,6 +74,7 @@ class ReelCreate(BaseModel):
     subtitle_bible_reference: str | None = Field(default=None, max_length=200)
     aspect_ratio: AspectRatio = AspectRatio.nine_sixteen
     status: ReelStatus = ReelStatus.draft
+    audio_offset_ms: int = Field(default=0, ge=-1000, le=1000)
     segments: list[ReelSegmentCreate] = Field(default_factory=list)
 
 
@@ -97,6 +98,7 @@ class ReelUpdate(BaseModel):
     aspect_ratio: AspectRatio | None = None
     status: ReelStatus | None = None
     framing_mode: str | None = None
+    audio_offset_ms: int | None = Field(default=None, ge=-1000, le=1000)
 
 
 class ReelSegmentResponse(BaseModel):
@@ -140,6 +142,7 @@ class ReelResponse(BaseModel):
     aspect_ratio: AspectRatio
     status: ReelStatus
     framing_mode: str = "center_crop"
+    audio_offset_ms: int = 0
     created_at: datetime
     updated_at: datetime
     segments: list[ReelSegmentResponse]

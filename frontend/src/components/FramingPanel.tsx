@@ -147,8 +147,9 @@ export function FramingPanel({ projectId, reel, sourceTime, onReelChange }: Fram
       </div>
       <p className="muted">
         Mantiene al predicador en el área vertical con movimiento suave. El video final lo
-        renderiza FFmpeg (crop); OpenCV solo analiza fotogramas dispersos. Zona segura arriba/abajo
-        para subtítulos.
+        renderiza FFmpeg con recorte a pantalla completa; OpenCV solo analiza fotogramas dispersos.
+        Los subtítulos se dibujan directamente sobre la imagen, sin añadir franjas ni espacio
+        arriba o abajo.
       </p>
 
       <div className="transcript-toolbar">
@@ -241,19 +242,14 @@ export function FramingPanel({ projectId, reel, sourceTime, onReelChange }: Fram
               <img
                 src={framingPreviewImageUrl(projectId, reel.id, preview.preview_filename)}
                 alt="Vista previa del encuadre"
+                style={{
+                  objectPosition: `${(preview.norm_x + preview.norm_w / 2) * 100}% ${
+                    (preview.norm_y + preview.norm_h / 2) * 100
+                  }%`,
+                }}
               />
             )}
-            <div
-              className="framing-preview__crop"
-              style={{
-                left: `${preview.norm_x * 100}%`,
-                top: `${preview.norm_y * 100}%`,
-                width: `${preview.norm_w * 100}%`,
-                height: `${preview.norm_h * 100}%`,
-              }}
-            />
-            <div className="framing-preview__safe framing-preview__safe--top" />
-            <div className="framing-preview__safe framing-preview__safe--bottom" />
+            <span className="framing-preview__output-label">Salida {reel.aspect_ratio}</span>
           </div>
         </div>
       )}

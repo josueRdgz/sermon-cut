@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
+from pathlib import Path
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, File, UploadFile
+from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 
+from app.core.exceptions import NotFoundError
 from app.db.session import get_db
 from app.schemas.background_music import (
     BackgroundMusicMetersResponse,
@@ -16,9 +19,17 @@ from app.schemas.background_music import (
     BackgroundMusicUpdate,
 )
 from app.services import projects as projects_service
+from app.services import storage
 from app.services.background_music import service as bgm_service
 
 router = APIRouter(tags=["background-music"])
+
+_AUDIO_MEDIA_TYPES = {
+    ".mp3": "audio/mpeg",
+    ".wav": "audio/wav",
+    ".m4a": "audio/mp4",
+    ".ogg": "audio/ogg",
+}
 
 
 async def _upload_chunks(upload: UploadFile) -> AsyncIterator[bytes]:
@@ -80,6 +91,29 @@ async def upload_background_music(
         chunks=_upload_chunks(file),
     )
     return bgm_service.to_response(row)
+
+
+@router.get("/projects/{project_id}/background-music/audio")
+def stream_background_music(
+    project_id: UUID,
+    db: Session = Depends(get_db),
+) -> FileResponse:
+    """Stream the uploaded music for seeking and selecting its start point."""
+    projects_service.get_project(db, project_id)
+    row = bgm_service.get_settings_row(db, project_id)
+    if row is None or not row.music_filename:
+        raise NotFoundError("Background music not found.", code="background_music_missing")
+    path = storage.resolve_inside_project(project_id, row.music_filename)
+    if not path.is_file():
+        raise NotFoundError("Background music file is missing.", code="background_music_missing")
+    media_type = _AUDIO_MEDIA_TYPES.get(Path(row.music_filename).suffix.lower(), "audio/mpeg")
+    return FileResponse(
+        path,
+        media_type=media_type,
+        filename=row.music_filename,
+        content_disposition_type="inline",
+        headers={"Cache-Control": "no-store"},
+    )
 
 
 @router.get(

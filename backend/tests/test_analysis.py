@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import pytest
 from app.services.ai.mock_provider import MockAIProvider
+from app.services.ai.prompts import build_user_prompt
 from app.services.ai.schemas import (
     AnalysisPreferences,
     AnalysisRequest,
@@ -187,6 +188,43 @@ def test_validate_rejects_overlapping_segments_in_one_clip() -> None:
     report = validate_analysis_response(response, segments=_segments(), video_duration=70.0)
     assert report.accepted == []
     assert "overlapping" in report.rejected[0]
+
+
+def test_validate_rejects_more_than_three_source_segments() -> None:
+    segments = _segments()
+    response = AnalysisResponse(
+        clips=[
+            SuggestedClip(
+                title="Demasiados cortes",
+                segments=[
+                    SuggestedSegment(
+                        start=item.start,
+                        end=item.end,
+                        exact_text=item.text,
+                    )
+                    for item in (segments[0], segments[2], segments[3], segments[4])
+                ],
+            )
+        ]
+    )
+
+    report = validate_analysis_response(
+        response,
+        segments=segments,
+        video_duration=70.0,
+        max_segments_per_clip=3,
+    )
+
+    assert report.accepted == []
+    assert "too many segments" in report.rejected[0]
+
+
+def test_prompt_requests_long_passages_and_at_most_three_segments() -> None:
+    prompt = build_user_prompt(_request())
+
+    assert "Máximo de fragmentos/cortes por Reel: 3" in prompt
+    assert "Duración mínima por fragmento: 8 s" in prompt
+    assert "no cortes por cada frase" in prompt
 
 
 def test_chunk_segments_preserves_absolute_times() -> None:

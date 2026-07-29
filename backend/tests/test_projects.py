@@ -68,7 +68,8 @@ def test_get_update_delete_project(client: TestClient, storage_root: Path) -> No
     assert patched.json()["title"] == "Título actualizado"
 
     project_folder = storage_root / project_id
-    assert project_folder.is_dir()
+    # Metadata-only projects no longer create empty storage folders.
+    assert not project_folder.exists()
 
     deleted = client.delete(f"/api/projects/{project_id}")
     assert deleted.status_code == 204
@@ -115,6 +116,41 @@ def test_upload_video_and_cover(client: TestClient, storage_root: Path) -> None:
     assert cover_body["cover_filename"] == "cover.jpg"
     assert (storage_root / project_id / "cover.jpg").is_file()
 
+    deleted_video = client.delete(f"/api/projects/{project_id}/video")
+    assert deleted_video.status_code == 200, deleted_video.text
+    deleted_body = deleted_video.json()
+    assert deleted_body["has_video"] is False
+    assert deleted_body["duration_seconds"] is None
+    assert deleted_body["resolution"] is None
+    assert not (storage_root / project_id / "original.mp4").exists()
+    assert (storage_root / project_id / "cover.jpg").is_file()
+
+
+def test_background_music_can_be_streamed_for_start_selection(client: TestClient) -> None:
+    created = _create_project(client)
+    fake_mp3 = b"ID3\x03\x00\x00\x00\x00\x00\x00preview-audio"
+    uploaded = client.post(
+        f"/api/projects/{created['id']}/background-music/upload",
+        files={"file": ("music.mp3", fake_mp3, "audio/mpeg")},
+    )
+    assert uploaded.status_code == 200, uploaded.text
+
+    streamed = client.get(
+        f"/api/projects/{created['id']}/background-music/audio"
+    )
+    assert streamed.status_code == 200
+    assert streamed.headers["content-type"].startswith("audio/mpeg")
+    assert streamed.headers["cache-control"] == "no-store"
+    assert streamed.content == fake_mp3
+
+    partial = client.get(
+        f"/api/projects/{created['id']}/background-music/audio",
+        headers={"Range": "bytes=0-9"},
+    )
+    assert partial.status_code == 206
+    assert partial.headers["accept-ranges"] == "bytes"
+    assert partial.content == fake_mp3[:10]
+
 
 def test_upload_rejects_unsupported_extension(client: TestClient) -> None:
     created = _create_project(client)
@@ -126,7 +162,7 @@ def test_upload_rejects_unsupported_extension(client: TestClient) -> None:
     assert response.json()["code"] == "unsupported_extension"
 
 
-def test_upload_rejects_oversized_file(client: TestClient) -> None:
+def test_upload_rejects_oversized_file(client: TestClient, storage_root: Path) -> None:
     created = _create_project(client)
     # Fixture sets max upload to 1 MiB.
     too_big = b"x" * (1024 * 1024 + 1)
@@ -136,6 +172,26 @@ def test_upload_rejects_oversized_file(client: TestClient) -> None:
     )
     assert response.status_code == 400
     assert response.json()["code"] == "file_too_large"
+    assert not (storage_root / created["id"]).exists()
+
+
+def test_prune_removes_only_fileless_project_trees(storage_root: Path) -> None:
+    from uuid import uuid4
+
+    from app.services.storage import prune_empty_project_dirs
+
+    empty = storage_root / str(uuid4())
+    (empty / "renders" / ".tmp").mkdir(parents=True)
+    occupied = storage_root / str(uuid4())
+    occupied.mkdir()
+    (occupied / "keep.txt").write_text("keep")
+    unrelated = storage_root / "not-a-project"
+    unrelated.mkdir()
+
+    assert prune_empty_project_dirs() == 1
+    assert not empty.exists()
+    assert occupied.is_dir()
+    assert unrelated.is_dir()
 
 
 def test_upload_rejects_path_traversal_filename(client: TestClient, storage_root: Path) -> None:

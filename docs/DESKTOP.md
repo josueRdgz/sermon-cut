@@ -55,11 +55,16 @@ Esa forma **no se elimina**.
   Detalle legal: [LICENSING.md](LICENSING.md).
 - **No** hay publicación automática de releases.
 
-### Limitaciones actuales del empaquetado
+### Alcance del instalador local
 
-- La build local espera un **venv Python** en `backend/.venv` (o `SERMON_CUT_PYTHON` / `SERMON_CUT_BACKEND_DIR`).
-- Un sidecar PyInstaller embebido en el `.app`/instalador queda como siguiente paso.
-- Firma notarizada (Apple) / SmartScreen (Windows) no están configuradas aún.
+- La compilación usa `backend/.venv`, pero el `.app` resultante incluye un
+  **sidecar Python/FastAPI autónomo** generado con PyInstaller.
+- Los proyectos, la base SQLite y los modelos se guardan fuera del bundle en
+  `~/Library/Application Support/app.sermoncut.desktop/storage`.
+- La configuración opcional se puede colocar en
+  `~/Library/Application Support/app.sermoncut.desktop/.env`.
+- FFmpeg/FFprobe siguen siendo dependencias del sistema.
+- Firma y notarización de Apple aún requieren una identidad de Developer ID.
 
 ---
 
@@ -70,6 +75,7 @@ Esa forma **no se elimina**.
 3. **Rust** estable vía [rustup](https://rustup.rs/) (`cargo`, `rustc`).
 4. En macOS: Xcode Command Line Tools (`xcode-select --install`).
 5. Dependencias npm del frontend (`cd frontend && npm install`).
+6. PyInstaller dentro del venv (se instala con `pip install -e ".[dev]"`).
 
 Variables opcionales:
 
@@ -77,6 +83,7 @@ Variables opcionales:
 |----------|-----|
 | `SERMON_CUT_PYTHON` | Interprete Python (por defecto `backend/.venv/...`) |
 | `SERMON_CUT_BACKEND_DIR` | Raíz del backend (debe contener `app/main.py`) |
+| `SERMON_CUT_ENV_FILE` | Archivo `.env` alternativo; el `.app` usa el de Application Support |
 
 ---
 
@@ -135,14 +142,25 @@ Artefactos típicos:
 | Windows | `frontend/src-tauri/target/release/bundle/msi/` o `nsis/` |
 | Linux | `frontend/src-tauri/target/release/bundle/deb/` / `appimage/` |
 
-La app resultante **sigue necesitando** el venv del backend (o Python+deps) y FFmpeg del sistema en esta fase. No se suben releases a GitHub desde estos scripts.
+La app resultante incluye Python, FastAPI, Whisper, Gemini y las dependencias
+configuradas en el venv. La Mac de destino solo necesita FFmpeg/FFprobe. No se
+suben releases a GitHub desde estos scripts.
+
+En macOS se generan normalmente:
+
+- `bundle/macos/Sermon Cut.app`
+- `bundle/dmg/Sermon Cut_0.1.0_aarch64.dmg` en Apple Silicon
+
+Sin firma/notarización, otra Mac puede mostrar una advertencia de Gatekeeper. La
+persona usuaria puede abrir la aplicación desde Finder con clic secundario →
+**Abrir**. Para distribución pública se debe configurar una identidad Apple
+Developer ID y notarizar el DMG.
 
 ---
 
-## Qué no hace v0
+## Qué no hace todavía
 
 - Empaquetar FFmpeg dentro del instalador.
-- Sidecar Python autocontenido (PyInstaller).
 - CI que publique releases automáticamente.
 - Notarización / firma de código.
 

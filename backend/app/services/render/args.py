@@ -54,8 +54,8 @@ _XFADE_TRANSITIONS: dict[str, str] = {
 
 TARGET_SAMPLE_RATE = 48000
 TARGET_CHANNELS = 2
-# Very short fade at each segment boundary to avoid audible clicks.
-BOUNDARY_FADE_SECONDS = 0.015
+# A 3 ms edge ramp prevents clicks without audibly ducking speech at each cut.
+BOUNDARY_FADE_SECONDS = 0.003
 DEFAULT_FPS = 30.0
 MIN_FPS = 12.0
 MAX_FPS = 60.0
@@ -157,7 +157,13 @@ def _video_chain(
     segment: RenderSegmentSpec | None = None,
 ) -> list[str]:
     """Per-segment video normalization chain, ending in label ``[v{index}]``."""
-    common = f"setsar=1,fps={_fmt(fps)},format=yuv420p,setpts=PTS-STARTPTS"
+    # ``xfade`` emits AVTB (1/1,000,000) on current FFmpeg versions. Force
+    # every incoming clip to that same timebase so a second consecutive xfade
+    # does not compare AVTB against the fps filter's native 1/fps timebase.
+    common = (
+        f"setsar=1,fps={_fmt(fps)},settb=AVTB,"
+        "format=yuv420p,setpts=PTS-STARTPTS"
+    )
     effective = layout
     if segment is not None and segment.layout_override:
         effective = segment.layout_override
@@ -205,7 +211,13 @@ def _crop_filter(
     return f"crop={width}:{height}"
 
 
-def _audio_chain(stream: str, index: int, duration: float) -> str:
+def _audio_chain(
+    stream: str,
+    index: int,
+    duration: float,
+    *,
+    delay_seconds: float = 0.0,
+) -> str:
     """Per-segment audio normalization chain, ending in label ``[a{index}]``.
 
     Mono/stereo/other layouts are converted to a fixed stereo 48 kHz stream, and
@@ -218,6 +230,12 @@ def _audio_chain(stream: str, index: int, duration: float) -> str:
         f"aresample={TARGET_SAMPLE_RATE}:async=1",
         "asetpts=PTS-STARTPTS",
     ]
+    if delay_seconds > 0:
+        parts.append(f"adelay={round(delay_seconds * 1000)}:all=1")
+    # An advanced offset can seek close to the beginning/end of the source.
+    # Always produce the exact clip duration, filling unavailable audio with silence.
+    parts.append(f"apad=whole_dur={_fmt(duration)}")
+    parts.append(f"atrim=0:{_fmt(duration)}")
     if fade > 0:
         parts.append(f"afade=t=in:st=0:d={_fmt(fade)}")
         fade_out_start = max(0.0, duration - fade)
@@ -351,7 +369,8 @@ def _end_card_chains(
         f"[{image_index}:v]scale={width}:{height}"
         f":force_original_aspect_ratio=decrease,"
         f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2,"
-        f"setsar=1,fps={_fmt(fps)},format=yuv420p,setpts=PTS-STARTPTS"
+        f"setsar=1,fps={_fmt(fps)},settb=AVTB,"
+        "format=yuv420p,setpts=PTS-STARTPTS"
     )
     if fade_in > 0:
         video += f",fade=t=in:st=0:d={_fmt(fade_in)}"
@@ -403,7 +422,7 @@ def _end_card_chains(
 def escape_filter_path(path: Path) -> str:
     """Escape a filesystem path for embedding inside an FFmpeg filtergraph."""
     text = path.resolve().as_posix()
-    return (
+    escaped = (
         text.replace("\\", "\\\\")
         .replace(":", "\\:")
         .replace("'", "\\'")
@@ -412,6 +431,9 @@ def escape_filter_path(path: Path) -> str:
         .replace(",", "\\,")
         .replace(";", "\\;")
     )
+    # Paths in ``-filter_complex`` are parsed once more by libavfilter.
+    # Quoting the complete value preserves spaces such as "Mobile Documents".
+    return f"'{escaped}'"
 
 
 def build_render_command(
@@ -435,6 +457,7 @@ def build_render_command(
     end_card: EndCardSpec | None = None,
     background_music: BackgroundMusicSpec | None = None,
     loudness: LoudnessSpec | None = None,
+    audio_offset_ms: int = 0,
 ) -> RenderPlan:
     """Build the full FFmpeg argument list for one reel render.
 
@@ -483,6 +506,8 @@ def build_render_command(
 
     if end_card is not None and end_card.duration <= 0:
         raise ValueError("The end card duration must be positive.")
+    if not -1000 <= audio_offset_ms <= 1000:
+        raise ValueError("Audio offset must be between -1000 and 1000 ms.")
 
     full_reel_music: BackgroundMusicSpec | None = None
     if background_music is not None and background_music.scope == BackgroundMusicScope.full_reel:
@@ -502,6 +527,24 @@ def build_render_command(
             str(source),
         ]
 
+    audio_offset_seconds = audio_offset_ms / 1000.0
+    separate_audio_inputs = has_audio and audio_offset_ms != 0
+    audio_input_delays: list[float] = [0.0] * len(segments)
+    if separate_audio_inputs:
+        for index, segment in enumerate(segments):
+            desired_start = segment.start - audio_offset_seconds
+            audio_start = max(0.0, desired_start)
+            audio_input_delays[index] = max(0.0, -desired_start)
+            args += [
+                "-accurate_seek",
+                "-ss",
+                _fmt(audio_start),
+                "-t",
+                _fmt(segment.duration),
+                "-i",
+                str(source),
+            ]
+
     # Silent stand-ins when the source carries no audio at all.
     if not has_audio:
         for segment in segments:
@@ -515,11 +558,13 @@ def build_render_command(
             ]
 
     count = len(segments)
-    next_input = count * (1 if has_audio else 2)
+    next_input = count * (2 if separate_audio_inputs or not has_audio else 1)
     music_input_index: int | None = None
     if full_reel_music is not None:
-        # Loop short beds so the prep filter can trim to the main duration.
-        args += ["-stream_loop", "-1", "-i", str(full_reel_music.path)]
+        # Never loop a short music file: repeating a recognisable passage is
+        # distracting and can make the export sound accidental. The prep
+        # filter pads the remainder with silence instead.
+        args += ["-i", str(full_reel_music.path)]
         music_input_index = next_input
         next_input += 1
 
@@ -538,8 +583,18 @@ def build_render_command(
             fps=output_fps,
             segment=segment,
         )
-        audio_stream = f"{index}:a" if has_audio else f"{count + index}:a"
-        filters.append(_audio_chain(audio_stream, index, segment.duration))
+        if separate_audio_inputs:
+            audio_stream = f"{count + index}:a"
+        else:
+            audio_stream = f"{index}:a" if has_audio else f"{count + index}:a"
+        filters.append(
+            _audio_chain(
+                audio_stream,
+                index,
+                segment.duration,
+                delay_seconds=audio_input_delays[index],
+            )
+        )
 
     if count == 1:
         video_label, audio_label = "v0", "a0"

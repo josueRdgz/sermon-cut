@@ -129,6 +129,8 @@ class Reel(Base):
     framing_mode: Mapped[str] = mapped_column(
         String(32), nullable=False, default="center_crop"
     )
+    # Positive values delay audio; negative values advance it.
+    audio_offset_ms: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=_utc_now

@@ -31,5 +31,18 @@ if ($LASTEXITCODE -ne 0) {
     Write-Host "AVISO: migración falló; el servidor arrancará igual." -ForegroundColor Yellow
 }
 
-Write-Host "Iniciando FastAPI en http://127.0.0.1:8000 …"
-& $VenvPython -m uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
+$UvicornArgs = @("-m", "uvicorn", "app.main:app", "--host", "127.0.0.1", "--port", "8000")
+$ReloadEnabled = [string]::Equals(
+    $env:SERMON_CUT_RELOAD,
+    "true",
+    [System.StringComparison]::OrdinalIgnoreCase
+)
+if ($ReloadEnabled) {
+    # Keep .venv outside the watcher. Installing faster-whisper while uvicorn
+    # watches all of backend/ otherwise restarts active in-process jobs.
+    $UvicornArgs += @("--reload", "--reload-dir", "app")
+    Write-Host "Iniciando FastAPI con autoreload limitado a backend/app/ …"
+} else {
+    Write-Host "Iniciando FastAPI en http://127.0.0.1:8000 (sin autoreload) …"
+}
+& $VenvPython @UvicornArgs

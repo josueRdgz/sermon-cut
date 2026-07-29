@@ -26,6 +26,7 @@ from app.services.render.args import (
     build_render_command,
     resolve_end_card_audio_mode,
 )
+from PIL import Image
 
 
 # Deterministic stand-in for real font metrics: every glyph is 10 px wide at
@@ -163,6 +164,45 @@ def test_render_survives_a_missing_cover_file(tmp_path: Path) -> None:
     )
     image = render_end_card(content=content, layout=EndCardLayout.cover_full, width=270, height=480)
     assert image.size == (270, 480)
+
+
+def test_end_card_ignores_title_identity_url_logo_and_qr() -> None:
+    simple = EndCardContent(
+        sermon_title="",
+        church_name="",
+        channel_handle="",
+    )
+    legacy_extras = EndCardContent(
+        sermon_title="Título que ya no debe mostrarse",
+        church_name="Iglesia que ya no debe mostrarse",
+        channel_handle="@identificador",
+        url_text="youtube.com/una-url",
+        logo_path=Path("/tmp/logo-inexistente.png"),
+        qr_url="https://youtube.com/watch?v=abc",
+    )
+    first = render_end_card(
+        content=simple, layout=EndCardLayout.cover_card, width=270, height=480
+    )
+    second = render_end_card(
+        content=legacy_extras, layout=EndCardLayout.cover_card, width=270, height=480
+    )
+    assert first.tobytes() == second.tobytes()
+
+
+def test_end_card_layouts_keep_distinct_image_treatments(tmp_path: Path) -> None:
+    cover = tmp_path / "wide-cover.png"
+    Image.new("RGB", (400, 100), (210, 80, 30)).save(cover)
+    content = EndCardContent(
+        sermon_title="",
+        church_name="",
+        channel_handle="",
+        cover_path=cover,
+    )
+    rendered = [
+        render_end_card(content=content, layout=layout, width=270, height=480).tobytes()
+        for layout in EndCardLayout
+    ]
+    assert len(set(rendered)) == len(EndCardLayout)
 
 
 # ---- FFmpeg wiring ----------------------------------------------------------

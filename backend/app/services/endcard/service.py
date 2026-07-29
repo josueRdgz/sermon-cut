@@ -85,7 +85,7 @@ def _from_row(row: EndCardSettings | None, *, is_override: bool) -> ResolvedEndC
             duration_seconds=DEFAULT_END_CARD_SECONDS,
             fade_in_ms=DEFAULT_FADE_IN_MS,
             audio_fade_out_ms=DEFAULT_AUDIO_FADE_OUT_MS,
-            audio_mode=EndCardAudioMode.continue_with_fade,
+            audio_mode=EndCardAudioMode.silence,
             music_filename=None,
             music_volume=0.6,
             logo_filename=None,
@@ -287,22 +287,13 @@ def build_content(
         candidate = storage.resolve_inside_project(project.id, project.cover_filename)
         cover_path = candidate if candidate.is_file() else None
 
-    logo_path: Path | None = None
-    if config.logo_filename:
-        candidate = storage.resolve_inside_project(project.id, config.logo_filename)
-        logo_path = candidate if candidate.is_file() else None
-
-    qr_url = None
-    if config.show_qr:
-        qr_url = config.qr_url or project.full_sermon_url
-
     return EndCardContent(
-        sermon_title=project.title,
-        church_name=project.church_name,
-        channel_handle=config.channel_handle or project.youtube_channel,
+        sermon_title="",
+        church_name="",
+        channel_handle="",
         call_to_action=config.custom_message or CALL_TO_ACTION_TEXT,
-        url_text=config.url_text or project.full_sermon_url,
+        url_text=None,
         cover_path=cover_path,
-        logo_path=logo_path,
-        qr_url=qr_url,
+        logo_path=None,
+        qr_url=None,
     )

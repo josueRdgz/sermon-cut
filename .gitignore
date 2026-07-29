@@ -13,6 +13,8 @@ env/
 htmlcov/
 .tox/
 .nox/
+backend/build/
+backend/.pyinstaller-cache/
 
 # ---- Node / frontend ----
 node_modules/

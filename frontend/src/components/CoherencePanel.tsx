@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 
 import {
+  autoFixReelCoherence,
   dismissCoherenceWarning,
   expandCoherenceContext,
   validateReelCoherence,
@@ -34,6 +35,7 @@ export function CoherencePanel({
   const [includeAi, setIncludeAi] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [fixResult, setFixResult] = useState<string | null>(null);
   const [editingIssue, setEditingIssue] = useState<CoherenceIssue | null>(null);
   const [editStart, setEditStart] = useState('');
   const [editEnd, setEditEnd] = useState('');
@@ -87,6 +89,34 @@ export function CoherencePanel({
       publish(next);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'No se pudo ignorar la advertencia');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleAutoFix = async () => {
+    setBusy(true);
+    setError(null);
+    setFixResult(null);
+    try {
+      const result = await autoFixReelCoherence(projectId, reelId, {
+        include_media_probes: true,
+      });
+      onReelChange(result.reel);
+      publish(result.report);
+      if (result.fixes.length === 0) {
+        setFixResult('No se encontró una corrección automática segura para aplicar.');
+      } else if (result.remaining_issues === 0) {
+        setFixResult(
+          `Corrección completada: ${result.fixes.length} ajuste(s) aplicado(s).`,
+        );
+      } else {
+        setFixResult(
+          `Se aplicaron ${result.fixes.length} ajuste(s). Quedan ${result.remaining_issues} asunto(s) que requieren revisión editorial.`,
+        );
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'No se pudo corregir la unión');
     } finally {
       setBusy(false);
     }
@@ -202,9 +232,15 @@ export function CoherencePanel({
         <button type="button" className="button--ghost" onClick={() => void runValidate()} disabled={busy}>
           {busy ? 'Validando…' : 'Revalidar'}
         </button>
+        {activeIssues.length > 0 && (
+          <button type="button" onClick={() => void handleAutoFix()} disabled={busy}>
+            {busy ? 'Corrigiendo…' : 'Corregir automáticamente'}
+          </button>
+        )}
       </div>
 
       {report && <p className={report.can_render ? 'muted' : 'error'}>{report.summary}</p>}
+      {fixResult && <p className="success">{fixResult}</p>}
 
       {activeIssues.length > 0 && (
         <ul className="coherence-list">

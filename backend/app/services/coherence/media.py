@@ -176,8 +176,10 @@ def check_media_joins(
         frame_stats[1:],
         strict=False,
     ):
+        has_soft_transition = prev.transition_type != "hard_cut"
         if (
-            a_prev.mean_volume_db is not None
+            not has_soft_transition
+            and a_prev.mean_volume_db is not None
             and a_next.mean_volume_db is not None
             and abs(a_prev.mean_volume_db - a_next.mean_volume_db) >= volume_jump_db
         ):
@@ -198,7 +200,11 @@ def check_media_joins(
                 )
             )
 
-        if a_prev.trailing_silence >= 0.45 and a_next.leading_silence >= 0.45:
+        if (
+            not has_soft_transition
+            and a_prev.trailing_silence >= 0.45
+            and a_next.leading_silence >= 0.45
+        ):
             issues.append(
                 CoherenceIssue(
                     severity=CoherenceSeverity.warning,
@@ -215,7 +221,8 @@ def check_media_joins(
             )
 
         if (
-            f_prev.mean_luma is not None
+            not has_soft_transition
+            and f_prev.mean_luma is not None
             and f_next.mean_luma is not None
             and abs(f_prev.mean_luma - f_next.mean_luma) >= luma_jump
         ):

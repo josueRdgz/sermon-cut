@@ -91,7 +91,17 @@ Luego, en dos terminales:
 ./scripts/start-frontend.sh   # o .\scripts\start-frontend.ps1
 ```
 
+El backend arranca sin autoreload para no interrumpir transcripciones, análisis
+o renders en proceso. Durante desarrollo puedes activarlo con
+`SERMON_CUT_RELOAD=true`; el watcher queda limitado a `backend/app/` y no vigila
+el entorno virtual `.venv`.
+
 Abre <http://localhost:5173>.
+
+En macOS, la versión reducida de `ffmpeg` puede omitir libass. Para exportar
+con subtítulos quemados instala `brew install ffmpeg-full`; la app detecta
+automáticamente su ejecutable keg-only. También puedes definir
+`SERMON_CUT_FFMPEG_PATH`.
 
 Diagnóstico:
 
@@ -292,6 +302,7 @@ Fixtures de ejemplo: `backend/tests/fixtures/transcripts/`.
 | POST | `/api/projects/{id}/reels/{reelId}/validate` | Validar coherencia de la unión |
 | POST | `/api/projects/{id}/reels/{reelId}/validate/dismiss` | Ignorar una advertencia |
 | POST | `/api/projects/{id}/reels/{reelId}/validate/expand-context` | Ampliar un fragmento con contexto |
+| POST | `/api/projects/{id}/reels/{reelId}/validate/auto-fix` | Corregir automáticamente empalmes y revalidar |
 | POST | `/api/projects/{id}/reels/{reelId}/cut-suggestions` | Generar sugerencias de corte técnico |
 | GET | `/api/projects/{id}/reels/{reelId}/cut-suggestions` | Listar sugerencias pendientes/aceptadas/rechazadas |
 | POST | `/api/projects/{id}/reels/{reelId}/cut-suggestions/{sid}/accept` | Aceptar una sugerencia (única vía que muta) |
@@ -471,46 +482,42 @@ repo.
 **Personalización en la UI:** estilo, tamaño, posición, mayúsculas, máx. de
 palabras, opacidad, margen inferior, con vista previa sobre el reproductor.
 
+**Sincronía de audio:** cada Reel puede guardar un desfase entre −1000 y
++1000 ms. El mismo adelanto o retraso usado en la vista previa se aplica a la
+exportación mediante entradas de audio independientes en FFmpeg.
+
 ## Pantalla final (obligatoria)
 
 Todo Reel termina con una pantalla final. **No se puede desactivar**; la UI la
 marca como `Obligatoria`. Dura entre **3 y 8 segundos** (por defecto 5 s, con
 fade in de 300 ms y fade out del audio principal de 500 ms).
 
-Muestra la portada de la predicación, el título del sermón, el texto «Ver sermón
-completo en nuestro canal de YouTube», el nombre de la iglesia y el
-identificador del canal, más logo, URL y código QR opcionales.
+Muestra únicamente la portada de la predicación y, debajo, el texto «Ver sermón
+completo en nuestro canal de YouTube». Ese mensaje es editable. No imprime el
+título, nombre de la iglesia, identificador del canal, URL, logo ni código QR.
+La UI permite escoger entre tres tratamientos:
 
-**Diseños**
+| Diseño | Tratamiento de la portada |
+|---|---|
+| Imagen de fondo (recomendado) | Cubre todo el lienzo, sin márgenes ni franjas |
+| Portada en tarjeta | Usa esquinas redondeadas |
+| Minimalista | Presentación más compacta |
 
-| ID | Idea |
-| -- | ---- |
-| `cover_full` | La portada llena la pantalla, oscurecida para que el texto se lea |
-| `cover_card` | La portada dentro de una tarjeta con esquinas redondeadas sobre un fondo desenfocado |
-| `minimal` | Fondo limpio, logo arriba y título con tipografía serif; no necesita portada |
+Los diseños de tarjeta y minimalista ajustan la portada completa dentro de su
+espacio. El diseño de fondo llena el lienzo; si la relación de aspecto de la
+portada es distinta a la del Reel, recorta únicamente el excedente necesario.
 
 **Generación de la imagen:** se compone con **Pillow** y se guarda como PNG
 temporal. No hay navegador ni motor headless de por medio: funciona sin red y en
 cualquier equipo. Las tipografías son las **instaladas en el sistema**, igual que
 en los subtítulos.
 
-**Zonas seguras y texto:** todos los elementos viven dentro de un rectángulo que
-deja libre un 8 % a los lados, un 10 % arriba y un 16 % abajo, para que la UI de
-Shorts / Reels no tape nada. El espacio vertical se reparte **antes** de dibujar
-(bandas para la portada, el QR y el logo), y cada párrafo se ajusta a lo que
-queda: el título pasa a varias líneas automáticamente, la fuente se reduce si
-hace falta y, como último recurso, se recorta con «…». El texto nunca desborda.
+**Zonas seguras y texto:** la imagen y el único mensaje viven dentro del área
+segura para que la UI de Shorts/Reels no los tape. El mensaje se ajusta a varias
+líneas y reduce su tamaño si hace falta.
 
-**Audio de la pantalla final**
-
-- `silence` — el audio principal hace fade out en el empalme y la pantalla queda
-  en silencio.
-- `continue_with_fade` — el audio del video **continúa** desde donde acabó el
-  último fragmento y se desvanece al final de la tarjeta. Si el video ya no tiene
-  material que reproducir, degrada a `silence`.
-- `local_music` — usa **un archivo tuyo** subido al proyecto, con volumen
-  ajustable y fades. Nunca se descarga música automáticamente; sin archivo
-  subido, el modo se rechaza (`code: "end_card_music_missing"`).
+La pantalla final queda en silencio; el audio principal hace fade out antes de
+mostrarla.
 
 **Configuración global y por proyecto:** existe una fila global de
 `EndCardSettings` (`project_id IS NULL`) y, opcionalmente, una fila por proyecto
@@ -521,19 +528,20 @@ global o volver a heredarla.
 **después** de quemar los subtítulos, así que los tiempos de los cues siguen
 siendo relativos al contenido principal.
 
-## Música de fondo (opcional, local)
+## Música de fondo (opcional)
 
-Desactivada por defecto (`preset=none`). El usuario sube **su propio** MP3, WAV,
-M4A u OGG; se guarda dentro del proyecto. **No hay descargas ni catálogos
-comerciales.**
+Desactivada por defecto (`preset=none`). La UI abre la Biblioteca de audio
+oficial de YouTube Studio; el usuario descarga allí el MP3 y lo selecciona en la
+app. También acepta un MP3, WAV, M4A u OGG local.
 
 Advertencia mostrada en la UI:
 
 > El usuario es responsable de contar con los derechos necesarios para utilizar este audio.
 
-**Presets:** `none` · `end_card_only` · `very_soft_background` (volumen bajo +
-ducking). Configurables: volumen, inicio/final del archivo, fade in/out, alcance
-(todo el Reel o solo pantalla final), ducking y objetivo LUFS.
+**Presets:** `none` · `very_soft_background` (volumen bajo + ducking).
+Configurables: volumen, inicio/final del archivo, fade in/out, ducking y objetivo
+LUFS. La pista nunca se repite: al terminar, el resto de la línea musical se
+rellena con silencio.
 
 **Mezcla:** con ducking, `sidechaincompress` baja la música cuando hay voz; el
 `amix` prioriza la voz. Antes de exportar, la UI muestra medidores (LUFS,
@@ -583,7 +591,9 @@ pip install -e ".[gemini]"   # SDK oficial google-genai
 
 El proveedor recibe metadatos del sermón, transcripción sincronizada, duración,
 preferencias (máx. Reels, duración min/máx, orientación doctrinal, instrucciones
-adicionales) y devuelve JSON validado por Pydantic.
+adicionales) y devuelve JSON validado por Pydantic. El ritmo editorial prioriza
+un solo pasaje continuo; admite como máximo 3 fragmentos por Reel y exige por
+defecto al menos 8 segundos por fragmento.
 
 **Pipeline:**
 
@@ -616,6 +626,12 @@ si la API expone métricas de tokens, se registran en el trabajo.
 - `SERMON_CUT_GEMINI_MODEL` — modelo Gemini (default `gemini-2.5-flash`).
 - `SERMON_CUT_GEMINI_TIMEOUT_SECONDS` / `SERMON_CUT_GEMINI_MAX_ATTEMPTS`.
 - `SERMON_CUT_AI_CHUNK_CHAR_LIMIT` — presupuesto de caracteres por bloque.
+- `SERMON_CUT_AI_MAX_SEGMENTS_PER_REEL` — máximo de fragmentos/cortes por Reel
+  sugerido (default `3`).
+- `SERMON_CUT_AI_MIN_SEGMENT_SECONDS` — duración mínima de cada fragmento
+  sugerido (default `8`).
+- `SERMON_CUT_AI_MERGE_GAP_SECONDS` — une sugerencias casi consecutivas en un
+  solo fragmento (default `1.25`).
 
 ## Calidad
 
@@ -649,10 +665,12 @@ Empaquetado opcional sin reescribir backend/frontend. Guía:
 
 ```bash
 ./scripts/dev-desktop.sh      # ventana de escritorio (dev)
-./scripts/build-desktop.sh    # build local (no publica releases)
+./scripts/build-desktop.sh    # genera .app + .dmg local
 ```
 
-El flujo en navegador (`start-backend` + `start-frontend`) sigue disponible.
+El `.app` incluye el backend Python autocontenido; FFmpeg/FFprobe permanecen
+como dependencias del sistema. El flujo en navegador (`start-backend` +
+`start-frontend`) sigue disponible.
 
 ## Diseño
 
@@ -678,4 +696,3 @@ El flujo en navegador (`start-backend` + `start-frontend`) sigue disponible.
 ## Licencia
 
 [MIT](LICENSE).
-

@@ -53,6 +53,7 @@ export interface StartRenderPayload {
   normalize_loudness?: boolean;
   crf?: number | null;
   burn_subtitles?: boolean;
+  audio_offset_ms?: number;
 }
 
 export const ACTIVE_RENDER_STATUSES: RenderJobStatus[] = ['queued', 'running', 'cancelling'];

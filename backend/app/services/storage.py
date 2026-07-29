@@ -12,6 +12,7 @@ from collections.abc import AsyncIterator
 from pathlib import Path
 from uuid import UUID
 
+from app.core import paths
 from app.core.exceptions import ValidationAppError
 from app.core.paths import project_dir
 
@@ -80,6 +81,69 @@ def delete_project_dir(project_id: UUID) -> None:
     directory = project_dir(project_id)
     if directory.exists():
         shutil.rmtree(directory)
+
+
+def remove_project_dir_if_empty(project_id: UUID) -> bool:
+    """Remove one project tree only when it contains no files or symlinks."""
+    directory = project_dir(project_id)
+    if not directory.is_dir() or directory.is_symlink():
+        return False
+    if any(path.is_file() or path.is_symlink() for path in directory.rglob("*")):
+        return False
+    shutil.rmtree(directory)
+    return True
+
+
+def remove_empty_project_subdirs(project_id: UUID) -> int:
+    """Remove empty descendant directories, deepest first."""
+    directory = project_dir(project_id)
+    if not directory.is_dir() or directory.is_symlink():
+        return 0
+    removed = 0
+    descendants = sorted(
+        (path for path in directory.rglob("*") if path.is_dir() and not path.is_symlink()),
+        key=lambda path: len(path.parts),
+        reverse=True,
+    )
+    for candidate in descendants:
+        try:
+            candidate.rmdir()
+            removed += 1
+        except OSError:
+            pass
+    return removed
+
+
+def prune_empty_project_dirs() -> int:
+    """Remove UUID project trees containing directories only; return the count."""
+    if not paths.PROJECTS_DIR.is_dir():
+        return 0
+    removed = 0
+    for directory in paths.PROJECTS_DIR.iterdir():
+        if not directory.is_dir() or directory.is_symlink():
+            continue
+        try:
+            UUID(directory.name)
+        except ValueError:
+            continue
+        remove_empty_project_subdirs(UUID(directory.name))
+        if remove_project_dir_if_empty(UUID(directory.name)):
+            removed += 1
+    return removed
+
+
+def delete_project_video_files(project_id: UUID) -> int:
+    """Delete top-level source video files, leaving covers, audio and renders."""
+    directory = project_dir(project_id)
+    if not directory.is_dir():
+        return 0
+    removed = 0
+    for candidate in directory.iterdir():
+        if candidate.is_file() and candidate.suffix.lower() in VIDEO_EXTENSIONS:
+            candidate.unlink(missing_ok=True)
+            removed += 1
+    remove_project_dir_if_empty(project_id)
+    return removed
 
 
 def validate_extension(filename: str, allowed: frozenset[str]) -> str:

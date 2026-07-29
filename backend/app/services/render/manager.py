@@ -50,6 +50,7 @@ from app.services.render.args import (
     build_render_command,
     format_command_for_log,
 )
+from app.services.render.binary import ffmpeg_has_filter, locate_ffmpeg
 from app.services.render.progress import ProgressUpdate
 from app.services.render.runner import FFmpegError, run_ffmpeg
 from app.services.subtitles import build_subtitle_artifacts, options_for_reel
@@ -117,7 +118,8 @@ class RenderManager:
         *,
         session_factory: SessionFactory,
         executor: object | None = None,
-        ffmpeg_locator: Callable[[], str | None] = lambda: shutil.which("ffmpeg"),
+        ffmpeg_locator: Callable[[], str | None] = locate_ffmpeg,
+        filter_checker: Callable[[str, str], bool] = ffmpeg_has_filter,
         runner: Callable[..., object] = run_ffmpeg,
         prober: Callable[[Path], object] = probe_video,
         keep_temp: bool = False,
@@ -125,6 +127,7 @@ class RenderManager:
         self._session_factory = session_factory
         self._executor = executor or ThreadPoolExecutor(max_workers=1)
         self._ffmpeg_locator = ffmpeg_locator
+        self._filter_checker = filter_checker
         self._runner = runner
         self._prober = prober
         self._keep_temp = keep_temp
@@ -164,6 +167,21 @@ class RenderManager:
             raise ValidationAppError(
                 "The reel has no segments to render.",
                 code="reel_empty",
+            )
+
+        ffmpeg = self._ffmpeg_locator()
+        if ffmpeg is None:
+            raise AppError(
+                "FFmpeg no está disponible en este sistema.",
+                code="ffmpeg_missing",
+                status_code=503,
+            )
+        if burn_subtitles and not self._filter_checker(ffmpeg, "ass"):
+            raise ValidationAppError(
+                "El FFmpeg instalado no incluye el filtro ASS/libass necesario para "
+                "quemar subtítulos. En macOS instala «ffmpeg-full» o desmarca "
+                "«Quemar subtítulos» para exportar sin ellos.",
+                code="ffmpeg_ass_filter_missing",
             )
 
         from app.services.coherence.service import assert_render_allowed
@@ -284,6 +302,40 @@ class RenderManager:
         if not candidate.is_file():
             raise NotFoundError("Render file is missing on disk.", code="render_output_missing")
         return candidate
+
+    def delete(self, db: Session, job_id: UUID) -> None:
+        """Delete one finished job and all of its output/report/temp artifacts."""
+        job = self.get(db, job_id)
+        if job.status in ACTIVE_RENDER_STATUSES:
+            raise ConflictError(
+                "No se puede eliminar un render mientras está activo.",
+                code="render_active",
+            )
+
+        renders_dir = project_renders_dir(job.project_id).resolve()
+        for filename in (job.output_filename, job.report_filename):
+            if not filename:
+                continue
+            candidate = (renders_dir / Path(filename).name).resolve()
+            if candidate.is_relative_to(renders_dir):
+                candidate.unlink(missing_ok=True)
+
+        temp_dir = project_render_temp_dir(job.project_id).resolve()
+        if temp_dir.is_dir():
+            job_token = str(job.id)
+            for candidate in temp_dir.iterdir():
+                if job_token not in candidate.name:
+                    continue
+                if candidate.is_dir() and not candidate.is_symlink():
+                    shutil.rmtree(candidate)
+                else:
+                    candidate.unlink(missing_ok=True)
+
+        project_id = job.project_id
+        db.delete(job)
+        db.commit()
+        storage.remove_empty_project_subdirs(project_id)
+        storage.remove_project_dir_if_empty(project_id)
 
     # ---- internals --------------------------------------------------------
 
@@ -555,6 +607,7 @@ class RenderManager:
                     end_card=end_card_spec,
                     background_music=full_reel_music,
                     loudness=loudness,
+                    audio_offset_ms=getattr(reel, "audio_offset_ms", 0) or 0,
                 )
             except ValueError as exc:
                 raise ValidationAppError(str(exc), code="invalid_render_options") from exc

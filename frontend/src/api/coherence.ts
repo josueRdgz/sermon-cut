@@ -1,5 +1,7 @@
 import type { Reel } from '../types/reel';
 import type {
+  CoherenceAutoFixPayload,
+  CoherenceAutoFixResponse,
   CoherenceDismissPayload,
   CoherenceExpandPayload,
   CoherenceReport,
@@ -38,6 +40,18 @@ export function expandCoherenceContext(
 ): Promise<Reel> {
   return apiJson<Reel>(
     `/api/projects/${projectId}/reels/${reelId}/validate/expand-context`,
+    'POST',
+    payload,
+  );
+}
+
+export function autoFixReelCoherence(
+  projectId: string,
+  reelId: string,
+  payload: CoherenceAutoFixPayload = {},
+): Promise<CoherenceAutoFixResponse> {
+  return apiJson<CoherenceAutoFixResponse>(
+    `/api/projects/${projectId}/reels/${reelId}/validate/auto-fix`,
     'POST',
     payload,
   );

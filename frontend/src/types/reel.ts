@@ -42,6 +42,8 @@ export interface Reel {
   aspect_ratio: AspectRatio;
   status: ReelStatus;
   framing_mode?: FramingMode | string;
+  /** Positive delays audio; negative advances it. */
+  audio_offset_ms: number;
   created_at: string;
   updated_at: string;
   segments: ReelSegment[];
@@ -92,6 +94,7 @@ export interface ReelUpdatePayload {
   subtitle_bible_reference?: string | null;
   aspect_ratio?: AspectRatio;
   status?: ReelStatus;
+  audio_offset_ms?: number;
 }
 
 export interface ReelSegmentUpdatePayload {

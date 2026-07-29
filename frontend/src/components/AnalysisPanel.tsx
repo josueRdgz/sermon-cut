@@ -18,6 +18,7 @@ import { ProgressBar } from './ProgressBar';
 
 interface AnalysisPanelProps {
   projectId: string;
+  transcriptRevision?: number;
   onCandidateAccepted?: (reelId: string) => void;
 }
 
@@ -43,7 +44,11 @@ function candidateDuration(candidate: AnalysisCandidate): number {
   return candidate.segments.reduce((sum, seg) => sum + Math.max(0, seg.end - seg.start), 0);
 }
 
-export function AnalysisPanel({ projectId, onCandidateAccepted }: AnalysisPanelProps) {
+export function AnalysisPanel({
+  projectId,
+  transcriptRevision = 0,
+  onCandidateAccepted,
+}: AnalysisPanelProps) {
   const [provider, setProvider] = useState<AnalysisProviderStatus | null>(null);
   const [job, setJob] = useState<AnalysisJob | null>(null);
   const [hasTranscript, setHasTranscript] = useState(false);
@@ -78,7 +83,7 @@ export function AnalysisPanel({ projectId, onCandidateAccepted }: AnalysisPanelP
     return () => {
       cancelled = true;
     };
-  }, [projectId]);
+  }, [projectId, transcriptRevision]);
 
   useEffect(() => {
     let cancelled = false;
@@ -200,6 +205,10 @@ export function AnalysisPanel({ projectId, onCandidateAccepted }: AnalysisPanelP
         Sugiere Reels a partir de la transcripción. Gemini es opcional: sin clave la app usa un
         proveedor mock determinista. Ningún candidato se renderiza solo; debes aceptar o descartar
         cada uno.
+      </p>
+      <p className="muted">
+        Ritmo editorial: se prioriza un pasaje continuo y, por defecto, cada Reel tendrá como
+        máximo 3 fragmentos de al menos 8 segundos cada uno.
       </p>
 
       {provider?.gemini_configured && (

@@ -4,9 +4,12 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from app.models.background_music import BackgroundMusicScope
+from app.models.background_music import BackgroundMusicPreset, BackgroundMusicScope
 from app.services.background_music.ffmpeg_filters import (
     ALIMITER,
+    DUCK_RATIO,
+    DUCK_THRESHOLD,
+    PRESET_VALUES,
     BackgroundMusicSpec,
     build_background_music_graph,
     build_ducked_mix_filters,
@@ -59,7 +62,8 @@ def test_music_prep_includes_trim_fades_volume_and_pad() -> None:
         fade_out_seconds=2.0,
         timeline_seconds=12.0,
     )
-    assert line.startswith("[2:a]")
+    assert line.startswith("[2:a]atrim=")
+    assert "[2:a]," not in line
     assert "atrim=1.5:40" in line
     assert "afade=t=in:st=0:d=1.5" in line
     assert "afade=t=out" in line
@@ -69,7 +73,7 @@ def test_music_prep_includes_trim_fades_volume_and_pad() -> None:
     assert "aloop" not in line
 
 
-def test_ducking_uses_sidechaincompress_and_voice_heavy_weights() -> None:
+def test_ducking_applies_slider_gain_only_once() -> None:
     ducked = build_ducked_mix_filters(
         voice_label="a0",
         music_label="bgm_raw",
@@ -79,7 +83,9 @@ def test_ducking_uses_sidechaincompress_and_voice_heavy_weights() -> None:
     joined = ";".join(ducked)
     assert "asplit=2" in joined
     assert "sidechaincompress=" in joined
-    assert "weights=1 0.45" in joined
+    assert f"threshold={DUCK_THRESHOLD}" in joined
+    assert "ratio=3" in joined
+    assert "weights=1 1" in joined
 
     plain = build_ducked_mix_filters(
         voice_label="a0",
@@ -89,7 +95,14 @@ def test_ducking_uses_sidechaincompress_and_voice_heavy_weights() -> None:
     )
     assert len(plain) == 1
     assert "sidechaincompress" not in plain[0]
-    assert "weights=1 0.35" in plain[0]
+    assert "weights=1 1" in plain[0]
+
+
+def test_soft_preset_stays_audible_before_moderate_ducking() -> None:
+    preset = PRESET_VALUES[BackgroundMusicPreset.very_soft_background]
+    assert preset["volume"] == 0.18
+    assert DUCK_THRESHOLD == 0.08
+    assert DUCK_RATIO == 3.0
 
 
 def test_background_music_graph_orders_mix_limiter_loudnorm() -> None:
@@ -129,8 +142,9 @@ def test_render_command_embeds_full_reel_music_filters() -> None:
         background_music=_spec(path=Path("/tmp/user-bed.ogg")),
         loudness=LoudnessSpec(target_lufs=-18.0),
     )
-    assert "-stream_loop" in plan.args
+    assert "-stream_loop" not in plan.args
     assert str(Path("/tmp/user-bed.ogg")) in plan.args
+    assert "apad=whole_dur=5" in plan.filter_complex
     assert "sidechaincompress=" in plan.filter_complex
     assert "loudnorm=I=-16" in plan.filter_complex  # from music spec, not LoudnessSpec
     assert ALIMITER in plan.filter_complex

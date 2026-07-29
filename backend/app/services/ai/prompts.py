@@ -7,11 +7,13 @@ from app.services.ai.schemas import AnalysisRequest
 SYSTEM_PROMPT = """\
 Actúa como editor de contenido cristiano reformado. Selecciona momentos que \
 sean fieles al sermón, comprensibles fuera de contexto y apropiados para Shorts. \
-Cada Reel puede unir varios fragmentos no consecutivos para eliminar \
-repeticiones, silencios o desvíos secundarios, pero nunca puede alterar el \
-significado del predicador. No inventes palabras ni reformules declaraciones \
-como si hubieran sido pronunciadas. Devuelve solo fragmentos reales con sus \
-tiempos.
+Prioriza un único fragmento continuo y de ritmo natural por Reel. Solo une \
+fragmentos no consecutivos cuando sea editorialmente imprescindible para \
+eliminar una repetición, un silencio largo o un desvío secundario, sin alterar \
+el significado del predicador. No conviertas cada línea de la transcripción en \
+un corte: un mismo segmento puede abarcar varias líneas consecutivas. No \
+inventes palabras ni reformules declaraciones como si hubieran sido \
+pronunciadas. Devuelve solo fragmentos reales con sus tiempos.
 
 Criterios a priorizar:
 - claridad bíblica;
@@ -42,8 +44,8 @@ Reglas técnicas:
 1. Cada segmento debe citar `exact_text` copiado literalmente de la \
 transcripción (sin inventar ni parafrasear).
 2. `start` y `end` son segundos absolutos del video original.
-3. Un Reel puede tener varios segmentos no consecutivos; ordénalos \
-cronológicamente.
+3. Prioriza 1 segmento continuo por Reel. Si hacen falta cortes, usa la menor \
+cantidad posible y nunca más de 3 segmentos; ordénalos cronológicamente.
 4. La duración total del Reel (suma de segmentos) debe caer entre el mínimo y \
 el máximo pedidos.
 5. No inventes hashtags sensacionalistas ni títulos que el predicador no \
@@ -71,6 +73,10 @@ def build_user_prompt(request: AnalysisRequest) -> str:
         f"- Máximo de Reels a sugerir: {prefs.max_reels}",
         f"- Duración deseada por Reel: {prefs.min_duration_seconds:.0f}"
         f"–{prefs.max_duration_seconds:.0f} s",
+        f"- Máximo de fragmentos/cortes por Reel: {prefs.max_segments_per_reel}",
+        f"- Duración mínima por fragmento: {prefs.min_segment_seconds:.0f} s",
+        "- Ritmo: conserva intervenciones continuas largas; no cortes por cada "
+        "frase ni por cada línea de subtítulos.",
         f"- Orientación doctrinal/editorial: {prefs.doctrinal_orientation}",
     ]
     if prefs.additional_instructions:
@@ -93,9 +99,10 @@ def build_user_prompt(request: AnalysisRequest) -> str:
 
     lines += [
         "",
-        "Devuelve un objeto JSON con la clave `clips`. Cada clip puede contener "
-        "varios `segments` no consecutivos. `exact_text` debe coincidir con el "
-        "texto real de la transcripción en ese intervalo.",
+        "Devuelve un objeto JSON con la clave `clips`. Cada clip debe preferir "
+        "un solo `segment` continuo y nunca superar el máximo indicado. "
+        "`exact_text` debe coincidir con el texto real de la transcripción en "
+        "ese intervalo.",
     ]
     return "\n".join(lines)
 
@@ -119,6 +126,10 @@ def build_merge_prompt(
             f"- Sermón: {meta.title} ({meta.duration_seconds:.1f} s)",
             f"- Máximo de Reels: {prefs.max_reels}",
             f"- Duración: {prefs.min_duration_seconds:.0f}–{prefs.max_duration_seconds:.0f} s",
+            f"- Máximo de fragmentos/cortes por Reel: {prefs.max_segments_per_reel}",
+            f"- Duración mínima por fragmento: {prefs.min_segment_seconds:.0f} s",
+            "- Prioriza continuidad: conserva 1 segmento siempre que sea posible y no "
+            "dividas frases consecutivas en cortes distintos.",
             f"- Orientación: {prefs.doctrinal_orientation}",
             "",
             "## Candidatos por bloque (JSON)",

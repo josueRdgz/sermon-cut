@@ -1,5 +1,5 @@
 import type { RenderJob, RenderJobListResponse, StartRenderPayload } from '../types/render';
-import { API_BASE_URL, apiGet, apiJson } from './client';
+import { API_BASE_URL, apiDelete, apiGet, apiJson } from './client';
 
 export function startRender(
   projectId: string,
@@ -23,6 +23,10 @@ export function getRenderJob(jobId: string): Promise<RenderJob> {
 
 export function cancelRenderJob(jobId: string): Promise<RenderJob> {
   return apiJson<RenderJob>(`/api/render-jobs/${jobId}/cancel`, 'POST', {});
+}
+
+export function deleteRenderJob(jobId: string): Promise<void> {
+  return apiDelete(`/api/render-jobs/${jobId}`);
 }
 
 export function revealRenderOutput(

@@ -14,6 +14,7 @@ from app.services.ai.schemas import (
     ProviderUsage,
     SuggestedClip,
     SuggestedSegment,
+    TranscriptSegmentInput,
 )
 
 
@@ -72,15 +73,27 @@ class MockAIProvider(AIProvider):
                 cursor = max(cursor + 1, next_index)
                 continue
 
-            segments = [
-                SuggestedSegment(
-                    start=item.start,
-                    end=item.end,
-                    exact_text=item.text.strip(),
-                    reason="Momento claro y autosuficiente (mock determinista).",
+            groups: list[list[TranscriptSegmentInput]] = []
+            for item in collected:
+                if groups and item.start - groups[-1][-1].end <= 1.25:
+                    groups[-1].append(item)
+                elif len(groups) < prefs.max_segments_per_reel:
+                    groups.append([item])
+                else:
+                    break
+
+            segments = []
+            for group in groups:
+                first = group[0]
+                last = group[-1]
+                segments.append(
+                    SuggestedSegment(
+                        start=first.start,
+                        end=last.end,
+                        exact_text=" ".join(item.text.strip() for item in group),
+                        reason="Momento claro y autosuficiente (mock determinista).",
+                    )
                 )
-                for item in collected
-            ]
             joined = " ".join(seg.exact_text for seg in segments)
             title_seed = collected[0].text.strip().split()
             title = " ".join(title_seed[:8]) or f"Clip {len(clips) + 1}"

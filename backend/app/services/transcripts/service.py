@@ -195,6 +195,55 @@ def delete_transcript(db: Session, project_id: UUID) -> None:
     db.commit()
 
 
+def _sync_edited_words(segment: TranscriptSegment, text: str) -> None:
+    """Keep word-level captions consistent after a user corrects segment text."""
+    existing = sorted(segment.words, key=lambda word: word.order)
+    if not existing:
+        return
+
+    tokens = text.split()
+    if len(tokens) == len(existing):
+        for token, word in zip(tokens, existing, strict=True):
+            if word.text != token:
+                word.text = token
+                # Confidence belongs to the recognizer's original guess.
+                word.confidence = None
+        return
+
+    start = segment.start_seconds
+    end = segment.end_seconds
+    if start is None or end is None or end <= start:
+        segment.words.clear()
+        return
+
+    # When words were added or removed, distribute the corrected tokens across
+    # the original segment window. Character weighting gives longer words a
+    # little more screen time while preserving the segment boundaries.
+    weights = [max(1, len(token)) for token in tokens]
+    total_weight = sum(weights)
+    duration = end - start
+    rebuilt: list[TranscriptWord] = []
+    elapsed_weight = 0
+    for order, (token, weight) in enumerate(zip(tokens, weights, strict=True)):
+        word_start = start + duration * elapsed_weight / total_weight
+        elapsed_weight += weight
+        word_end = (
+            end
+            if order == len(tokens) - 1
+            else start + duration * elapsed_weight / total_weight
+        )
+        rebuilt.append(
+            TranscriptWord(
+                order=order,
+                start_seconds=word_start,
+                end_seconds=word_end,
+                text=token,
+                confidence=None,
+            )
+        )
+    segment.words = rebuilt
+
+
 def update_segment(
     db: Session,
     segment_id: UUID,
@@ -242,11 +291,24 @@ def update_segment(
         ),
     )
 
-    segment.text = new_text.strip() if isinstance(new_text, str) else segment.text
+    cleaned_text = new_text.strip() if isinstance(new_text, str) else segment.text
+    if not cleaned_text:
+        raise ValidationAppError(
+            "Transcript text cannot be empty.",
+            code="empty_segment_text",
+        )
     segment.start_seconds = new_start
     segment.end_seconds = new_end
+    if cleaned_text != segment.text:
+        segment.text = cleaned_text
+        _sync_edited_words(segment, cleaned_text)
 
     transcript.full_text = "\n".join(s.text for s in siblings)
+    transcript.has_word_timestamps = any(
+        word.start_seconds is not None and word.end_seconds is not None
+        for sibling in siblings
+        for word in sibling.words
+    )
     if all(s.start_seconds is not None and s.end_seconds is not None for s in siblings):
         transcript.status = TranscriptStatus.ready
     _touch(transcript)

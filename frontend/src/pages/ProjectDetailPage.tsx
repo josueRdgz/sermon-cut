@@ -1,7 +1,7 @@
-import { useEffect, useState } from 'react';
-import { Link, useNavigate, useParams } from 'react-router-dom';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 
-import { deleteProject, getProject } from '../api/projects';
+import { deleteProject, deleteProjectVideo, getProject } from '../api/projects';
 import { AnalysisPanel } from '../components/AnalysisPanel';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { ReelEditor } from '../components/ReelEditor';
@@ -10,14 +10,79 @@ import { TranscriptEditor } from '../components/TranscriptEditor';
 import type { Project } from '../types/project';
 import { formatDate, formatDuration, statusLabel } from '../utils/format';
 
+const WORKSPACE_SECTIONS = [
+  {
+    id: 'project',
+    label: 'Proyecto',
+    description: 'Archivo y datos',
+  },
+  {
+    id: 'transcript',
+    label: 'Transcripción',
+    description: 'Texto y tiempos',
+  },
+  {
+    id: 'analysis',
+    label: 'Análisis IA',
+    description: 'Propuestas de Reels',
+  },
+  {
+    id: 'editor',
+    label: 'Editor de Reel',
+    description: 'Editar y exportar',
+  },
+] as const;
+
+type WorkspaceSection = (typeof WORKSPACE_SECTIONS)[number]['id'];
+
+function isWorkspaceSection(value: string | null): value is WorkspaceSection {
+  return WORKSPACE_SECTIONS.some((section) => section.id === value);
+}
+
 export function ProjectDetailPage() {
   const { projectId } = useParams<{ projectId: string }>();
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const workspaceRef = useRef<HTMLElement>(null);
   const [project, setProject] = useState<Project | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [confirmOpen, setConfirmOpen] = useState(false);
+  const [confirmVideoDelete, setConfirmVideoDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [deletingVideo, setDeletingVideo] = useState(false);
+  const [transcriptRevision, setTranscriptRevision] = useState(0);
+  const [reelRevision, setReelRevision] = useState(0);
+  const [reelToFocus, setReelToFocus] = useState<string | null>(null);
+  const requestedSection = searchParams.get('section');
+  const activeSection: WorkspaceSection = isWorkspaceSection(requestedSection)
+    ? requestedSection
+    : 'project';
+
+  const activateSection = useCallback(
+    (section: WorkspaceSection) => {
+      workspaceRef.current
+        ?.querySelectorAll<HTMLMediaElement>('video, audio')
+        .forEach((media) => media.pause());
+      const next = new URLSearchParams(searchParams);
+      next.set('section', section);
+      setSearchParams(next, { replace: true });
+    },
+    [searchParams, setSearchParams],
+  );
+
+  const handleTranscriptChanged = useCallback(() => {
+    setTranscriptRevision((revision) => revision + 1);
+  }, []);
+
+  const handleCandidateAccepted = useCallback(
+    (reelId: string) => {
+      setReelToFocus(reelId);
+      setReelRevision((revision) => revision + 1);
+      activateSection('editor');
+    },
+    [activateSection],
+  );
 
   useEffect(() => {
     if (!projectId) return;
@@ -54,6 +119,21 @@ export function ProjectDetailPage() {
     }
   }
 
+  async function handleDeleteVideo() {
+    if (!project) return;
+    setDeletingVideo(true);
+    setError(null);
+    try {
+      const updated = await deleteProjectVideo(project.id);
+      setProject(updated);
+      setConfirmVideoDelete(false);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'No se pudo eliminar el video');
+    } finally {
+      setDeletingVideo(false);
+    }
+  }
+
   if (loading) {
     return (
       <main className="page">
@@ -72,7 +152,7 @@ export function ProjectDetailPage() {
   }
 
   return (
-    <main className="page page--wide">
+    <main ref={workspaceRef} className="page page--wide project-workspace">
       <header className="page__header">
         <p className="eyebrow">
           <Link to="/projects">← Proyectos</Link>
@@ -84,52 +164,127 @@ export function ProjectDetailPage() {
         </p>
       </header>
 
-      <section className="card">
-        <h2>Detalles</h2>
-        <StatusRow
-          label="Estado"
-          value={statusLabel(project.status)}
-          ok={project.status !== 'failed'}
+      <nav className="workspace-nav" aria-label="Flujo del proyecto">
+        <div className="workspace-nav__track" role="tablist" aria-label="Categorías">
+          {WORKSPACE_SECTIONS.map((section, index) => (
+            <button
+              key={section.id}
+              id={`workspace-tab-${section.id}`}
+              type="button"
+              role="tab"
+              aria-selected={activeSection === section.id}
+              aria-controls={`workspace-panel-${section.id}`}
+              className={`workspace-nav__tab${
+                activeSection === section.id ? ' workspace-nav__tab--active' : ''
+              }`}
+              onClick={() => activateSection(section.id)}
+            >
+              <span className="workspace-nav__number">{index + 1}</span>
+              <span>
+                <strong>{section.label}</strong>
+                <small>{section.description}</small>
+              </span>
+            </button>
+          ))}
+        </div>
+      </nav>
+
+      <div
+        id="workspace-panel-project"
+        role="tabpanel"
+        aria-labelledby="workspace-tab-project"
+        hidden={activeSection !== 'project'}
+      >
+        <section className="card">
+          <h2>Detalles</h2>
+          <StatusRow
+            label="Estado"
+            value={statusLabel(project.status)}
+            ok={project.status !== 'failed'}
+          />
+          <StatusRow label="Duración" value={formatDuration(project.duration_seconds)} />
+          <StatusRow label="Resolución" value={project.resolution ?? '—'} />
+          <StatusRow label="FPS" value={project.fps != null ? String(project.fps) : '—'} />
+          <StatusRow label="Códec video" value={project.video_codec ?? '—'} />
+          <StatusRow label="Códec audio" value={project.audio_codec ?? '—'} />
+          <StatusRow
+            label="Video"
+            value={project.has_video ? (project.video_filename ?? 'Sí') : 'No'}
+          />
+          <StatusRow
+            label="Portada"
+            value={project.has_cover ? (project.cover_filename ?? 'Sí') : 'No'}
+          />
+          <StatusRow label="Referencia" value={project.bible_reference ?? '—'} />
+          <StatusRow label="Canal YouTube" value={project.youtube_channel} />
+          <StatusRow label="Creado" value={formatDate(project.created_at)} />
+          <StatusRow label="Modificado" value={formatDate(project.updated_at)} />
+          {project.full_sermon_url && (
+            <StatusRow label="Sermón completo" value={project.full_sermon_url} />
+          )}
+          {project.error_message && (
+            <StatusRow label="Error" value={project.error_message} ok={false} />
+          )}
+          {project.has_video && (
+            <button
+              type="button"
+              className="button button--danger button--inline"
+              onClick={() => setConfirmVideoDelete(true)}
+            >
+              Eliminar video original
+            </button>
+          )}
+        </section>
+        <button
+          type="button"
+          className="button button--danger"
+          onClick={() => setConfirmOpen(true)}
+        >
+          Eliminar proyecto
+        </button>
+      </div>
+
+      <div
+        id="workspace-panel-transcript"
+        role="tabpanel"
+        aria-labelledby="workspace-tab-transcript"
+        hidden={activeSection !== 'transcript'}
+      >
+        <TranscriptEditor
+          projectId={project.id}
+          hasVideo={project.has_video}
+          onTranscriptChanged={handleTranscriptChanged}
         />
-        <StatusRow label="Duración" value={formatDuration(project.duration_seconds)} />
-        <StatusRow label="Resolución" value={project.resolution ?? '—'} />
-        <StatusRow label="FPS" value={project.fps != null ? String(project.fps) : '—'} />
-        <StatusRow label="Códec video" value={project.video_codec ?? '—'} />
-        <StatusRow label="Códec audio" value={project.audio_codec ?? '—'} />
-        <StatusRow
-          label="Video"
-          value={project.has_video ? (project.video_filename ?? 'Sí') : 'No'}
+      </div>
+
+      <div
+        id="workspace-panel-analysis"
+        role="tabpanel"
+        aria-labelledby="workspace-tab-analysis"
+        hidden={activeSection !== 'analysis'}
+      >
+        <AnalysisPanel
+          projectId={project.id}
+          transcriptRevision={transcriptRevision}
+          onCandidateAccepted={handleCandidateAccepted}
         />
-        <StatusRow
-          label="Portada"
-          value={project.has_cover ? (project.cover_filename ?? 'Sí') : 'No'}
+      </div>
+
+      <div
+        id="workspace-panel-editor"
+        role="tabpanel"
+        aria-labelledby="workspace-tab-editor"
+        hidden={activeSection !== 'editor'}
+      >
+        <ReelEditor
+          projectId={project.id}
+          hasVideo={project.has_video}
+          hasCover={project.has_cover}
+          videoDuration={project.duration_seconds}
+          refreshToken={reelRevision}
+          focusReelId={reelToFocus}
         />
-        <StatusRow label="Referencia" value={project.bible_reference ?? '—'} />
-        <StatusRow label="Canal YouTube" value={project.youtube_channel} />
-        <StatusRow label="Creado" value={formatDate(project.created_at)} />
-        <StatusRow label="Modificado" value={formatDate(project.updated_at)} />
-        {project.full_sermon_url && (
-          <StatusRow label="Sermón completo" value={project.full_sermon_url} />
-        )}
-        {project.error_message && (
-          <StatusRow label="Error" value={project.error_message} ok={false} />
-        )}
-      </section>
-
-      <TranscriptEditor projectId={project.id} hasVideo={project.has_video} />
-
-      <AnalysisPanel projectId={project.id} />
-
-      <ReelEditor
-        projectId={project.id}
-        hasVideo={project.has_video}
-        hasCover={project.has_cover}
-        videoDuration={project.duration_seconds}
-      />
-
-      <button type="button" className="button button--danger" onClick={() => setConfirmOpen(true)}>
-        Eliminar proyecto
-      </button>
+      </div>
 
       {confirmOpen && (
         <ConfirmDialog
@@ -138,6 +293,17 @@ export function ProjectDetailPage() {
           busy={deleting}
           onConfirm={() => void handleDelete()}
           onCancel={() => !deleting && setConfirmOpen(false)}
+        />
+      )}
+
+      {confirmVideoDelete && (
+        <ConfirmDialog
+          title="Eliminar video original"
+          message="Se borrará el archivo original para liberar espacio. La transcripción, los cortes, la portada y los Reels ya exportados se conservarán."
+          confirmLabel="Eliminar video"
+          busy={deletingVideo}
+          onConfirm={() => void handleDeleteVideo()}
+          onCancel={() => !deletingVideo && setConfirmVideoDelete(false)}
         />
       )}
     </main>

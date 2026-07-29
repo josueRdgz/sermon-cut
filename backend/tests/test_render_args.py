@@ -106,6 +106,7 @@ def test_center_crop_normalizes_every_segment() -> None:
     assert graph.count("scale=1080:1920:force_original_aspect_ratio=increase") == 2
     assert graph.count("crop=1080:1920") == 2
     assert graph.count("fps=30") == 2
+    assert graph.count("settb=AVTB") == 2
     assert graph.count("format=yuv420p") == 2
     assert graph.count("setsar=1") == 2
     assert plan.width == 1080
@@ -130,6 +131,36 @@ def test_audio_normalized_to_stereo_48k_with_boundary_fades() -> None:
     assert graph.count("aresample=48000") == 2
     assert graph.count("afade=t=in") == 2
     assert graph.count("afade=t=out") == 2
+    assert graph.count("d=0.003") == 4
+
+
+def test_positive_audio_offset_uses_earlier_independent_audio_inputs() -> None:
+    plan = _build(audio_offset_ms=250)
+    assert plan.args.count("-i") == 4
+    seek_values = [
+        plan.args[index + 1] for index, value in enumerate(plan.args) if value == "-ss"
+    ]
+    assert seek_values == ["10.2", "11.05", "9.95", "10.8"]
+    assert "[2:a]" in plan.filter_complex
+    assert "[3:a]" in plan.filter_complex
+
+
+def test_negative_audio_offset_advances_audio_and_start_boundary_delays_silence() -> None:
+    advanced = _build(audio_offset_ms=-250)
+    seek_values = [
+        advanced.args[index + 1]
+        for index, value in enumerate(advanced.args)
+        if value == "-ss"
+    ]
+    assert seek_values[-2:] == ["10.45", "11.3"]
+
+    near_start = _build(
+        segments=[RenderSegmentSpec(0.1, 2.1)],
+        audio_offset_ms=500,
+    )
+    assert "adelay=400:all=1" in near_start.filter_complex
+    assert "apad=whole_dur=2" in near_start.filter_complex
+    assert "atrim=0:2" in near_start.filter_complex
 
 
 def test_silence_generated_when_source_has_no_audio() -> None:

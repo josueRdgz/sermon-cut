@@ -10,7 +10,6 @@ from app.models.end_card import (
     EndCardAudioMode,
 )
 from app.models.project import Project
-from app.services import storage
 from app.services.endcard.image import render_end_card, save_end_card
 from app.services.endcard.layout import clamp_duration
 from app.services.endcard.service import ResolvedEndCard, build_content
@@ -41,26 +40,12 @@ def build_end_card_spec(
     image = render_end_card(content=content, layout=config.layout, width=width, height=height)
     save_end_card(image, image_path)
 
-    music_path: Path | None = None
-    if config.audio_mode == EndCardAudioMode.local_music and config.music_filename:
-        candidate = storage.resolve_inside_project(project.id, config.music_filename)
-        music_path = candidate if candidate.is_file() else None
-
-    continue_from: float | None = None
-    if config.audio_mode == EndCardAudioMode.continue_with_fade:
-        tail_start = main_content_end_seconds
-        if tail_start is not None and (
-            source_duration_seconds is None or tail_start < source_duration_seconds - 0.1
-        ):
-            continue_from = tail_start
-
     return EndCardSpec(
         image_path=image_path,
         duration=duration,
         fade_in_seconds=config.fade_in_ms / 1000.0,
         audio_fade_out_seconds=config.audio_fade_out_ms / 1000.0,
-        audio_mode=config.audio_mode.value,
-        music_path=music_path,
-        music_volume=config.music_volume,
-        continue_from_seconds=continue_from,
+        audio_mode=EndCardAudioMode.silence.value,
+        music_path=None,
+        continue_from_seconds=None,
     )

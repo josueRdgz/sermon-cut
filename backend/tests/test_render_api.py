@@ -121,6 +121,7 @@ def render_env(
         session_factory=TestingSessionLocal,
         executor=InlineExecutor(),
         ffmpeg_locator=lambda: "ffmpeg",
+        filter_checker=lambda _binary, _filter: True,
         runner=runner,
         prober=_fake_prober(),
     )
@@ -269,6 +270,25 @@ def test_render_always_appends_the_mandatory_end_card(render_env) -> None:
     from app.core.paths import project_renders_dir
 
     assert not list((project_renders_dir(UUID(project_id)) / ".tmp").glob("*.png"))
+
+
+def test_saved_audio_offset_reaches_ffmpeg_export(render_env) -> None:
+    client, session_factory, runner = render_env
+    project_id, reel_id = _seed_project_and_reel(session_factory)
+
+    rendered = client.post(
+        f"/api/projects/{project_id}/reels/{reel_id}/render",
+        json={"layout": "center_crop", "audio_offset_ms": 300},
+    )
+    assert rendered.status_code == 202
+    saved = client.get(f"/api/projects/{project_id}/reels/{reel_id}")
+    assert saved.json()["audio_offset_ms"] == 300
+    args = runner.calls[-1]
+    seek_values = [args[index + 1] for index, value in enumerate(args) if value == "-ss"]
+    assert seek_values[:4] == ["620", "665", "619.7", "664.7"]
+    graph = args[args.index("-filter_complex") + 1]
+    assert "[2:a]" in graph
+    assert "[3:a]" in graph
 
 
 def test_end_card_duration_override_reaches_the_render(render_env) -> None:
@@ -429,6 +449,31 @@ def test_cancelled_render_produces_no_output(render_env) -> None:
     assert output.status_code == 404
 
 
+def test_delete_render_removes_mp4_report_and_history(render_env) -> None:
+    client, session_factory, _ = render_env
+    project_id, reel_id = _seed_project_and_reel(session_factory)
+    rendered = client.post(
+        f"/api/projects/{project_id}/reels/{reel_id}/render",
+        json={},
+    ).json()
+
+    from app.core.paths import project_renders_dir
+
+    directory = project_renders_dir(UUID(project_id))
+    output = directory / rendered["output_filename"]
+    report = directory / rendered["report_filename"]
+    assert output.is_file()
+    assert report.is_file()
+
+    deleted = client.delete(f"/api/render-jobs/{rendered['id']}")
+    assert deleted.status_code == 204
+    assert not output.exists()
+    assert not report.exists()
+    assert client.get(f"/api/render-jobs/{rendered['id']}").status_code == 404
+    history = client.get(f"/api/projects/{project_id}/reels/{reel_id}/renders")
+    assert history.json()["total"] == 0
+
+
 def test_cancel_endpoint_on_finished_job_is_noop(render_env) -> None:
     client, session_factory, _ = render_env
     project_id, reel_id = _seed_project_and_reel(session_factory)
@@ -460,7 +505,7 @@ _HAS_FFMPEG = shutil.which("ffmpeg") is not None
 
 @pytest.mark.skipif(not _HAS_FFMPEG, reason="FFmpeg is not installed")
 def test_integration_real_ffmpeg_render(tmp_path: Path) -> None:
-    """Render two non-consecutive windows of a synthetic clip end to end."""
+    """Render consecutive crossfades without mixing FFmpeg timebases."""
     from app.services.render.args import RenderSegmentSpec, build_render_command
     from app.services.render.runner import run_ffmpeg
 
@@ -487,8 +532,9 @@ def test_integration_real_ffmpeg_render(tmp_path: Path) -> None:
         ffmpeg=ffmpeg,
         source=source,
         segments=[
-            RenderSegmentSpec(0.5, 2.0, "hard_cut", 0),
-            RenderSegmentSpec(4.0, 5.5),
+            RenderSegmentSpec(0.5, 2.0, "short_crossfade", 200),
+            RenderSegmentSpec(2.5, 4.0, "short_crossfade", 200),
+            RenderSegmentSpec(4.5, 5.5),
         ],
         aspect_ratio="9:16",
         layout="blurred_background",
@@ -497,6 +543,7 @@ def test_integration_real_ffmpeg_render(tmp_path: Path) -> None:
         fps=25.0,
         normalize_loudness=False,
         preset="ultrafast",
+        audio_offset_ms=250,
     )
 
     seen: list[float] = []
@@ -517,4 +564,4 @@ def test_integration_real_ffmpeg_render(tmp_path: Path) -> None:
     assert (meta.width, meta.height) == (1080, 1920)
     assert meta.video_codec == "h264"
     assert meta.audio_codec == "aac"
-    assert meta.duration_seconds == pytest.approx(3.0, abs=0.4)
+    assert meta.duration_seconds == pytest.approx(3.6, abs=0.4)

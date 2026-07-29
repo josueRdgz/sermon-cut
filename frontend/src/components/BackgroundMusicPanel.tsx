@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import {
+  backgroundMusicAudioUrl,
   getBackgroundMusic,
   getBackgroundMusicMeters,
   listBackgroundMusicPresets,
@@ -12,7 +13,6 @@ import type {
   BackgroundMusicPayload,
   BackgroundMusicPreset,
   BackgroundMusicPresetInfo,
-  BackgroundMusicScope,
   BackgroundMusicSettings,
 } from '../types/backgroundMusic';
 
@@ -27,11 +27,6 @@ const FALLBACK_PRESETS: BackgroundMusicPresetInfo[] = [
     id: 'none',
     label: 'Ninguna',
     description: 'Sin música de fondo (predeterminado).',
-  },
-  {
-    id: 'end_card_only',
-    label: 'Solo pantalla final',
-    description: 'La música suena únicamente en la tarjeta de cierre.',
   },
   {
     id: 'very_soft_background',
@@ -52,6 +47,8 @@ export function BackgroundMusicPanel({ projectId, showMeters = true }: Backgroun
   const [notice, setNotice] = useState<string | null>(null);
   const [uploadPercent, setUploadPercent] = useState<number | null>(null);
   const musicInputRef = useRef<HTMLInputElement>(null);
+  const audioPreviewRef = useRef<HTMLAudioElement>(null);
+  const [audioPreviewKey, setAudioPreviewKey] = useState(() => Date.now().toString());
 
   const reloadMeters = useCallback(async () => {
     if (!showMeters) return;
@@ -114,6 +111,7 @@ export function BackgroundMusicPanel({ projectId, showMeters = true }: Backgroun
     try {
       const next = await uploadBackgroundMusic(projectId, file, setUploadPercent);
       setSettings(next);
+      setAudioPreviewKey(Date.now().toString());
       setNotice('Audio guardado en el proyecto. Elige un preset distinto de «Ninguna» para usarlo.');
       await reloadMeters();
     } catch (err) {
@@ -123,6 +121,22 @@ export function BackgroundMusicPanel({ projectId, showMeters = true }: Backgroun
       setUploadPercent(null);
       if (musicInputRef.current) musicInputRef.current.value = '';
     }
+  };
+
+  const markCurrentPositionAsStart = async () => {
+    const player = audioPreviewRef.current;
+    if (!player || !Number.isFinite(player.currentTime)) return;
+    const start = Math.round(player.currentTime * 10) / 10;
+    await patch({ start_seconds: start }, `Inicio guardado en ${start.toFixed(1)} s`);
+  };
+
+  const playFromSavedStart = () => {
+    const player = audioPreviewRef.current;
+    if (!player) return;
+    player.currentTime = settings?.start_seconds ?? 0;
+    void player.play().catch((err: unknown) => {
+      setError(err instanceof Error ? err.message : 'No se pudo reproducir la pista');
+    });
   };
 
   if (!settings) {
@@ -149,13 +163,29 @@ export function BackgroundMusicPanel({ projectId, showMeters = true }: Backgroun
       </div>
 
       <p className="muted">
-        Opcional y desactivada por defecto. Solo archivos locales (MP3, WAV, M4A, OGG) — sin
-        catálogos ni descargas.
+        Puedes usar una pista descargada desde la Biblioteca de audio de YouTube o un archivo
+        local (MP3, WAV, M4A u OGG). La música nunca se repite: si termina antes que el Reel, el
+        resto queda en silencio.
       </p>
 
       <p className="background-music-panel__rights" role="note">
         {rights}
       </p>
+
+      <div className="button-stack">
+        <a
+          className="button-link"
+          href="https://www.youtube.com/audiolibrary"
+          target="_blank"
+          rel="noreferrer"
+        >
+          Abrir Biblioteca de audio de YouTube
+        </a>
+        <span className="muted">
+          Descarga el MP3 en YouTube Studio y luego selecciónalo aquí. Revisa si la pista exige
+          atribución.
+        </span>
+      </div>
 
       <div className="transcript-toolbar">
         <label className="field field--inline">
@@ -178,19 +208,6 @@ export function BackgroundMusicPanel({ projectId, showMeters = true }: Backgroun
           </select>
         </label>
 
-        <label className="field field--inline">
-          <span>Alcance</span>
-          <select
-            value={settings.scope}
-            disabled={busy || settings.preset === 'none'}
-            onChange={(e) =>
-              void patch({ scope: e.target.value as BackgroundMusicScope }, 'Alcance actualizado')
-            }
-          >
-            <option value="full_reel">Durante todo el Reel</option>
-            <option value="end_card_only">Solo pantalla final</option>
-          </select>
-        </label>
       </div>
 
       <div className="background-music-panel__upload">
@@ -206,7 +223,7 @@ export function BackgroundMusicPanel({ projectId, showMeters = true }: Backgroun
           disabled={busy}
           onClick={() => musicInputRef.current?.click()}
         >
-          {uploadPercent != null ? `Subiendo… ${uploadPercent}%` : 'Subir audio local'}
+          {uploadPercent != null ? `Subiendo… ${uploadPercent}%` : 'Seleccionar pista descargada'}
         </button>
         {settings.music_filename && (
           <>
@@ -223,6 +240,38 @@ export function BackgroundMusicPanel({ projectId, showMeters = true }: Backgroun
         )}
       </div>
 
+      {settings.music_filename && (
+        <div className="background-music-panel__player">
+          <strong>Escuchar y elegir el inicio</strong>
+          <audio
+            key={audioPreviewKey}
+            ref={audioPreviewRef}
+            controls
+            preload="metadata"
+            src={backgroundMusicAudioUrl(projectId, audioPreviewKey)}
+          >
+            Tu navegador no soporta reproducción de audio.
+          </audio>
+          <div className="button-stack">
+            <button type="button" disabled={busy} onClick={() => void markCurrentPositionAsStart()}>
+              Usar posición actual como inicio
+            </button>
+            <button
+              type="button"
+              className="button button--secondary"
+              disabled={busy}
+              onClick={playFromSavedStart}
+            >
+              Reproducir desde {settings.start_seconds.toFixed(1)} s
+            </button>
+          </div>
+          <p className="muted">
+            Mueve la barra al punto deseado y guárdalo. La exportación comenzará allí y no
+            repetirá la pista si llega al final.
+          </p>
+        </div>
+      )}
+
       {musicActive && (
         <div className="background-music-panel__controls">
           <label className="field">
@@ -235,13 +284,15 @@ export function BackgroundMusicPanel({ projectId, showMeters = true }: Backgroun
               value={settings.volume}
               disabled={busy}
               onChange={(e) => setSettings({ ...settings, volume: Number(e.target.value) })}
-              onMouseUp={(e) =>
+              onPointerUp={(e) =>
                 void patch({ volume: Number((e.target as HTMLInputElement).value) })
               }
-              onTouchEnd={(e) =>
-                void patch({ volume: Number((e.target as HTMLInputElement).value) })
-              }
+              onBlur={(e) => void patch({ volume: Number(e.target.value) })}
             />
+            <small className="muted">
+              Se aplica como volumen real de exportación; el ducking solo lo reduce mientras hay
+              voz.
+            </small>
           </label>
 
           <div className="background-music-panel__grid">

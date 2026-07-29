@@ -108,6 +108,52 @@ def test_upload_txt_is_unsynced(client: TestClient) -> None:
     assert export.json()["code"] == "unsynced_export"
 
 
+def test_editing_segment_text_updates_word_level_captions(client: TestClient) -> None:
+    project = _create_project(client)
+    content = (FIXTURES / "sample.json").read_bytes()
+    uploaded = client.post(
+        f"/api/projects/{project['id']}/transcript",
+        files={"file": ("sample.json", content, "application/json")},
+    )
+    assert uploaded.status_code == 201
+    segment = uploaded.json()["segments"][0]
+    original_times = [
+        (word["start_seconds"], word["end_seconds"]) for word in segment["words"]
+    ]
+
+    same_count = client.patch(
+        f"/api/transcripts/segments/{segment['id']}",
+        json={"text": "Palabra corregida aquí"},
+    )
+    assert same_count.status_code == 200
+    edited = same_count.json()["segments"][0]
+    assert [word["text"] for word in edited["words"]] == [
+        "Palabra",
+        "corregida",
+        "aquí",
+    ]
+    assert [
+        (word["start_seconds"], word["end_seconds"]) for word in edited["words"]
+    ] == original_times
+
+    different_count = client.patch(
+        f"/api/transcripts/segments/{segment['id']}",
+        json={"text": "Una frase corregida con más palabras"},
+    )
+    assert different_count.status_code == 200
+    rebuilt = different_count.json()["segments"][0]["words"]
+    assert [word["text"] for word in rebuilt] == [
+        "Una",
+        "frase",
+        "corregida",
+        "con",
+        "más",
+        "palabras",
+    ]
+    assert rebuilt[0]["start_seconds"] == 10.2
+    assert rebuilt[-1]["end_seconds"] == 14.8
+
+
 def test_upload_corrupt_srt_returns_structured_error(client: TestClient) -> None:
     project = _create_project(client)
     content = (FIXTURES / "corrupt_overlap.srt").read_bytes()

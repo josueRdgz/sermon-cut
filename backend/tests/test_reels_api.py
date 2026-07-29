@@ -207,11 +207,18 @@ def test_list_get_update_delete_reel(
 
     patched = client.patch(
         f"/api/projects/{project_id}/reels/{reel_id}",
-        json={"title": "Dos", "aspect_ratio": "1:1"},
+        json={"title": "Dos", "aspect_ratio": "1:1", "audio_offset_ms": 240},
     )
     assert patched.status_code == 200
     assert patched.json()["title"] == "Dos"
     assert patched.json()["aspect_ratio"] == "1:1"
+    assert patched.json()["audio_offset_ms"] == 240
+
+    invalid_offset = client.patch(
+        f"/api/projects/{project_id}/reels/{reel_id}",
+        json={"audio_offset_ms": 1001},
+    )
+    assert invalid_offset.status_code == 422
 
     deleted = client.delete(f"/api/projects/{project_id}/reels/{reel_id}")
     assert deleted.status_code == 204

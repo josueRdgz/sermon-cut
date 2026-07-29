@@ -54,11 +54,6 @@ _PRESET_INFO: tuple[BackgroundMusicPresetInfo, ...] = (
         description="Sin música de fondo (predeterminado).",
     ),
     BackgroundMusicPresetInfo(
-        id=BackgroundMusicPreset.end_card_only,
-        label="Solo pantalla final",
-        description="La música suena únicamente en la tarjeta de cierre.",
-    ),
-    BackgroundMusicPresetInfo(
         id=BackgroundMusicPreset.very_soft_background,
         label="Fondo muy suave",
         description="Bed bajo durante todo el Reel con ducking ante la voz.",
@@ -165,6 +160,16 @@ def update_settings(
         apply_preset(row, BackgroundMusicPreset(data["preset"]))
         data.pop("preset", None)
 
+    if (
+        "start_seconds" in data
+        and "end_seconds" not in data
+        and row.end_seconds is not None
+        and row.end_seconds <= data["start_seconds"]
+    ):
+        # Moving the start beyond a previously selected end means “use the
+        # remainder of the file” rather than retaining an impossible range.
+        row.end_seconds = None
+
     for key, value in data.items():
         if key == "end_seconds" and value is not None and value <= row.start_seconds:
             raise ValidationAppError(
@@ -257,10 +262,9 @@ def build_meters(db: Session, project_id: UUID) -> BackgroundMusicMetersResponse
     ducking = bool(row.ducking_enabled) if row is not None else False
     preset = row.preset if row is not None else BackgroundMusicPreset.none
     music_db = volume_to_db(volume) if response.enabled else -96.0
-    # Soft bed sits roughly 18–24 dB under voice after ducking / weights.
-    under = -22.0 if ducking else -16.0
-    if preset == BackgroundMusicPreset.very_soft_background:
-        under = -24.0
+    # The slider gain is applied exactly once. Ducking adds a moderate estimated
+    # reduction while speech is present; the source track's own loudness varies.
+    under = music_db - (6.0 if ducking else 0.0)
     return BackgroundMusicMetersResponse(
         enabled=response.enabled,
         preset=preset,
@@ -271,7 +275,8 @@ def build_meters(db: Session, project_id: UUID) -> BackgroundMusicMetersResponse
         ducking_enabled=ducking and response.enabled,
         estimated_music_under_voice_db=under if response.enabled else 0.0,
         voice_priority_note=(
-            "La voz se mantiene claramente por encima: ducking + volumen bajo del bed."
+            "La música usa el volumen indicado una sola vez; el ducking la baja "
+            "moderadamente mientras hay voz."
             if response.enabled
             else "Sin música de fondo (preset none)."
         ),

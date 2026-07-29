@@ -17,11 +17,16 @@ import { TranscriptionPanel } from './TranscriptionPanel';
 interface TranscriptEditorProps {
   projectId: string;
   hasVideo: boolean;
+  onTranscriptChanged?: () => void;
 }
 
 const TRANSCRIPT_ACCEPT = '.srt,.vtt,.json,.txt,text/plain,application/json';
 
-export function TranscriptEditor({ projectId, hasVideo }: TranscriptEditorProps) {
+export function TranscriptEditor({
+  projectId,
+  hasVideo,
+  onTranscriptChanged,
+}: TranscriptEditorProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const [transcript, setTranscript] = useState<Transcript | null>(null);
   const [loading, setLoading] = useState(true);
@@ -96,6 +101,7 @@ export function TranscriptEditor({ projectId, hasVideo }: TranscriptEditorProps)
       if (editEnd !== '') payload.end_seconds = Number(editEnd);
       const updated = await updateSegment(editing.id, payload);
       setTranscript(updated);
+      onTranscriptChanged?.();
       setEditing(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'No se pudo guardar el segmento');
@@ -111,6 +117,7 @@ export function TranscriptEditor({ projectId, hasVideo }: TranscriptEditorProps)
     try {
       const created = await uploadTranscript(projectId, file, language);
       setTranscript(created);
+      onTranscriptChanged?.();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'No se pudo importar la transcripción');
     } finally {
@@ -123,6 +130,7 @@ export function TranscriptEditor({ projectId, hasVideo }: TranscriptEditorProps)
     try {
       await deleteTranscript(projectId);
       setTranscript(null);
+      onTranscriptChanged?.();
       setConfirmDelete(false);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'No se pudo eliminar');
@@ -161,7 +169,9 @@ export function TranscriptEditor({ projectId, hasVideo }: TranscriptEditorProps)
       <TranscriptionPanel
         projectId={projectId}
         hasVideo={hasVideo}
-        onCompleted={() => void loadTranscript()}
+        onCompleted={() => {
+          void loadTranscript().then(() => onTranscriptChanged?.());
+        }}
       />
 
       <div className="transcript-toolbar">
@@ -242,6 +252,10 @@ export function TranscriptEditor({ projectId, hasVideo }: TranscriptEditorProps)
             Fuente: {transcript.source} · {transcript.segments.length} segmentos
             {transcript.has_word_timestamps ? ' · con tiempos por palabra' : ''}
           </p>
+          <p className="muted">
+            Si la transcripción contiene un error, usa «Corregir texto» en el segmento
+            correspondiente. La corrección se aplicará también a los subtítulos del Reel.
+          </p>
 
           <ul className="segment-list">
             {filteredSegments.map((segment) => (
@@ -269,7 +283,7 @@ export function TranscriptEditor({ projectId, hasVideo }: TranscriptEditorProps)
                   className="button button--secondary button--inline"
                   onClick={() => openEditor(segment)}
                 >
-                  Editar
+                  Corregir texto
                 </button>
               </li>
             ))}
@@ -278,53 +292,74 @@ export function TranscriptEditor({ projectId, hasVideo }: TranscriptEditorProps)
       )}
 
       {editing && (
-        <form className="segment-edit" onSubmit={(e) => void handleSaveSegment(e)}>
-          <h3>Editar segmento</h3>
-          <label className="field">
-            <span>Texto</span>
-            <textarea
-              value={editText}
-              onChange={(e) => setEditText(e.target.value)}
-              rows={3}
-              required
-            />
-          </label>
-          <div className="field-row">
+        <div
+          className="dialog-backdrop"
+          role="presentation"
+          onClick={() => !saving && setEditing(null)}
+        >
+          <form
+            className="dialog transcript-correction-dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Corregir transcripción"
+            onClick={(event) => event.stopPropagation()}
+            onSubmit={(e) => void handleSaveSegment(e)}
+          >
+            <h2>Corregir transcripción</h2>
+            <p>
+              Corrige una palabra, nombre o frase. Se conservará la sincronización para los
+              subtítulos.
+            </p>
             <label className="field">
-              <span>Inicio (s)</span>
-              <input
-                type="number"
-                step="0.001"
-                min="0"
-                value={editStart}
-                onChange={(e) => setEditStart(e.target.value)}
+              <span>Texto</span>
+              <textarea
+                value={editText}
+                onChange={(e) => setEditText(e.target.value)}
+                rows={5}
+                required
+                autoFocus
               />
             </label>
-            <label className="field">
-              <span>Fin (s)</span>
-              <input
-                type="number"
-                step="0.001"
-                min="0"
-                value={editEnd}
-                onChange={(e) => setEditEnd(e.target.value)}
-              />
-            </label>
-          </div>
-          <div className="dialog__actions">
-            <button
-              type="button"
-              className="button button--secondary"
-              onClick={() => setEditing(null)}
-              disabled={saving}
-            >
-              Cancelar
-            </button>
-            <button type="submit" className="button" disabled={saving}>
-              {saving ? 'Guardando…' : 'Guardar'}
-            </button>
-          </div>
-        </form>
+            <details className="transcript-correction-dialog__timing">
+              <summary>Ajustar tiempos (avanzado)</summary>
+              <div className="field-row">
+                <label className="field">
+                  <span>Inicio (s)</span>
+                  <input
+                    type="number"
+                    step="0.001"
+                    min="0"
+                    value={editStart}
+                    onChange={(e) => setEditStart(e.target.value)}
+                  />
+                </label>
+                <label className="field">
+                  <span>Fin (s)</span>
+                  <input
+                    type="number"
+                    step="0.001"
+                    min="0"
+                    value={editEnd}
+                    onChange={(e) => setEditEnd(e.target.value)}
+                  />
+                </label>
+              </div>
+            </details>
+            <div className="dialog__actions">
+              <button
+                type="button"
+                className="button button--secondary"
+                onClick={() => setEditing(null)}
+                disabled={saving}
+              >
+                Cancelar
+              </button>
+              <button type="submit" className="button" disabled={saving || !editText.trim()}>
+                {saving ? 'Guardando…' : 'Guardar corrección'}
+              </button>
+            </div>
+          </form>
+        </div>
       )}
 
       {confirmDelete && (

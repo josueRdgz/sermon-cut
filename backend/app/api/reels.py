@@ -9,6 +9,8 @@ from sqlalchemy.orm import Session
 
 from app.db.session import get_db
 from app.schemas.coherence import (
+    CoherenceAutoFixRequest,
+    CoherenceAutoFixResponse,
     CoherenceDismissRequest,
     CoherenceExpandContextRequest,
     CoherenceReport,
@@ -191,3 +193,24 @@ def expand_coherence_context(
     """Widen a fragment by neighbouring seconds to restore cut context."""
     reel = coherence_service.expand_segment_context(db, project_id, reel_id, payload)
     return reels_service.to_response(reel)
+
+
+@router.post(
+    "/projects/{project_id}/reels/{reel_id}/validate/auto-fix",
+    response_model=CoherenceAutoFixResponse,
+)
+def auto_fix_coherence(
+    project_id: UUID,
+    reel_id: UUID,
+    payload: CoherenceAutoFixRequest = CoherenceAutoFixRequest(),
+    db: Session = Depends(get_db),
+) -> CoherenceAutoFixResponse:
+    """Repair safe timing/context/transition findings and validate again."""
+    reel, report, fixes = coherence_service.auto_fix_reel(db, project_id, reel_id, payload)
+    remaining = sum(1 for issue in report.issues if not issue.dismissed)
+    return CoherenceAutoFixResponse(
+        reel=reels_service.to_response(reel),
+        report=report,
+        fixes=fixes,
+        remaining_issues=remaining,
+    )

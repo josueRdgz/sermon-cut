@@ -13,6 +13,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use log::{info, warn};
+use tauri::{AppHandle, Manager};
 
 const HEALTH_TIMEOUT: Duration = Duration::from_secs(90);
 const HEALTH_POLL: Duration = Duration::from_millis(250);
@@ -49,31 +50,40 @@ impl Drop for BackendHandle {
 }
 
 /// Start uvicorn on 127.0.0.1:<free-port> and wait until /api/health is OK.
-pub fn start_backend() -> Result<BackendHandle, String> {
+pub fn start_backend(app: &AppHandle) -> Result<BackendHandle, String> {
     let port = free_port()?;
     let api_base = format!("http://127.0.0.1:{port}");
-    let backend_dir = resolve_backend_dir()?;
-    let python = resolve_python(&backend_dir)?;
+    let bundled = resolve_bundled_backend(app)?;
+    let (backend_dir, executable) = if let Some((directory, binary)) = bundled.as_ref() {
+        (directory.clone(), binary.clone())
+    } else {
+        let directory = resolve_backend_dir()?;
+        let python = resolve_python(&directory)?;
+        (directory, python)
+    };
 
     info!(
-        "Starting FastAPI with {} in {} on {}",
-        python.display(),
+        "Starting FastAPI with {} in {} on {} (bundled={})",
+        executable.display(),
         backend_dir.display(),
-        api_base
+        api_base,
+        bundled.is_some()
     );
 
-    let mut cmd = Command::new(&python);
+    let mut cmd = Command::new(&executable);
     cmd.current_dir(&backend_dir)
         .env("SERMON_CUT_AUTO_MIGRATE", "true")
         // Desktop webview origins (in addition to defaults in Settings).
         .env(
             "SERMON_CUT_CORS_ORIGINS",
             r#"["http://localhost:5173","http://127.0.0.1:5173","tauri://localhost","https://tauri.localhost","http://tauri.localhost","https://asset.localhost","http://asset.localhost"]"#,
-        )
-        .arg("-m")
-        .arg("uvicorn")
-        .arg("app.main:app")
-        .arg("--host")
+        );
+    if bundled.is_none() {
+        cmd.arg("-m").arg("uvicorn").arg("app.main:app");
+    } else {
+        configure_bundled_environment(app, &mut cmd)?;
+    }
+    cmd.arg("--host")
         .arg("127.0.0.1")
         .arg("--port")
         .arg(port.to_string())
@@ -86,7 +96,7 @@ pub fn start_backend() -> Result<BackendHandle, String> {
         format!(
             "No se pudo iniciar el backend FastAPI ({}): {err}. \
              ¿Existe el venv? Ejecuta ./scripts/setup-macos.sh (u equivalente).",
-            python.display()
+            executable.display()
         )
     })?;
 
@@ -110,6 +120,51 @@ pub fn start_backend() -> Result<BackendHandle, String> {
         api_base,
         child: Mutex::new(Some(child)),
     })
+}
+
+fn resolve_bundled_backend(app: &AppHandle) -> Result<Option<(PathBuf, PathBuf)>, String> {
+    let resource_dir = app
+        .path()
+        .resource_dir()
+        .map_err(|err| format!("No se pudo localizar Resources del .app: {err}"))?;
+    let directory = resource_dir.join("backend");
+    #[cfg(windows)]
+    let executable = directory.join("sermon-cut-backend.exe");
+    #[cfg(not(windows))]
+    let executable = directory.join("sermon-cut-backend");
+
+    if executable.is_file() {
+        return Ok(Some((directory, executable)));
+    }
+    Ok(None)
+}
+
+fn configure_bundled_environment(app: &AppHandle, cmd: &mut Command) -> Result<(), String> {
+    let app_data = app
+        .path()
+        .app_data_dir()
+        .map_err(|err| format!("No se pudo localizar Application Support: {err}"))?;
+    let storage = app_data.join("storage");
+    std::fs::create_dir_all(&storage)
+        .map_err(|err| format!("No se pudo crear {}: {err}", storage.display()))?;
+
+    if std::env::var_os("SERMON_CUT_STORAGE_DIR").is_none() {
+        cmd.env("SERMON_CUT_STORAGE_DIR", &storage);
+    }
+    if std::env::var_os("SERMON_CUT_ENV_FILE").is_none() {
+        cmd.env("SERMON_CUT_ENV_FILE", app_data.join(".env"));
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        let inherited = std::env::var("PATH").unwrap_or_default();
+        let path = format!(
+            "/opt/homebrew/bin:/opt/homebrew/opt/ffmpeg-full/bin:/usr/local/bin:\
+             /usr/local/opt/ffmpeg-full/bin:{inherited}"
+        );
+        cmd.env("PATH", path);
+    }
+    Ok(())
 }
 
 fn pipe_to_log<R: Read>(mut reader: R, is_err: bool) {
@@ -169,9 +224,8 @@ fn health_ok(port: u16, path: &str) -> bool {
     };
     let _ = stream.set_read_timeout(Some(Duration::from_millis(800)));
     let _ = stream.set_write_timeout(Some(Duration::from_millis(800)));
-    let request = format!(
-        "GET {path} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nConnection: close\r\n\r\n"
-    );
+    let request =
+        format!("GET {path} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nConnection: close\r\n\r\n");
     if stream.write_all(request.as_bytes()).is_err() {
         return false;
     }

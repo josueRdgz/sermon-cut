@@ -11,7 +11,7 @@ import logging
 from dataclasses import dataclass
 from pathlib import Path
 
-from PIL import Image, ImageDraw, ImageFilter, ImageFont
+from PIL import Image, ImageDraw, ImageFilter, ImageFont, ImageOps
 
 from app.models.end_card import CALL_TO_ACTION_TEXT, EndCardLayout
 from app.services.endcard.layout import FittedText, SafeArea, fit_text, safe_area
@@ -124,7 +124,7 @@ def _cover_crop(cover_path: Path | None, width: int, height: int) -> Image.Image
         return None
     try:
         with Image.open(cover_path) as source:
-            cover = source.convert("RGBA")
+            cover = ImageOps.exif_transpose(source).convert("RGBA")
     except OSError:
         logger.warning("Could not read cover image %s", cover_path)
         return None
@@ -137,6 +137,27 @@ def _cover_crop(cover_path: Path | None, width: int, height: int) -> Image.Image
     left = (resized.width - width) // 2
     top = (resized.height - height) // 2
     return resized.crop((left, top, left + width, top + height))
+
+
+def _cover_contain(
+    cover_path: Path | None,
+    max_width: int,
+    max_height: int,
+) -> Image.Image | None:
+    """Fit the entire cover inside a box without cropping any edge."""
+    if cover_path is None or not cover_path.is_file():
+        return None
+    try:
+        with Image.open(cover_path) as source:
+            cover = ImageOps.exif_transpose(source).convert("RGBA")
+    except OSError:
+        logger.warning("Could not read cover image %s", cover_path)
+        return None
+    scale = min(max_width / cover.width, max_height / cover.height)
+    return cover.resize(
+        (max(1, round(cover.width * scale)), max(1, round(cover.height * scale))),
+        Image.LANCZOS,
+    )
 
 
 def _cover_background(
@@ -229,83 +250,86 @@ def render_end_card(
     width: int,
     height: int,
 ) -> Image.Image:
-    """Compose the end card image for the given canvas and layout.
-
-    Vertical space is budgeted before anything is painted: the cover panel, the
-    QR and the logo claim their bands first, and the text blocks are fitted into
-    whatever is left. That is what keeps elements from overlapping.
-    """
+    """Compose a deliberately simple card: cover image, then one CTA line."""
     layout_value = EndCardLayout(layout)
     area = safe_area(width, height)
 
     if layout_value == EndCardLayout.cover_full:
-        canvas = _cover_background(content.cover_path, width, height, darken=140)
-    elif layout_value == EndCardLayout.cover_card:
-        # The cover also appears sharp inside the panel, so blur the backdrop.
-        canvas = _cover_background(content.cover_path, width, height, darken=205, blur=True)
-    else:
-        canvas = Image.new("RGBA", (width, height), _CARD_BG)
-
-    draw = ImageDraw.Draw(canvas)
-    region_top = area.top
-
-    if layout_value == EndCardLayout.cover_card:
-        region_top = _draw_cover_card_panel(canvas, content, area, width)
-    elif layout_value == EndCardLayout.minimal and content.logo_path is not None:
-        region_top = _paste_logo(
-            canvas,
-            content.logo_path,
-            box=round(height * 0.12),
-            center_x=area.center_x,
-            y=region_top,
+        # Full-bleed means exactly that: no margins or letterboxing. The CTA is
+        # overlaid in the lower safe area so the image can occupy the full frame.
+        canvas = _cover_crop(content.cover_path, width, height)
+        if canvas is None:
+            canvas = Image.new("RGBA", (width, height), _CARD_BG)
+        draw = ImageDraw.Draw(canvas)
+        fitted = fit_text(
+            content.call_to_action,
+            max_width=area.width,
+            max_height=round(height * 0.18),
+            max_lines=3,
+            font_size=round(height * 0.034),
+            measure=_measurer(bold=True),
+            min_font_size=max(14, round(height * 0.018)),
         )
-        region_top += round(height * 0.03)
-
-    qr_size = round(min(width, height) * 0.15) if content.qr_url else 0
-    logo_box = 0
-    if layout_value in {EndCardLayout.cover_full, EndCardLayout.cover_card}:
-        logo_box = round(height * 0.08) if content.logo_path is not None else 0
-    reserved = qr_size + logo_box + (round(height * 0.025) if qr_size or logo_box else 0)
-    available = max(round(height * 0.1), area.bottom - reserved - region_top)
-    # The inter-paragraph gaps come out of the budget, so the fitted blocks plus
-    # their gaps can never exceed the region.
-    budget = max(1, available - round(height * _GAP_RATIO_TOTAL))
-
-    serif = layout_value == EndCardLayout.minimal
-    blocks = _text_blocks(content, area=area, height=height, available=budget, serif=serif)
-
-    stack = sum(block.height for block in blocks)
-    stack += sum(block.gap_after for block in blocks[:-1])
-    # Centre the stack in its region; it anchors to the top when it barely fits.
-    cursor = region_top + max(0, (available - stack) // 2)
-    for index, block in enumerate(blocks):
-        cursor = _draw_centered_block(
+        text_height = round(fitted.font_size * 1.22) * len(fitted.lines)
+        _draw_centered_block(
             draw,
-            block.fitted,
+            fitted,
             center_x=area.center_x,
-            top=cursor,
-            color=block.color,
-            serif=block.serif,
-            bold=block.bold,
+            top=area.bottom - text_height - round(height * 0.025),
+            color=_TEXT_COLOR,
+            bold=True,
         )
-        if index < len(blocks) - 1:
-            cursor += block.gap_after
+        return canvas
 
-    bottom = area.bottom
-    if logo_box:
-        _paste_logo(
-            canvas,
-            content.logo_path,
-            box=logo_box,
-            center_x=area.center_x,
-            y=bottom - logo_box,
-        )
-        bottom -= logo_box + round(height * 0.015)
+    canvas = Image.new("RGBA", (width, height), _CARD_BG)
+    draw = ImageDraw.Draw(canvas)
+    if layout_value == EndCardLayout.cover_card:
+        image_box_width = round(area.width * 0.92)
+        image_box_height = round(height * 0.52)
+        image_top = area.top + round(height * 0.025)
+    else:
+        image_box_width = round(area.width * 0.78)
+        image_box_height = round(height * 0.46)
+        image_top = area.top + round(height * 0.07)
 
-    if qr_size:
-        qr = _qr_image(content.qr_url or "", qr_size)
-        if qr is not None:
-            canvas.alpha_composite(qr, (area.center_x - qr_size // 2, bottom - qr_size))
+    cover = _cover_contain(content.cover_path, image_box_width, image_box_height)
+    if cover is not None:
+        image_left = area.center_x - cover.width // 2
+        if layout_value == EndCardLayout.cover_card:
+            radius = max(8, round(width * 0.03))
+            mask = Image.new("L", cover.size, 0)
+            ImageDraw.Draw(mask).rounded_rectangle(
+                (0, 0, cover.width - 1, cover.height - 1),
+                radius,
+                fill=255,
+            )
+            canvas.paste(cover, (image_left, image_top), mask)
+        else:
+            canvas.alpha_composite(cover, (image_left, image_top))
+        image_bottom = image_top + cover.height
+    else:
+        image_bottom = image_top + min(image_box_height, round(height * 0.32))
+
+    text_top = image_bottom + round(height * 0.045)
+    text_available = max(1, area.bottom - text_top)
+    fitted = fit_text(
+        content.call_to_action,
+        max_width=area.width,
+        max_height=text_available,
+        max_lines=3,
+        font_size=round(height * 0.034),
+        measure=_measurer(bold=True),
+        min_font_size=max(14, round(height * 0.018)),
+    )
+    text_height = round(fitted.font_size * 1.22) * len(fitted.lines)
+    _draw_centered_block(
+        draw,
+        fitted,
+        center_x=area.center_x,
+        top=text_top + max(0, (text_available - text_height) // 2),
+        color=_TEXT_COLOR,
+        bold=True,
+    )
 
     return canvas
 

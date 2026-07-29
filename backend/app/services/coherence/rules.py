@@ -48,6 +48,7 @@ _INCOMPLETE_ENDINGS: tuple[str, ...] = (
     "en",
     "con",
     "para",
+    "por",
     "sin",
     "como",
 )
@@ -102,6 +103,8 @@ class SegmentView:
     end: float
     text: str
     gap_before: float  # source gap from the previous segment (0 for the first)
+    transition_type: str = "hard_cut"
+    transition_duration_ms: int = 0
 
 
 @dataclass(frozen=True)
@@ -382,6 +385,9 @@ def check_artificial_pauses(segments: list[SegmentView]) -> list[CoherenceIssue]
     """Hard cuts across large source gaps often feel like artificial pauses."""
     issues: list[CoherenceIssue] = []
     for segment in segments[1:]:
+        previous = segments[segment.index - 2]
+        if previous.transition_type != "hard_cut":
+            continue
         if segment.gap_before >= 3.0:
             issues.append(
                 CoherenceIssue(

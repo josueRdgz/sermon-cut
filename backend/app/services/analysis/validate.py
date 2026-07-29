@@ -137,6 +137,10 @@ def validate_analysis_response(
     segments: list[TranscriptSegmentInput],
     video_duration: float,
     min_segment_seconds: float = 0.1,
+    max_segments_per_clip: int | None = None,
+    merge_gap_seconds: float = 0.0,
+    min_clip_seconds: float | None = None,
+    max_clip_seconds: float | None = None,
     min_match_ratio: float = 0.72,
 ) -> ValidationReport:
     """Reject invented text and illegal intervals; snap survivors to words."""
@@ -152,6 +156,10 @@ def validate_analysis_response(
                 words=words,
                 video_duration=video_duration,
                 min_segment_seconds=min_segment_seconds,
+                max_segments_per_clip=max_segments_per_clip,
+                merge_gap_seconds=merge_gap_seconds,
+                min_clip_seconds=min_clip_seconds,
+                max_clip_seconds=max_clip_seconds,
                 min_match_ratio=min_match_ratio,
             )
         except ValueError as exc:
@@ -169,6 +177,10 @@ def _validate_clip(
     words: list[TranscriptWordInput],
     video_duration: float,
     min_segment_seconds: float,
+    max_segments_per_clip: int | None,
+    merge_gap_seconds: float,
+    min_clip_seconds: float | None,
+    max_clip_seconds: float | None,
     min_match_ratio: float,
 ) -> ValidatedClip:
     if not clip.segments:
@@ -184,9 +196,6 @@ def _validate_clip(
             raise ValueError(f"inverted interval {start}–{end}")
         if start < -0.05 or end > video_duration + 0.25:
             raise ValueError(f"interval outside the video ({start}–{end})")
-        if end - start < min_segment_seconds:
-            raise ValueError(f"segment shorter than {min_segment_seconds}s")
-
         snapped_start, snapped_end, snapped = snap_to_words(start, end, words)
         if snapped_end <= snapped_start:
             raise ValueError("snapped interval collapsed")
@@ -226,6 +235,29 @@ def _validate_clip(
                 f"overlapping segments {prev.start}–{prev.end} and {nxt.start}–{nxt.end}"
             )
 
+    ordered = _merge_nearby_segments(ordered, max(0.0, merge_gap_seconds))
+    if max_segments_per_clip is not None and len(ordered) > max_segments_per_clip:
+        raise ValueError(
+            f"too many segments ({len(ordered)}; maximum {max_segments_per_clip})"
+        )
+    for segment in ordered:
+        duration = segment.end - segment.start
+        if duration < min_segment_seconds:
+            raise ValueError(
+                f"segment shorter than {min_segment_seconds}s "
+                f"({segment.start}–{segment.end})"
+            )
+
+    total_duration = sum(segment.end - segment.start for segment in ordered)
+    if min_clip_seconds is not None and total_duration < min_clip_seconds:
+        raise ValueError(
+            f"clip shorter than {min_clip_seconds}s ({total_duration:.2f}s)"
+        )
+    if max_clip_seconds is not None and total_duration > max_clip_seconds:
+        raise ValueError(
+            f"clip longer than {max_clip_seconds}s ({total_duration:.2f}s)"
+        )
+
     confidence = sum(ratios) / len(ratios) if ratios else 0.0
     if confidence < 0.85:
         warnings.append(
@@ -248,3 +280,31 @@ def _validate_clip(
         warnings=warnings,
         confidence=round(confidence, 3),
     )
+
+
+def _merge_nearby_segments(
+    segments: list[ValidatedSegment],
+    max_gap_seconds: float,
+) -> list[ValidatedSegment]:
+    """Join consecutive suggestions so subtitle boundaries do not become cuts."""
+    if not segments:
+        return []
+
+    merged = [segments[0]]
+    for current in segments[1:]:
+        previous = merged[-1]
+        gap = current.start - previous.end
+        if gap > max_gap_seconds:
+            merged.append(current)
+            continue
+
+        reasons = [value for value in (previous.reason, current.reason) if value]
+        merged[-1] = ValidatedSegment(
+            start=previous.start,
+            end=current.end,
+            exact_text=f"{previous.exact_text} {current.exact_text}".strip(),
+            reason=" ".join(dict.fromkeys(reasons)),
+            match_ratio=min(previous.match_ratio, current.match_ratio),
+            snapped=previous.snapped or current.snapped,
+        )
+    return merged

@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import subprocess
 from pathlib import Path
 
 import pytest
-from app.services.render.args import RenderSegmentSpec, build_render_command
+from app.services.render.args import RenderSegmentSpec, build_render_command, escape_filter_path
+from app.services.render.binary import ffmpeg_has_filter, locate_ffmpeg
 from app.services.subtitles.ass import ass_timestamp, render_ass_document
 from app.services.subtitles.cues import (
     SourceSegment,
@@ -194,6 +196,61 @@ def test_render_command_burns_ass_filter(tmp_path: Path) -> None:
     assert "fontsdir=" in plan.filter_complex
     assert "[vout]" in plan.filter_complex
     assert plan.args[plan.args.index("-map") + 1] == "[vout]"
+
+
+def test_ass_filter_accepts_icloud_paths_with_spaces(tmp_path: Path) -> None:
+    ffmpeg = locate_ffmpeg()
+    if ffmpeg is None or not ffmpeg_has_filter(ffmpeg, "ass"):
+        pytest.skip("No hay un FFmpeg con filtro ASS/libass")
+    root = tmp_path / "Mobile Documents" / "com~apple~CloudDocs" / "App"
+    fonts = root / "render fonts"
+    fonts.mkdir(parents=True)
+    ass = root / "reel subtitles.ass"
+    ass.write_text(
+        """[Script Info]
+ScriptType: v4.00+
+PlayResX: 64
+PlayResY: 64
+
+[V4+ Styles]
+Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
+Style: Default,Arial,12,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,1,0,2,2,2,2,1
+
+[Events]
+Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+Dialogue: 0,0:00:00.00,0:00:00.50,Default,,0,0,0,,Prueba
+""",
+        encoding="utf-8",
+    )
+    graph = (
+        f"[0:v]ass={escape_filter_path(ass)}"
+        f":fontsdir={escape_filter_path(fonts)}[vout]"
+    )
+    completed = subprocess.run(
+        [
+            ffmpeg,
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-f",
+            "lavfi",
+            "-i",
+            "color=c=black:s=64x64:d=0.1",
+            "-filter_complex",
+            graph,
+            "-map",
+            "[vout]",
+            "-frames:v",
+            "1",
+            "-f",
+            "null",
+            "-",
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert completed.returncode == 0, completed.stderr
 
 
 def test_timeline_matches_render_expected_duration() -> None:

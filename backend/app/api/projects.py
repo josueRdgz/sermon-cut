@@ -109,6 +109,16 @@ async def upload_video(
     return projects_service.to_response(project)
 
 
+@router.delete("/{project_id}/video", response_model=ProjectResponse)
+def delete_video(
+    project_id: UUID,
+    db: Session = Depends(get_db),
+) -> ProjectResponse:
+    """Delete source video files but keep transcript, edits and prior exports."""
+    project = projects_service.delete_video(db, project_id)
+    return projects_service.to_response(project)
+
+
 @router.post("/{project_id}/cover", response_model=ProjectResponse)
 async def upload_cover(
     project_id: UUID,

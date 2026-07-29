@@ -7,8 +7,9 @@ restricciones. Complementa el README.
 
 - **Sin publicación automática** a YouTube, Instagram, Facebook o WhatsApp.
   La exportación es solo local (MP4 + reporte JSON).
-- **Sin catálogos de música** ni descarga automática de audio. Solo archivos
-  locales del usuario (y el usuario debe tener derechos).
+- La Biblioteca de audio de YouTube se abre en YouTube Studio; como no hay un
+  catálogo público para importarla por API, el usuario descarga allí el MP3 y
+  luego lo selecciona en la app.
 - El **análisis editorial con Gemini es opcional**. Sin clave se usa un mock
   determinista; no sustituye el criterio pastoral humano.
 - Los **clips sugeridos no se aplican solos**: aceptación/rechazo explícitos.

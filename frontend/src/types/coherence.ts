@@ -35,3 +35,14 @@ export interface CoherenceExpandPayload {
   before_seconds?: number;
   after_seconds?: number;
 }
+
+export interface CoherenceAutoFixPayload {
+  include_media_probes?: boolean;
+}
+
+export interface CoherenceAutoFixResponse {
+  reel: import('./reel').Reel;
+  report: CoherenceReport;
+  fixes: string[];
+  remaining_issues: number;
+}

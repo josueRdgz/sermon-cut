@@ -34,6 +34,8 @@ class RenderStartRequest(BaseModel):
     crf: int | None = Field(default=None, ge=14, le=32)
     # When False, skip ASS burning even if the reel has subtitles enabled.
     burn_subtitles: bool = True
+    # Snapshot the editor value into the Reel before the worker builds FFmpeg.
+    audio_offset_ms: int | None = Field(default=None, ge=-1000, le=1000)
 
 
 class RenderJobResponse(BaseModel):

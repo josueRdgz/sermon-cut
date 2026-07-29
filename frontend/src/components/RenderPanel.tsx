@@ -2,13 +2,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { getBackgroundMusicMeters } from '../api/backgroundMusic';
 import { ApiError } from '../api/client';
-import {
-  estimateExportSize,
-  listExportProfiles,
-  updateExportProfile,
-} from '../api/exportProfiles';
+import { estimateExportSize, listExportProfiles, updateExportProfile } from '../api/exportProfiles';
 import {
   cancelRenderJob,
+  deleteRenderJob,
   getLatestRender,
   getRenderJob,
   listRenders,
@@ -25,6 +22,7 @@ import type { RenderJob, RenderLayout } from '../types/render';
 import { ACTIVE_RENDER_STATUSES } from '../types/render';
 import { formatDuration } from '../utils/format';
 import { CoherencePanel } from './CoherencePanel';
+import { ConfirmDialog } from './ConfirmDialog';
 import { ProgressBar } from './ProgressBar';
 
 interface RenderPanelProps {
@@ -32,6 +30,7 @@ interface RenderPanelProps {
   reelId: string;
   reelAspectRatio: AspectRatio;
   segments: ReelSegment[];
+  audioOffsetMs: number;
   onReelChange: (reel: Reel) => void;
 }
 
@@ -93,6 +92,7 @@ export function RenderPanel({
   reelId,
   reelAspectRatio,
   segments,
+  audioOffsetMs,
   onReelChange,
 }: RenderPanelProps) {
   const [job, setJob] = useState<RenderJob | null>(null);
@@ -111,6 +111,7 @@ export function RenderPanel({
   const [busy, setBusy] = useState(false);
   const [coherence, setCoherence] = useState<CoherenceReport | null>(null);
   const [meters, setMeters] = useState<BackgroundMusicMeters | null>(null);
+  const [pendingDeleteRender, setPendingDeleteRender] = useState<RenderJob | null>(null);
   const previousReelRef = useRef<string>(reelId);
   const segmentCount = segments.length;
 
@@ -123,8 +124,7 @@ export function RenderPanel({
     listExportProfiles()
       .then((data) => {
         setProfiles(data.items);
-        const preferred =
-          data.items.find((item) => item.slug === 'youtube-short') ?? data.items[0];
+        const preferred = data.items.find((item) => item.slug === 'youtube-short') ?? data.items[0];
         if (preferred) {
           setProfileId((current) => current || preferred.id);
           setCrf(crfForProfile(preferred, 'standard'));
@@ -248,6 +248,7 @@ export function RenderPanel({
         layout,
         normalize_loudness: normalizeLoudness,
         burn_subtitles: burnSubtitles,
+        audio_offset_ms: audioOffsetMs,
       });
       setJob(started);
       const data = await listRenders(projectId, reelId);
@@ -268,6 +269,7 @@ export function RenderPanel({
     layout,
     normalizeLoudness,
     burnSubtitles,
+    audioOffsetMs,
     coherence,
   ]);
 
@@ -294,6 +296,25 @@ export function RenderPanel({
       setBusy(false);
     }
   }, [job]);
+
+  const handleDeleteRender = useCallback(async () => {
+    if (!pendingDeleteRender) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await deleteRenderJob(pendingDeleteRender.id);
+      const data = await listRenders(projectId, reelId);
+      setHistory(data.items);
+      if (job?.id === pendingDeleteRender.id) {
+        setJob(data.items[0] ?? null);
+      }
+      setPendingDeleteRender(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'No se pudo eliminar el render');
+    } finally {
+      setBusy(false);
+    }
+  }, [job?.id, pendingDeleteRender, projectId, reelId]);
 
   const handleSaveProfile = useCallback(async () => {
     if (!selectedProfile) return;
@@ -344,12 +365,28 @@ export function RenderPanel({
       />
 
       <div className="reel-editor__section-header">
-        <h4>Exportar video (perfiles)</h4>
-        {job && (
-          <span className={`badge badge--${job.status}`}>
-            {STAGE_LABELS[job.status] ?? job.status}
-          </span>
-        )}
+        <h4>Exportar Reel</h4>
+        <div className="button-stack">
+          {job && (
+            <span className={`badge badge--${job.status}`}>
+              {STAGE_LABELS[job.status] ?? job.status}
+            </span>
+          )}
+          {!active && (
+            <button
+              type="button"
+              onClick={() => void handleStart()}
+              disabled={busy || !canRender}
+              title={
+                canRender
+                  ? 'Generar el archivo MP4 del Reel'
+                  : 'Completa la validación de unión para habilitar la exportación'
+              }
+            >
+              {busy ? 'Preparando exportación…' : 'Exportar Reel a MP4'}
+            </button>
+          )}
+        </div>
       </div>
 
       <p className="muted">
@@ -358,10 +395,10 @@ export function RenderPanel({
       </p>
 
       <p className="error" role="note">
-        Responsabilidad editorial: un Short/Reel con cortes no consecutivos puede alterar el
-        sentido del sermón. Revisa la unión, los subtítulos tras varios segmentos y el contenido
-        completo antes de publicar. La validación de coherencia bloquea solo problemas graves;
-        las advertencias se pueden ignorar conscientemente.
+        Responsabilidad editorial: un Short/Reel con cortes no consecutivos puede alterar el sentido
+        del sermón. Revisa la unión, los subtítulos tras varios segmentos y el contenido completo
+        antes de publicar. La validación de coherencia bloquea solo problemas graves; las
+        advertencias se pueden ignorar conscientemente.
       </p>
 
       {!canRender && segmentCount === 0 && (
@@ -449,11 +486,6 @@ export function RenderPanel({
               <span>Quemar subtítulos</span>
             </label>
             <div className="button-stack">
-              {!active && (
-                <button type="button" onClick={() => void handleStart()} disabled={busy || !canRender}>
-                  {busy ? 'Iniciando…' : 'Renderizar'}
-                </button>
-              )}
               {active && (
                 <button
                   type="button"
@@ -636,7 +668,11 @@ export function RenderPanel({
                   >
                     Descargar MP4
                   </a>
-                  <button type="button" className="button--ghost" onClick={() => void handleReveal()}>
+                  <button
+                    type="button"
+                    className="button--ghost"
+                    onClick={() => void handleReveal()}
+                  >
                     Abrir carpeta
                   </button>
                   {job.report_filename && (
@@ -644,6 +680,13 @@ export function RenderPanel({
                       Reporte JSON
                     </a>
                   )}
+                  <button
+                    type="button"
+                    className="button button--danger button--inline"
+                    onClick={() => setPendingDeleteRender(job)}
+                  >
+                    Eliminar render
+                  </button>
                 </div>
               </div>
             </div>
@@ -661,6 +704,7 @@ export function RenderPanel({
                     <th>Resolución</th>
                     <th>Tamaño</th>
                     <th>Estado</th>
+                    <th>Acciones</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -669,11 +713,38 @@ export function RenderPanel({
                       <td>{formatDate(item.finished_at ?? item.created_at)}</td>
                       <td>{item.profile_name ?? item.profile_slug ?? '—'}</td>
                       <td>{formatDuration(item.total_seconds)}</td>
-                      <td>
-                        {item.width && item.height ? `${item.width}×${item.height}` : '—'}
-                      </td>
+                      <td>{item.width && item.height ? `${item.width}×${item.height}` : '—'}</td>
                       <td>{formatSize(item.output_size_bytes)}</td>
                       <td>{STAGE_LABELS[item.status] ?? item.status}</td>
+                      <td>
+                        {item.status === 'completed' && item.output_filename ? (
+                          <div className="button-stack">
+                            <a
+                              className="button-link"
+                              href={renderOutputUrl(item.id, true)}
+                              download={item.output_filename}
+                            >
+                              Descargar MP4
+                            </a>
+                            <button
+                              type="button"
+                              className="button button--danger button--inline"
+                              onClick={() => setPendingDeleteRender(item)}
+                            >
+                              Eliminar
+                            </button>
+                          </div>
+                        ) : (
+                          <button
+                            type="button"
+                            className="button button--danger button--inline"
+                            disabled={ACTIVE_RENDER_STATUSES.includes(item.status)}
+                            onClick={() => setPendingDeleteRender(item)}
+                          >
+                            Eliminar registro
+                          </button>
+                        )}
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -703,6 +774,17 @@ export function RenderPanel({
       )}
 
       {error && <p className="error">{error}</p>}
+
+      {pendingDeleteRender && (
+        <ConfirmDialog
+          title="Eliminar render"
+          message={`Se borrarán «${pendingDeleteRender.output_filename ?? 'este registro'}» y su reporte del disco. Esta acción no se puede deshacer.`}
+          confirmLabel="Eliminar render"
+          busy={busy}
+          onConfirm={() => void handleDeleteRender()}
+          onCancel={() => !busy && setPendingDeleteRender(null)}
+        />
+      )}
     </div>
   );
 }

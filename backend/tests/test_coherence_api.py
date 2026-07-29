@@ -5,6 +5,12 @@ from __future__ import annotations
 from uuid import UUID
 
 from app.models.project import Project
+from app.models.transcript import (
+    Transcript,
+    TranscriptSegment,
+    TranscriptSource,
+    TranscriptStatus,
+)
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import sessionmaker
 
@@ -145,3 +151,62 @@ def test_expand_context_widens_segment(
     segment = expanded.json()["segments"][0]
     assert segment["source_start_seconds"] == 18.0
     assert segment["source_end_seconds"] == 31.5
+
+
+def test_auto_fix_completes_cut_sentence_and_revalidates(
+    client: TestClient, db_session_factory: sessionmaker
+) -> None:
+    project_id = _project(client, db_session_factory)
+    with db_session_factory() as db:
+        transcript = Transcript(
+            project_id=UUID(project_id),
+            source=TranscriptSource.manual,
+            status=TranscriptStatus.ready,
+            full_text="La salvación viene por la fe. En Cristo tenemos esperanza.",
+            has_word_timestamps=False,
+        )
+        transcript.segments.extend(
+            [
+                TranscriptSegment(
+                    order=0,
+                    start_seconds=10.0,
+                    end_seconds=15.0,
+                    text="La salvación viene por",
+                ),
+                TranscriptSegment(
+                    order=1,
+                    start_seconds=15.0,
+                    end_seconds=20.0,
+                    text="la fe. En Cristo tenemos esperanza.",
+                ),
+            ]
+        )
+        db.add(transcript)
+        db.commit()
+
+    created = client.post(
+        f"/api/projects/{project_id}/reels",
+        json={
+            "title": "Frase cortada",
+            "segments": [
+                {
+                    "source_start_seconds": 10.0,
+                    "source_end_seconds": 15.0,
+                    "transcript_text": "La salvación viene por",
+                }
+            ],
+        },
+    )
+    assert created.status_code == 201, created.text
+    reel_id = created.json()["id"]
+
+    fixed = client.post(
+        f"/api/projects/{project_id}/reels/{reel_id}/validate/auto-fix",
+        json={"include_media_probes": False},
+    )
+    assert fixed.status_code == 200, fixed.text
+    body = fixed.json()
+    assert body["reel"]["segments"][0]["source_end_seconds"] == 20.0
+    assert body["report"]["severity"] == "valid"
+    assert body["remaining_issues"] == 0
+    assert any("final de la idea" in item for item in body["fixes"])

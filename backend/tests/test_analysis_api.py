@@ -39,7 +39,8 @@ def analysis_env(
     projects.mkdir()
     monkeypatch.setattr("app.core.paths.PROJECTS_DIR", projects)
     monkeypatch.setenv("SERMON_CUT_AI_PROVIDER", "mock")
-    monkeypatch.delenv("SERMON_CUT_GEMINI_API_KEY", raising=False)
+    # An explicit empty value must override a developer's repo-root .env.
+    monkeypatch.setenv("SERMON_CUT_GEMINI_API_KEY", "")
     get_settings.cache_clear()
 
     url = f"sqlite:///{(tmp_path / 'test.db').as_posix()}"

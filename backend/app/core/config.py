@@ -2,12 +2,19 @@
 
 from __future__ import annotations
 
+import os
 from functools import lru_cache
 
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from app.core.paths import ROOT_DIR, default_database_url
+
+
+def _settings_env_file() -> str:
+    """Use the per-user desktop config when the native shell provides it."""
+    override = os.environ.get("SERMON_CUT_ENV_FILE", "").strip()
+    return override or str(ROOT_DIR / ".env")
 
 
 class Settings(BaseSettings):
@@ -18,7 +25,7 @@ class Settings(BaseSettings):
     """
 
     model_config = SettingsConfigDict(
-        env_file=str(ROOT_DIR / ".env"),
+        env_file=_settings_env_file(),
         env_prefix="SERMON_CUT_",
         extra="ignore",
     )
@@ -64,6 +71,10 @@ class Settings(BaseSettings):
 
     min_reel_segment_seconds: float = 0.1
 
+    # Optional explicit FFmpeg executable. On macOS the renderer automatically
+    # prefers Homebrew's keg-only ffmpeg-full build when it is installed.
+    ffmpeg_path: str | None = None
+
     # ---- Optional AI analysis (Gemini) ----
     ai_provider: str = "auto"
     gemini_api_key: str | None = None
@@ -71,6 +82,10 @@ class Settings(BaseSettings):
     gemini_timeout_seconds: float = 90.0
     gemini_max_attempts: int = 3
     ai_chunk_char_limit: int = 48_000
+    # Editorial pacing: prefer long, continuous source windows over rapid cuts.
+    ai_max_segments_per_reel: int = 3
+    ai_min_segment_seconds: float = 8.0
+    ai_merge_gap_seconds: float = 1.25
 
     # ---- Loudness (spoken-word friendly) ----
     target_lufs: float = -16.0
