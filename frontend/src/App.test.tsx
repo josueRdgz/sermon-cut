@@ -6,7 +6,7 @@ import App from './App';
 const healthPayload = {
   status: 'ok',
   app_name: 'Sermon Cut',
-  version: '0.1.0',
+  version: '0.2.0',
   ffmpeg: { available: true, version: '8.1' },
   ffprobe: { available: true, version: '8.1' },
   whisper: { available: true, version: '1.0.0' },

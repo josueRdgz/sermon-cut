@@ -61,8 +61,15 @@ Esa forma **no se elimina**.
   **sidecar Python/FastAPI autónomo** generado con PyInstaller.
 - Los proyectos, la base SQLite y los modelos se guardan fuera del bundle en
   `~/Library/Application Support/app.sermoncut.desktop/storage`.
-- La configuración opcional se puede colocar en
-  `~/Library/Application Support/app.sermoncut.desktop/.env`.
+- La configuración opcional (Gemini, etc.) vive en
+  `~/Library/Application Support/app.sermoncut.desktop/.env` con permisos `0600`.
+  Ese archivo **no** se borra al reinstalar el DMG.
+- En el primer arranque (o al ejecutar `scripts/seed-desktop-env.sh` / `build-desktop.sh`),
+  si el `.env` de Application Support aún no existe y el `.env` del repositorio
+  contiene `SERMON_CUT_GEMINI_API_KEY`, se migran solo
+  `SERMON_CUT_AI_PROVIDER`, `SERMON_CUT_GEMINI_API_KEY` y `SERMON_CUT_GEMINI_MODEL`
+  sin imprimir la clave. Un `.env` persistente existente nunca se sobrescribe.
+- La API key **nunca** se embebe en el `.app`, el DMG ni el JavaScript.
 - FFmpeg/FFprobe siguen siendo dependencias del sistema.
 - Firma y notarización de Apple aún requieren una identidad de Developer ID.
 
@@ -149,7 +156,7 @@ suben releases a GitHub desde estos scripts.
 En macOS se generan normalmente:
 
 - `bundle/macos/Sermon Cut.app`
-- `bundle/dmg/Sermon Cut_0.1.0_aarch64.dmg` en Apple Silicon
+- `bundle/dmg/Sermon Cut_0.2.0_aarch64.dmg` en Apple Silicon
 
 Sin firma/notarización, otra Mac puede mostrar una advertencia de Gatekeeper. La
 persona usuaria puede abrir la aplicación desde Finder con clic secundario →

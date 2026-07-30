@@ -147,12 +147,17 @@ fn configure_bundled_environment(app: &AppHandle, cmd: &mut Command) -> Result<(
     let storage = app_data.join("storage");
     std::fs::create_dir_all(&storage)
         .map_err(|err| format!("No se pudo crear {}: {err}", storage.display()))?;
+    std::fs::create_dir_all(&app_data)
+        .map_err(|err| format!("No se pudo crear {}: {err}", app_data.display()))?;
+
+    let env_file = app_data.join(".env");
+    ensure_persistent_env(&env_file);
 
     if std::env::var_os("SERMON_CUT_STORAGE_DIR").is_none() {
         cmd.env("SERMON_CUT_STORAGE_DIR", &storage);
     }
     if std::env::var_os("SERMON_CUT_ENV_FILE").is_none() {
-        cmd.env("SERMON_CUT_ENV_FILE", app_data.join(".env"));
+        cmd.env("SERMON_CUT_ENV_FILE", &env_file);
     }
 
     #[cfg(target_os = "macos")]
@@ -165,6 +170,153 @@ fn configure_bundled_environment(app: &AppHandle, cmd: &mut Command) -> Result<(
         cmd.env("PATH", path);
     }
     Ok(())
+}
+
+/// Keys copied once into Application Support when the desktop shell first runs.
+/// Never log values — only whether migration happened.
+const PERSIST_ENV_KEYS: &[&str] = &[
+    "SERMON_CUT_AI_PROVIDER",
+    "SERMON_CUT_GEMINI_API_KEY",
+    "SERMON_CUT_GEMINI_MODEL",
+];
+
+/// Ensure `{app_data}/.env` exists. If missing, migrate Gemini settings from a
+/// development `.env` when available. Never overwrite an existing file.
+fn ensure_persistent_env(target: &Path) {
+    if target.is_file() {
+        info!(
+            "Using existing desktop env at {} (not overwritten)",
+            target.display()
+        );
+        return;
+    }
+
+    let Some(source) = find_migration_source_env() else {
+        info!(
+            "No desktop .env yet at {}; create one to configure Gemini",
+            target.display()
+        );
+        return;
+    };
+
+    match migrate_gemini_env(&source, target) {
+        Ok(true) => info!(
+            "Migrated Gemini settings into desktop env (source present; values not logged)"
+        ),
+        Ok(false) => info!(
+            "Source .env had no Gemini key to migrate; desktop env not created"
+        ),
+        Err(err) => warn!("Could not migrate desktop .env: {err}"),
+    }
+}
+
+fn find_migration_source_env() -> Option<PathBuf> {
+    if let Ok(override_path) = std::env::var("SERMON_CUT_SOURCE_ENV") {
+        let path = PathBuf::from(override_path);
+        if path.is_file() {
+            return Some(path);
+        }
+    }
+
+    // Dev / sidecar rebuilds still know the repo layout.
+    if let Ok(backend_dir) = resolve_backend_dir() {
+        let candidate = backend_dir
+            .parent()
+            .map(|root| root.join(".env"))
+            .filter(|path| path.is_file());
+        if candidate.is_some() {
+            return candidate;
+        }
+    }
+
+    // Packaged launches on this machine: look next to common checkout paths
+    // without embedding secrets in the bundle.
+    let home = std::env::var_os("HOME").map(PathBuf::from)?;
+    let candidates = [
+        home.join("Library/Mobile Documents/com~apple~CloudDocs/App/.env"),
+        home.join("Projects/sermon-cut/.env"),
+        home.join("sermon-cut/.env"),
+    ];
+    candidates.into_iter().find(|path| path.is_file())
+}
+
+fn migrate_gemini_env(source: &Path, target: &Path) -> Result<bool, String> {
+    let raw = std::fs::read_to_string(source)
+        .map_err(|err| format!("no se pudo leer la fuente: {err}"))?;
+    let mut values: std::collections::BTreeMap<String, String> = std::collections::BTreeMap::new();
+    for line in raw.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with('#') {
+            continue;
+        }
+        let Some((key, value)) = trimmed.split_once('=') else {
+            continue;
+        };
+        let key = key.trim();
+        if !PERSIST_ENV_KEYS.contains(&key) {
+            continue;
+        }
+        let mut value = value.trim().to_string();
+        if (value.starts_with('"') && value.ends_with('"'))
+            || (value.starts_with('\'') && value.ends_with('\''))
+        {
+            value = value[1..value.len() - 1].to_string();
+        }
+        if !value.is_empty() {
+            values.insert(key.to_string(), value);
+        }
+    }
+
+    let has_key = values
+        .get("SERMON_CUT_GEMINI_API_KEY")
+        .is_some_and(|value| !value.trim().is_empty());
+    if !has_key {
+        return Ok(false);
+    }
+
+    values
+        .entry("SERMON_CUT_AI_PROVIDER".into())
+        .or_insert_with(|| "gemini".into());
+    values
+        .entry("SERMON_CUT_GEMINI_MODEL".into())
+        .or_insert_with(|| "gemini-2.5-flash".into());
+
+    if let Some(parent) = target.parent() {
+        std::fs::create_dir_all(parent)
+            .map_err(|err| format!("no se pudo crear {}: {err}", parent.display()))?;
+    }
+
+    let mut body = String::from(
+        "# Sermon Cut desktop configuration (Application Support)\n\
+         # Migrated once from a development .env. Values are never logged.\n",
+    );
+    for key in PERSIST_ENV_KEYS {
+        if let Some(value) = values.get(*key) {
+            body.push_str(key);
+            body.push('=');
+            body.push_str(value);
+            body.push('\n');
+        }
+    }
+
+    // Create exclusively so a concurrent writer cannot clobber an existing file.
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    let mut file = options
+        .open(target)
+        .map_err(|err| format!("no se pudo crear {}: {err}", target.display()))?;
+    file.write_all(body.as_bytes())
+        .map_err(|err| format!("no se pudo escribir {}: {err}", target.display()))?;
+    file.flush()
+        .map_err(|err| format!("no se pudo guardar {}: {err}", target.display()))?;
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(target, std::fs::Permissions::from_mode(0o600));
+    }
+
+    Ok(true)
 }
 
 fn pipe_to_log<R: Read>(mut reader: R, is_err: bool) {

@@ -203,8 +203,8 @@ export function AnalysisPanel({
 
       <p className="muted">
         Sugiere Reels a partir de la transcripción. Gemini es opcional: sin clave la app usa un
-        proveedor mock determinista. Ningún candidato se renderiza solo; debes aceptar o descartar
-        cada uno.
+        proveedor mock determinista (no Gemini). Ningún candidato se renderiza solo; debes aceptar
+        o descartar cada uno.
       </p>
       <p className="muted">
         Ritmo editorial: se prioriza un pasaje continuo y, por defecto, cada Reel tendrá como
@@ -219,14 +219,30 @@ export function AnalysisPanel({
         </p>
       )}
 
+      {provider && !provider.gemini_configured && (
+        <p className="error" role="note">
+          Gemini no está configurado. El proveedor activo es el mock local. Para habilitar Gemini
+          en la app de escritorio, crea o edita el archivo{' '}
+          <code>~/Library/Application Support/app.sermoncut.desktop/.env</code> con
+          <code> SERMON_CUT_AI_PROVIDER=gemini</code>,{' '}
+          <code>SERMON_CUT_GEMINI_API_KEY</code> y opcionalmente{' '}
+          <code>SERMON_CUT_GEMINI_MODEL</code>, con permisos 0600, y reinicia la aplicación. En
+          desarrollo puedes usar el <code>.env</code> de la raíz del repositorio. La clave nunca
+          se incluye en el DMG.
+        </p>
+      )}
+
       {provider && (
         <p className="muted">
           Proveedor activo: <strong>{provider.active}</strong>
           {provider.gemini_configured
             ? ` · Gemini configurado (${provider.gemini_model})`
-            : ' · Gemini no configurado (SERMON_CUT_GEMINI_API_KEY)'}
+            : ' · Gemini no configurado'}
           {!provider.gemini_sdk_installed && provider.gemini_configured
-            ? ' · SDK ausente: pip install -e ".[gemini]"'
+            ? ' · SDK ausente: reinstala el sidecar o pip install -e ".[gemini]"'
+            : ''}
+          {provider.requested === 'gemini' && !provider.gemini_configured
+            ? ' · Se solicitó Gemini pero falta la clave; se usa mock.'
             : ''}
         </p>
       )}

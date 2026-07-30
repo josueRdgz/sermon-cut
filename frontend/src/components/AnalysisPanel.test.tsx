@@ -12,10 +12,12 @@ vi.mock('../api/analysis', () => ({
   cancelAnalysisJob: vi.fn(),
   getAnalysisJob: vi.fn(),
   getAnalysisProviderStatus: vi.fn().mockResolvedValue({
+    requested: 'auto',
     active: 'mock',
     gemini_configured: false,
     gemini_model: 'gemini-2.5-flash',
     gemini_sdk_installed: false,
+    optional: true,
   }),
   getLatestAnalysis: vi.fn(),
   rejectAnalysisCandidate: vi.fn(),

@@ -244,22 +244,63 @@ def _sync_edited_words(segment: TranscriptSegment, text: str) -> None:
     segment.words = rebuilt
 
 
+def _remap_word_timings(
+    segment: TranscriptSegment,
+    *,
+    old_start: float,
+    old_end: float,
+    new_start: float,
+    new_end: float,
+) -> None:
+    """Map existing word timestamps into a new segment window proportionally."""
+    if not segment.words:
+        return
+    old_duration = old_end - old_start
+    new_duration = new_end - new_start
+    if old_duration <= 0 or new_duration <= 0:
+        return
+
+    for word in sorted(segment.words, key=lambda item: item.order):
+        if word.start_seconds is not None:
+            ratio = (word.start_seconds - old_start) / old_duration
+            word.start_seconds = new_start + max(0.0, min(1.0, ratio)) * new_duration
+        if word.end_seconds is not None:
+            ratio = (word.end_seconds - old_start) / old_duration
+            word.end_seconds = new_start + max(0.0, min(1.0, ratio)) * new_duration
+        if (
+            word.start_seconds is not None
+            and word.end_seconds is not None
+            and word.end_seconds <= word.start_seconds
+        ):
+            word.end_seconds = min(new_end, word.start_seconds + 1e-3)
+        if word.start_seconds is not None:
+            word.start_seconds = min(max(word.start_seconds, new_start), new_end)
+        if word.end_seconds is not None:
+            word.end_seconds = min(max(word.end_seconds, new_start), new_end)
+
+
 def update_segment(
     db: Session,
     segment_id: UUID,
     payload: TranscriptSegmentUpdate,
 ) -> Transcript:
-    """Edit a segment's text and/or timing, then return the parent transcript."""
+    """Edit a segment's text and/or timing, then return the parent transcript.
+
+    Timing overlaps with immediate neighbors adjust the shared boundary in the
+    same DB transaction when safe; otherwise a Spanish validation error is raised.
+    """
     segment = get_segment(db, segment_id)
     transcript = get_transcript_for_project(db, segment.transcript.project_id)
 
     data = payload.model_dump(exclude_unset=True)
     if not data:
-        raise ValidationAppError("No fields to update.", code="empty_update")
+        raise ValidationAppError("No hay campos para actualizar.", code="empty_update")
 
     new_text = data.get("text", segment.text)
     new_start = data.get("start_seconds", segment.start_seconds)
     new_end = data.get("end_seconds", segment.end_seconds)
+    old_start = segment.start_seconds
+    old_end = segment.end_seconds
 
     siblings = sorted(transcript.segments, key=lambda s: s.order)
     index = next(i for i, item in enumerate(siblings) if item.id == segment.id)
@@ -267,6 +308,9 @@ def update_segment(
     following = siblings[index + 1] if index + 1 < len(siblings) else None
 
     from app.services.transcripts.types import ParsedSegment
+
+    project = projects_service.get_project(db, transcript.project_id)
+    max_duration = project.duration_seconds
 
     validate_segment_edit(
         start_seconds=new_start,
@@ -289,19 +333,77 @@ def update_segment(
             if following
             else None
         ),
+        max_duration_seconds=max_duration,
+        allow_neighbor_adjust=True,
     )
 
     cleaned_text = new_text.strip() if isinstance(new_text, str) else segment.text
     if not cleaned_text:
         raise ValidationAppError(
-            "Transcript text cannot be empty.",
+            "El texto del segmento no puede estar vacío.",
             code="empty_segment_text",
         )
+
+    # Transactional neighbor boundary adjustment (shared limit).
+    if (
+        previous is not None
+        and new_start is not None
+        and previous.end_seconds is not None
+        and previous.start_seconds is not None
+        and new_start < previous.end_seconds
+    ):
+        prev_old_start = previous.start_seconds
+        prev_old_end = previous.end_seconds
+        previous.end_seconds = new_start
+        if previous.words:
+            _remap_word_timings(
+                previous,
+                old_start=prev_old_start,
+                old_end=prev_old_end,
+                new_start=prev_old_start,
+                new_end=new_start,
+            )
+
+    if (
+        following is not None
+        and new_end is not None
+        and following.start_seconds is not None
+        and following.end_seconds is not None
+        and new_end > following.start_seconds
+    ):
+        next_old_start = following.start_seconds
+        next_old_end = following.end_seconds
+        following.start_seconds = new_end
+        if following.words:
+            _remap_word_timings(
+                following,
+                old_start=next_old_start,
+                old_end=next_old_end,
+                new_start=new_end,
+                new_end=next_old_end,
+            )
+
+    timing_changed = new_start != old_start or new_end != old_end
     segment.start_seconds = new_start
     segment.end_seconds = new_end
     if cleaned_text != segment.text:
         segment.text = cleaned_text
         _sync_edited_words(segment, cleaned_text)
+    elif (
+        timing_changed
+        and old_start is not None
+        and old_end is not None
+        and new_start is not None
+        and new_end is not None
+        and segment.words
+    ):
+        _remap_word_timings(
+            segment,
+            old_start=old_start,
+            old_end=old_end,
+            new_start=new_start,
+            new_end=new_end,
+        )
 
     transcript.full_text = "\n".join(s.text for s in siblings)
     transcript.has_word_timestamps = any(

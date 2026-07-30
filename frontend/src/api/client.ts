@@ -5,6 +5,9 @@ import type { ApiErrorBody } from '../types/project';
 // http://127.0.0.1:<port> via prepareApiBaseUrl() before React mounts.
 export let API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? '';
 
+/** Default request timeout so hung backends never leave the UI waiting forever. */
+export const DEFAULT_FETCH_TIMEOUT_MS = 30_000;
+
 /** Resolve API origin when running inside the Tauri desktop shell. */
 export async function prepareApiBaseUrl(): Promise<void> {
   if (API_BASE_URL) return;
@@ -43,10 +46,54 @@ async function parseError(response: Response): Promise<ApiError> {
   }
 }
 
-export async function apiGet<T>(path: string): Promise<T> {
-  const response = await fetch(`${API_BASE_URL}${path}`, {
-    headers: { Accept: 'application/json' },
-  });
+function withTimeoutSignal(
+  timeoutMs: number,
+  external?: AbortSignal,
+): { signal: AbortSignal; clear: () => void } {
+  const controller = new AbortController();
+  const timer = window.setTimeout(() => controller.abort(), timeoutMs);
+  const onExternalAbort = () => controller.abort();
+  if (external) {
+    if (external.aborted) controller.abort();
+    else external.addEventListener('abort', onExternalAbort, { once: true });
+  }
+  return {
+    signal: controller.signal,
+    clear: () => {
+      window.clearTimeout(timer);
+      if (external) external.removeEventListener('abort', onExternalAbort);
+    },
+  };
+}
+
+async function fetchWithTimeout(
+  input: string,
+  init: RequestInit = {},
+  timeoutMs = DEFAULT_FETCH_TIMEOUT_MS,
+): Promise<Response> {
+  const { signal, clear } = withTimeoutSignal(timeoutMs, init.signal ?? undefined);
+  try {
+    return await fetch(input, { ...init, signal });
+  } catch (err) {
+    if (err instanceof DOMException && err.name === 'AbortError') {
+      throw new ApiError(
+        'La solicitud tardó demasiado o se canceló. Inténtalo de nuevo.',
+        0,
+        'request_timeout',
+      );
+    }
+    throw err;
+  } finally {
+    clear();
+  }
+}
+
+export async function apiGet<T>(path: string, timeoutMs = DEFAULT_FETCH_TIMEOUT_MS): Promise<T> {
+  const response = await fetchWithTimeout(
+    `${API_BASE_URL}${path}`,
+    { headers: { Accept: 'application/json' } },
+    timeoutMs,
+  );
   if (!response.ok) throw await parseError(response);
   return (await response.json()) as T;
 }
@@ -55,39 +102,64 @@ export async function apiJson<T>(
   path: string,
   method: 'POST' | 'PATCH' | 'PUT',
   body: unknown,
+  options?: { timeoutMs?: number; signal?: AbortSignal },
 ): Promise<T> {
-  const response = await fetch(`${API_BASE_URL}${path}`, {
-    method,
-    headers: {
-      Accept: 'application/json',
-      'Content-Type': 'application/json',
+  const response = await fetchWithTimeout(
+    `${API_BASE_URL}${path}`,
+    {
+      method,
+      headers: {
+        Accept: 'application/json',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(body),
+      signal: options?.signal,
     },
-    body: JSON.stringify(body),
-  });
+    options?.timeoutMs ?? DEFAULT_FETCH_TIMEOUT_MS,
+  );
   if (!response.ok) throw await parseError(response);
   return (await response.json()) as T;
 }
 
-export async function apiDelete(path: string): Promise<void> {
-  const response = await fetch(`${API_BASE_URL}${path}`, { method: 'DELETE' });
+export async function apiDelete(path: string, timeoutMs = DEFAULT_FETCH_TIMEOUT_MS): Promise<void> {
+  const response = await fetchWithTimeout(
+    `${API_BASE_URL}${path}`,
+    { method: 'DELETE' },
+    timeoutMs,
+  );
   if (!response.ok) throw await parseError(response);
 }
 
-export async function apiDeleteJson<T>(path: string): Promise<T> {
-  const response = await fetch(`${API_BASE_URL}${path}`, {
-    method: 'DELETE',
-    headers: { Accept: 'application/json' },
-  });
+export async function apiDeleteJson<T>(
+  path: string,
+  timeoutMs = DEFAULT_FETCH_TIMEOUT_MS,
+): Promise<T> {
+  const response = await fetchWithTimeout(
+    `${API_BASE_URL}${path}`,
+    {
+      method: 'DELETE',
+      headers: { Accept: 'application/json' },
+    },
+    timeoutMs,
+  );
   if (!response.ok) throw await parseError(response);
   if (response.status === 204) return undefined as T;
   return (await response.json()) as T;
 }
 
-export async function apiForm<T>(path: string, form: FormData): Promise<T> {
-  const response = await fetch(`${API_BASE_URL}${path}`, {
-    method: 'POST',
-    body: form,
-  });
+export async function apiForm<T>(
+  path: string,
+  form: FormData,
+  timeoutMs = DEFAULT_FETCH_TIMEOUT_MS,
+): Promise<T> {
+  const response = await fetchWithTimeout(
+    `${API_BASE_URL}${path}`,
+    {
+      method: 'POST',
+      body: form,
+    },
+    timeoutMs,
+  );
   if (!response.ok) throw await parseError(response);
   return (await response.json()) as T;
 }
@@ -104,6 +176,7 @@ export function uploadWithProgress<T>(
 
     xhr.open('POST', `${API_BASE_URL}${path}`);
     xhr.responseType = 'json';
+    xhr.timeout = DEFAULT_FETCH_TIMEOUT_MS;
 
     xhr.upload.onprogress = (event) => {
       if (event.lengthComputable && event.total > 0) {
@@ -126,6 +199,8 @@ export function uploadWithProgress<T>(
       );
     };
 
+    xhr.ontimeout = () =>
+      reject(new ApiError('La subida tardó demasiado. Inténtalo de nuevo.', 0, 'request_timeout'));
     xhr.onerror = () => reject(new ApiError('Network error during upload', 0));
     xhr.send(form);
   });

@@ -7,8 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.2.0] — 2026-07-30
+
 ### Added
 
+- Desktop Gemini persistence: `scripts/seed-desktop-env.sh` + Tauri first-run
+  migration into `~/Library/Application Support/app.sermoncut.desktop/.env`
+  (mode `0600`, never overwrite, never log the key).
 - Professional dark home screen redesign (DaVinci/OBS/Cursor aesthetic):
   `AppLayout` + `TopBar` + `Sidebar` + `StatusBar`, Inter Variable typography,
   lucide-react icons, CSS Modules design system (`PrimaryButton`,
@@ -31,6 +36,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- Transcript timing edits no longer freeze the UI: finite validation, Spanish
+  errors, transactional neighbor boundary adjust, word-timestamp remap, fetch
+  timeouts, and double-save guards.
 - Project status no longer flips to completed/failed while sibling renders run.
 - Whisper audio extract respects cancel (terminates FFmpeg).
 - Render cancel checked through verify/finalize.
@@ -56,6 +64,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Community files: CONTRIBUTING, CODE_OF_CONDUCT, SECURITY, issue/PR templates,
   GitHub Actions CI.
 - README targets macOS, Windows, and Linux (still no Docker requirement).
+- FastAPI app version now follows `SERMON_CUT` / `Settings.app_version`.
 
 ## [0.1.0] — 2026-07-24
 

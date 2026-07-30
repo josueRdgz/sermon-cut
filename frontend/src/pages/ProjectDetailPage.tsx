@@ -253,6 +253,7 @@ export function ProjectDetailPage() {
         <TranscriptEditor
           projectId={project.id}
           hasVideo={project.has_video}
+          videoDuration={project.duration_seconds}
           onTranscriptChanged={handleTranscriptChanged}
         />
       </div>

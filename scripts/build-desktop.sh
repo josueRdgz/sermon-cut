@@ -16,6 +16,16 @@ if ! command -v cargo >/dev/null 2>&1; then
 fi
 
 "$ROOT/scripts/build-backend-sidecar.sh"
+
+# Persist Gemini settings into Application Support before packaging so the
+# installed app keeps the key across DMG rebuilds. Never embeds secrets in the
+# .app / DMG bundle itself.
+if [[ -x "$ROOT/scripts/seed-desktop-env.sh" ]]; then
+  "$ROOT/scripts/seed-desktop-env.sh"
+elif [[ -f "$ROOT/scripts/seed-desktop-env.sh" ]]; then
+  bash "$ROOT/scripts/seed-desktop-env.sh"
+fi
+
 if [[ "$(uname -s)" == "Darwin" ]]; then
   # Build the DMG first (its script removes the temporary .app), then leave a
   # standalone .app alongside it for direct local use.

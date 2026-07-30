@@ -196,3 +196,122 @@ def test_replace_transcript_on_reupload(client: TestClient) -> None:
     assert second.json()["id"] != first["id"]
     assert second.json()["source"] == "uploaded_json"
     assert len(second.json()["segments"]) == 2
+
+
+def test_valid_timing_edit_and_word_remap(client: TestClient) -> None:
+    project = _create_project(client)
+    content = (FIXTURES / "sample.json").read_bytes()
+    uploaded = client.post(
+        f"/api/projects/{project['id']}/transcript",
+        files={"file": ("sample.json", content, "application/json")},
+    )
+    assert uploaded.status_code == 201
+    segment = uploaded.json()["segments"][0]
+    assert segment["start_seconds"] == 10.2
+    assert segment["end_seconds"] == 14.8
+
+    patched = client.patch(
+        f"/api/transcripts/segments/{segment['id']}",
+        json={"start_seconds": 10.0, "end_seconds": 14.0},
+    )
+    assert patched.status_code == 200, patched.text
+    edited = patched.json()["segments"][0]
+    assert edited["start_seconds"] == 10.0
+    assert edited["end_seconds"] == 14.0
+    words = edited["words"]
+    assert words[0]["start_seconds"] == 10.0
+    assert words[-1]["end_seconds"] == 14.0
+    assert all(10.0 <= w["start_seconds"] <= 14.0 for w in words)
+    assert all(10.0 <= w["end_seconds"] <= 14.0 for w in words)
+
+
+def test_start_greater_or_equal_end_rejected(client: TestClient) -> None:
+    project = _create_project(client)
+    created = _upload_srt(client, project["id"])
+    segment_id = created["segments"][0]["id"]
+    response = client.patch(
+        f"/api/transcripts/segments/{segment_id}",
+        json={"start_seconds": 5.0, "end_seconds": 5.0},
+    )
+    assert response.status_code == 400
+    assert response.json()["code"] == "invalid_time_range"
+    assert "inicio" in response.json()["detail"].lower()
+
+
+def test_non_finite_timing_rejected(client: TestClient) -> None:
+    project = _create_project(client)
+    created = _upload_srt(client, project["id"])
+    segment_id = created["segments"][0]["id"]
+    # Pydantic rejects non-finite floats before our validator in most paths;
+    # sending a string that coerces poorly should still fail validation.
+    response = client.patch(
+        f"/api/transcripts/segments/{segment_id}",
+        json={"start_seconds": "NaN", "end_seconds": 4.0},
+    )
+    assert response.status_code == 422
+
+
+def test_overlap_previous_adjusts_shared_boundary(client: TestClient) -> None:
+    project = _create_project(client)
+    created = _upload_srt(client, project["id"])
+    segments = created["segments"]
+    # sample.srt: [1–4.5], [4.5–8.2], [8.2–12]
+    mid = segments[1]
+    response = client.patch(
+        f"/api/transcripts/segments/{mid['id']}",
+        json={"start_seconds": 4.0, "end_seconds": 8.2},
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()["segments"]
+    assert body[0]["end_seconds"] == 4.0
+    assert body[1]["start_seconds"] == 4.0
+    assert body[1]["end_seconds"] == 8.2
+    assert body[2]["start_seconds"] == 8.2
+
+
+def test_overlap_next_adjusts_shared_boundary(client: TestClient) -> None:
+    project = _create_project(client)
+    created = _upload_srt(client, project["id"])
+    segments = created["segments"]
+    mid = segments[1]
+    response = client.patch(
+        f"/api/transcripts/segments/{mid['id']}",
+        json={"start_seconds": 4.5, "end_seconds": 9.0},
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()["segments"]
+    assert body[1]["end_seconds"] == 9.0
+    assert body[2]["start_seconds"] == 9.0
+
+
+def test_unsafe_neighbor_adjust_rejected(client: TestClient) -> None:
+    project = _create_project(client)
+    created = _upload_srt(client, project["id"])
+    mid = created["segments"][1]
+    # Would swallow the entire previous segment (previous starts at 1.0).
+    response = client.patch(
+        f"/api/transcripts/segments/{mid['id']}",
+        json={"start_seconds": 0.5, "end_seconds": 8.2},
+    )
+    assert response.status_code == 400
+    assert response.json()["code"] == "unsafe_neighbor_adjust"
+
+
+def test_beyond_video_duration_rejected(client: TestClient, storage_root: Path) -> None:
+    project = _create_project(client)
+    project_id = project["id"]
+    fake_mp4 = b"\x00\x00\x00\x18ftypisom\x00\x00\x00\x00isomiso2mp41"
+    with patch("app.services.projects.probe_video", return_value=FAKE_METADATA):
+        upload = client.post(
+            f"/api/projects/{project_id}/video",
+            files={"file": ("sermon.mp4", fake_mp4, "video/mp4")},
+        )
+    assert upload.status_code == 200
+    created = _upload_srt(client, project_id)
+    last = created["segments"][-1]
+    response = client.patch(
+        f"/api/transcripts/segments/{last['id']}",
+        json={"start_seconds": 8.2, "end_seconds": 90.0},
+    )
+    assert response.status_code == 400
+    assert response.json()["code"] == "beyond_video_duration"

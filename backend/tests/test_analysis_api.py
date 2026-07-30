@@ -138,6 +138,34 @@ def test_provider_status_reports_optional_mock(analysis_env) -> None:
     assert body["gemini_configured"] is False
 
 
+def test_provider_status_reports_gemini_when_key_configured(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Desktop-style SERMON_CUT_ENV_FILE must surface Gemini without printing the key."""
+    env_file = tmp_path / "desktop.env"
+    env_file.write_text(
+        "SERMON_CUT_AI_PROVIDER=gemini\n"
+        "SERMON_CUT_GEMINI_API_KEY=test-key-not-a-real-secret\n"
+        "SERMON_CUT_GEMINI_MODEL=gemini-2.5-flash\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("SERMON_CUT_ENV_FILE", str(env_file))
+    monkeypatch.delenv("SERMON_CUT_GEMINI_API_KEY", raising=False)
+    monkeypatch.delenv("SERMON_CUT_AI_PROVIDER", raising=False)
+    get_settings.cache_clear()
+
+    # Avoid importing GeminiProvider (needs network/SDK behaviour); only status fields.
+    from app.services.ai import provider_availability
+
+    status = provider_availability()
+    assert status["gemini_configured"] is True
+    assert status["requested"] == "gemini"
+    assert status["gemini_model"] == "gemini-2.5-flash"
+    # Never leak the key in the public status payload.
+    assert "test-key" not in str(status)
+    get_settings.cache_clear()
+
+
 def test_analysis_requires_transcript(analysis_env) -> None:
     client, session_factory = analysis_env
     with session_factory() as db:

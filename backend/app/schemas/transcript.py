@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+import math
 from datetime import datetime
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from app.models.transcript import TranscriptSource, TranscriptStatus
 
@@ -53,6 +54,13 @@ class TranscriptSegmentUpdate(BaseModel):
     text: str | None = Field(default=None, min_length=1)
     start_seconds: float | None = Field(default=None, ge=0)
     end_seconds: float | None = Field(default=None, ge=0)
+
+    @field_validator("start_seconds", "end_seconds")
+    @classmethod
+    def reject_non_finite(cls, value: float | None) -> float | None:
+        if value is not None and not math.isfinite(value):
+            raise ValueError("El tiempo debe ser un número finito (no NaN ni Infinity).")
+        return value
 
 
 class ExportWord(BaseModel):

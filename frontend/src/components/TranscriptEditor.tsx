@@ -17,20 +17,37 @@ import { TranscriptionPanel } from './TranscriptionPanel';
 interface TranscriptEditorProps {
   projectId: string;
   hasVideo: boolean;
+  videoDuration?: number | null;
   onTranscriptChanged?: () => void;
 }
 
 const TRANSCRIPT_ACCEPT = '.srt,.vtt,.json,.txt,text/plain,application/json';
 
+function parseTimingField(raw: string, label: string): { value: number | null; error: string | null } {
+  const trimmed = raw.trim();
+  if (trimmed === '') return { value: null, error: null };
+  const value = Number(trimmed);
+  if (!Number.isFinite(value)) {
+    return { value: null, error: `${label} debe ser un número finito.` };
+  }
+  if (value < 0) {
+    return { value: null, error: `${label} no puede ser negativo.` };
+  }
+  return { value, error: null };
+}
+
 export function TranscriptEditor({
   projectId,
   hasVideo,
+  videoDuration = null,
   onTranscriptChanged,
 }: TranscriptEditorProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
+  const savingRef = useRef(false);
   const [transcript, setTranscript] = useState<Transcript | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [fieldError, setFieldError] = useState<string | null>(null);
   const [query, setQuery] = useState('');
   const [activeId, setActiveId] = useState<string | null>(null);
   const [editing, setEditing] = useState<TranscriptSegment | null>(null);
@@ -84,28 +101,74 @@ export function TranscriptEditor({
     setEditText(segment.text);
     setEditStart(segment.start_seconds != null ? String(segment.start_seconds) : '');
     setEditEnd(segment.end_seconds != null ? String(segment.end_seconds) : '');
+    setFieldError(null);
+    setError(null);
+  }
+
+  function closeEditor() {
+    if (savingRef.current) return;
+    setEditing(null);
+    setFieldError(null);
   }
 
   async function handleSaveSegment(event: FormEvent) {
     event.preventDefault();
-    if (!editing) return;
+    if (!editing || savingRef.current) return;
+
+    const startParsed = parseTimingField(editStart, 'El inicio');
+    const endParsed = parseTimingField(editEnd, 'El fin');
+    if (startParsed.error || endParsed.error) {
+      setFieldError(startParsed.error ?? endParsed.error);
+      return;
+    }
+    if (
+      (editStart !== '' && startParsed.value == null) ||
+      (editEnd !== '' && endParsed.value == null)
+    ) {
+      setFieldError('Inicio y fin deben ser números válidos.');
+      return;
+    }
+    if (startParsed.value != null && endParsed.value != null && startParsed.value >= endParsed.value) {
+      setFieldError('El inicio debe ser menor que el fin.');
+      return;
+    }
+    if (
+      videoDuration != null &&
+      Number.isFinite(videoDuration) &&
+      endParsed.value != null &&
+      endParsed.value > videoDuration
+    ) {
+      setFieldError(`El fin no puede superar la duración del video (${videoDuration}s).`);
+      return;
+    }
+    if (!editText.trim()) {
+      setFieldError('El texto del segmento no puede estar vacío.');
+      return;
+    }
+
+    savingRef.current = true;
     setSaving(true);
+    setFieldError(null);
     setError(null);
     try {
       const payload: {
         text: string;
         start_seconds?: number | null;
         end_seconds?: number | null;
-      } = { text: editText };
-      if (editStart !== '') payload.start_seconds = Number(editStart);
-      if (editEnd !== '') payload.end_seconds = Number(editEnd);
+      } = { text: editText.trim() };
+      if (editStart !== '') payload.start_seconds = startParsed.value;
+      if (editEnd !== '') payload.end_seconds = endParsed.value;
       const updated = await updateSegment(editing.id, payload);
+      // Refresh transcript data only — keep the same video element mounted.
       setTranscript(updated);
       onTranscriptChanged?.();
       setEditing(null);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'No se pudo guardar el segmento');
+      const message = err instanceof Error ? err.message : 'No se pudo guardar el segmento';
+      setFieldError(message);
+      // Keep the editor open on validation / network errors.
     } finally {
+      savingRef.current = false;
       setSaving(false);
     }
   }
@@ -126,6 +189,8 @@ export function TranscriptEditor({
   }
 
   async function handleDelete() {
+    if (savingRef.current) return;
+    savingRef.current = true;
     setSaving(true);
     try {
       await deleteTranscript(projectId);
@@ -135,6 +200,7 @@ export function TranscriptEditor({
     } catch (err) {
       setError(err instanceof Error ? err.message : 'No se pudo eliminar');
     } finally {
+      savingRef.current = false;
       setSaving(false);
     }
   }
@@ -197,7 +263,7 @@ export function TranscriptEditor({
 
       {uploading && <p className="muted">Importando transcripción…</p>}
       {loading && <p className="muted">Cargando transcripción…</p>}
-      {error && <p className="error">{error}</p>}
+      {error && !editing && <p className="error">{error}</p>}
 
       {!loading && !transcript && !uploading && (
         <p className="muted">Aún no hay transcripción. Importa un archivo para empezar.</p>
@@ -292,11 +358,7 @@ export function TranscriptEditor({
       )}
 
       {editing && (
-        <div
-          className="dialog-backdrop"
-          role="presentation"
-          onClick={() => !saving && setEditing(null)}
-        >
+        <div className="dialog-backdrop" role="presentation" onClick={closeEditor}>
           <form
             className="dialog transcript-correction-dialog"
             role="dialog"
@@ -318,38 +380,56 @@ export function TranscriptEditor({
                 rows={5}
                 required
                 autoFocus
+                disabled={saving}
               />
             </label>
-            <details className="transcript-correction-dialog__timing">
-              <summary>Ajustar tiempos (avanzado)</summary>
+            <details className="transcript-correction-dialog__timing" open>
+              <summary>Ajustar tiempos</summary>
               <div className="field-row">
                 <label className="field">
                   <span>Inicio (s)</span>
                   <input
-                    type="number"
-                    step="0.001"
-                    min="0"
+                    type="text"
+                    inputMode="decimal"
+                    aria-label="Inicio (s)"
                     value={editStart}
-                    onChange={(e) => setEditStart(e.target.value)}
+                    disabled={saving}
+                    onChange={(e) => {
+                      setEditStart(e.target.value);
+                      setFieldError(null);
+                    }}
                   />
                 </label>
                 <label className="field">
                   <span>Fin (s)</span>
                   <input
-                    type="number"
-                    step="0.001"
-                    min="0"
+                    type="text"
+                    inputMode="decimal"
+                    aria-label="Fin (s)"
                     value={editEnd}
-                    onChange={(e) => setEditEnd(e.target.value)}
+                    disabled={saving}
+                    onChange={(e) => {
+                      setEditEnd(e.target.value);
+                      setFieldError(null);
+                    }}
                   />
                 </label>
               </div>
+              <p className="muted">
+                Si el nuevo rango invade el segmento vecino, se ajustará el límite compartido
+                automáticamente cuando sea seguro.
+              </p>
             </details>
+            {fieldError && (
+              <p className="error" role="alert">
+                {fieldError}
+              </p>
+            )}
             <div className="dialog__actions">
               <button
                 type="button"
                 className="button button--secondary"
-                onClick={() => setEditing(null)}
+                onClick={closeEditor}
                 disabled={saving}
               >
                 Cancelar

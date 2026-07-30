@@ -31,7 +31,7 @@ class Settings(BaseSettings):
     )
 
     app_name: str = "Sermon Cut"
-    app_version: str = "0.1.0"
+    app_version: str = "0.2.0"
     api_prefix: str = "/api"
 
     # Optional override for local media + SQLite (absolute or relative path).
@@ -111,8 +111,12 @@ class Settings(BaseSettings):
 
 @lru_cache
 def get_settings() -> Settings:
-    """Return a cached Settings instance."""
-    return Settings()
+    """Return a cached Settings instance.
+
+    ``_env_file`` is resolved at call time so the desktop shell can point at
+    Application Support via ``SERMON_CUT_ENV_FILE`` before the first read.
+    """
+    return Settings(_env_file=_settings_env_file())
 
 
 def clear_settings_cache() -> None:
