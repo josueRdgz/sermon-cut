@@ -75,6 +75,7 @@ class Transcript(Base):
         default=TranscriptStatus.ready,
     )
     full_text: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    original_full_text: Mapped[str] = mapped_column(Text, nullable=False, default="")
     has_word_timestamps: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=_utc_now
@@ -106,6 +107,7 @@ class TranscriptSegment(Base):
     start_seconds: Mapped[float | None] = mapped_column(Float, nullable=True)
     end_seconds: Mapped[float | None] = mapped_column(Float, nullable=True)
     text: Mapped[str] = mapped_column(Text, nullable=False)
+    original_text: Mapped[str] = mapped_column(Text, nullable=False, default="")
 
     transcript: Mapped[Transcript] = relationship(back_populates="segments")
     words: Mapped[list[TranscriptWord]] = relationship(

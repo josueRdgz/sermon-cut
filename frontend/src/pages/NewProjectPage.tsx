@@ -20,6 +20,7 @@ const RIGHTS_NOTICE =
   'responsable de respetar los derechos de autor y las condiciones de la plataforma.';
 
 type VideoSource = 'local' | 'youtube';
+type ContentMode = 'shorts' | 'highlights' | 'both';
 type Step = 'idle' | 'creating' | 'video' | 'importing' | 'cover' | 'done';
 
 const ACTIVE_IMPORT_STATUSES = new Set([
@@ -94,6 +95,7 @@ export function NewProjectPage() {
   const [churchName, setChurchName] = useState('');
   const [youtubeChannel, setYoutubeChannel] = useState('');
   const [fullSermonUrl, setFullSermonUrl] = useState('');
+  const [contentMode, setContentMode] = useState<ContentMode>('shorts');
   const [videoFile, setVideoFile] = useState<File | null>(null);
   const [coverFile, setCoverFile] = useState<File | null>(null);
   const [step, setStep] = useState<Step>('idle');
@@ -134,19 +136,16 @@ export function NewProjectPage() {
     }
   }, [youtubeUrl]);
 
-  const pollImport = useCallback(
-    async (jobId: string): Promise<YouTubeImportJob> => {
-      let job = await getYouTubeImportJob(jobId);
+  const pollImport = useCallback(async (jobId: string): Promise<YouTubeImportJob> => {
+    let job = await getYouTubeImportJob(jobId);
+    setImportJob(job);
+    while (ACTIVE_IMPORT_STATUSES.has(job.status) && !cancelRef.current) {
+      await sleep(1200);
+      job = await getYouTubeImportJob(jobId);
       setImportJob(job);
-      while (ACTIVE_IMPORT_STATUSES.has(job.status) && !cancelRef.current) {
-        await sleep(1200);
-        job = await getYouTubeImportJob(jobId);
-        setImportJob(job);
-      }
-      return job;
-    },
-    [],
-  );
+    }
+    return job;
+  }, []);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -177,6 +176,7 @@ export function NewProjectPage() {
         church_name: churchName.trim(),
         youtube_channel: youtubeChannel.trim(),
         full_sermon_url: fullSermonUrl.trim() || null,
+        content_mode: contentMode,
       });
 
       if (videoSource === 'local') {
@@ -254,6 +254,29 @@ export function NewProjectPage() {
             maxLength={300}
           />
         </label>
+
+        <fieldset className="field" style={{ border: 'none', padding: 0, margin: 0 }}>
+          <span>Tipo de contenido *</span>
+          <div className="source-toggle" role="radiogroup" aria-label="Tipo de contenido">
+            {[
+              ['shorts', 'Crear Shorts'],
+              ['highlights', 'Crear Video Highlights'],
+              ['both', 'Crear ambos'],
+            ].map(([value, label]) => (
+              <label className="source-toggle__option" key={value}>
+                <input
+                  type="radio"
+                  name="content-mode"
+                  value={value}
+                  checked={contentMode === value}
+                  onChange={() => setContentMode(value as ContentMode)}
+                  disabled={busy}
+                />
+                <span>{label}</span>
+              </label>
+            ))}
+          </div>
+        </fieldset>
 
         <label className="field">
           <span>Predicador</span>
@@ -445,9 +468,7 @@ export function NewProjectPage() {
         {(step === 'importing' || step === 'cover') && importJob && (
           <div className="youtube-import__progress">
             <ProgressBar label={importLabel} percent={importPercent} />
-            {importDetail(importJob) && (
-              <p className="muted">{importDetail(importJob)}</p>
-            )}
+            {importDetail(importJob) && <p className="muted">{importDetail(importJob)}</p>}
             {ACTIVE_IMPORT_STATUSES.has(importJob.status) && (
               <button
                 type="button"

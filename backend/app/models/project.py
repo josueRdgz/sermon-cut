@@ -31,6 +31,14 @@ class ProjectStatus(enum.StrEnum):
     failed = "failed"
 
 
+class ProjectContentMode(enum.StrEnum):
+    """Content products enabled for a project."""
+
+    shorts = "shorts"
+    highlights = "highlights"
+    both = "both"
+
+
 class Project(Base):
     """A local project: metadata, media paths, and probed video properties.
 
@@ -48,6 +56,16 @@ class Project(Base):
     church_name: Mapped[str] = mapped_column(String(200), nullable=False)
     youtube_channel: Mapped[str] = mapped_column(String(200), nullable=False)
     full_sermon_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    content_mode: Mapped[ProjectContentMode] = mapped_column(
+        Enum(
+            ProjectContentMode,
+            name="project_content_mode",
+            native_enum=False,
+            length=24,
+        ),
+        nullable=False,
+        default=ProjectContentMode.shorts,
+    )
 
     # Relative file names inside the project directory (never absolute paths).
     video_filename: Mapped[str | None] = mapped_column(String(255), nullable=True)

@@ -15,7 +15,7 @@ renders y la base SQLite viven en tu disco (`storage/` o `SERMON_CUT_STORAGE_DIR
 
 | Función | Destino | Datos | Cómo evitarlo |
 |---------|---------|-------|---------------|
-| Análisis editorial / coherencia con Gemini | Google Generative AI | Texto de la transcripción (y metadatos del proyecto) | No configures `SERMON_CUT_GEMINI_API_KEY`; usa el mock local |
+| Análisis editorial / coherencia / Video Highlights con Gemini | Google Generative AI | Texto de la transcripción y metadatos del proyecto; nunca el video | No configures `SERMON_CUT_GEMINI_API_KEY`; utiliza detección y edición local |
 | Primera descarga de modelos Whisper | Hugging Face (caché) | Binarios del modelo, no tu sermón | Preinstala el modelo offline; la transcripción en sí es local |
 | Importación desde YouTube (yt-dlp) | YouTube / Google | La URL del video que pegas; se descarga el video a tu disco | Deshabilita con `SERMON_CUT_YOUTUBE_IMPORT_ENABLED=false`; usa subida local |
 

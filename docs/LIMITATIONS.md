@@ -10,15 +10,16 @@ restricciones. Complementa el README.
 - La Biblioteca de audio de YouTube se abre en YouTube Studio; como no hay un
   catálogo público para importarla por API, el usuario descarga allí el MP3 y
   luego lo selecciona en la app.
-- El **análisis editorial con Gemini es opcional**. Sin clave se usa un mock
-  determinista; no sustituye el criterio pastoral humano.
+- El análisis de Shorts puede operar con evaluación estructural local cuando
+  Gemini no está configurado. Video Highlights exige Gemini para la selección
+  semántica; la detección y la edición manual permanecen locales.
 - Los **clips sugeridos no se aplican solos**: aceptación/rechazo explícitos.
 - La **pantalla final es obligatoria** en cada render (no se puede desactivar).
 
 ## Plataforma y hardware
 
 - Pensado para **uso local** en macOS, Windows y Linux. No requiere Docker.
-  Hay un shell experimental **Tauri 2** ([docs/DESKTOP.md](DESKTOP.md)); el
+  La distribución de escritorio utiliza **Tauri 2** ([docs/DESKTOP.md](DESKTOP.md)); el
   instalador aún depende del venv Python y de FFmpeg del sistema (no se
   empaquetan). Ver también [PRIVACY.md](PRIVACY.md) y [LICENSING.md](LICENSING.md).
 - **faster-whisper** carga el audio del sermón completo a WAV temporal; videos
@@ -28,6 +29,11 @@ restricciones. Complementa el README.
   subtítulos/render.
 - El **tracking** de sujeto (OpenCV) es opcional y puede degradar a recorte
   central si falta el extra o falla el análisis.
+- La detección de predicación no incluye diarización de hablantes ni clasificación
+  visual de escenas. Utiliza transcripción, continuidad de voz y pausas; por eso
+  los casos de baja confianza requieren confirmación manual.
+- Los subtítulos horizontales utilizan márgenes seguros y división semántica,
+  pero todavía no desplazan cada cue dinámicamente para evitar un rostro.
 
 ## Media y calidad
 

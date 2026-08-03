@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session, selectinload
 
 from app.core.exceptions import ConflictError, NotFoundError, ValidationAppError
 from app.models.analysis import AnalysisCandidate, AnalysisCandidateStatus, AnalysisJob
+from app.models.highlight import ContentMetadata
 from app.models.reel import AspectRatio
 from app.schemas.analysis import (
     AnalysisCandidateResponse,
@@ -61,6 +62,12 @@ def candidate_to_response(candidate: AnalysisCandidate) -> AnalysisCandidateResp
         joined_script=candidate.joined_script,
         caption=candidate.caption,
         hashtags=[str(tag) for tag in _parse_json_list(candidate.hashtags_json)],
+        suggested_titles={
+            str(key): str(value)
+            for key, value in _parse_json_object(candidate.suggested_titles_json).items()
+        },
+        thumbnail_text=candidate.thumbnail_text,
+        keywords=[str(item) for item in _parse_json_list(candidate.keywords_json)],
         segments=segments,
         warnings=[str(item) for item in _parse_json_list(candidate.warnings_json)],
         removed_context_warning=candidate.removed_context_warning,
@@ -128,6 +135,9 @@ def persist_candidates(
             joined_script=clip.joined_script or None,
             caption=clip.caption or None,
             hashtags_json=json.dumps(clip.hashtags, ensure_ascii=False),
+            suggested_titles_json=json.dumps(clip.suggested_titles, ensure_ascii=False),
+            thumbnail_text=clip.thumbnail_text or None,
+            keywords_json=json.dumps(clip.keywords, ensure_ascii=False),
             segments_json=json.dumps(
                 [
                     {
@@ -250,6 +260,31 @@ def accept_candidate(
     reel = reels_service.create_reel(db, project_id, payload)
     candidate.status = AnalysisCandidateStatus.accepted
     candidate.accepted_reel_id = reel.id
+    metadata = ContentMetadata(
+        project_id=project_id,
+        reel_id=reel.id,
+        content_kind="short",
+        suggested_titles_json=candidate.suggested_titles_json or "{}",
+        chosen_title=(
+            _parse_json_object(candidate.suggested_titles_json).get("recommended")
+            or candidate.title
+        ),
+        description=candidate.caption or candidate.summary,
+        thumbnail_text=candidate.thumbnail_text,
+        hashtags_json=candidate.hashtags_json or "[]",
+        keywords_json=candidate.keywords_json or "[]",
+    )
+    db.add(metadata)
     db.commit()
     db.refresh(candidate)
     return candidate, reel.id
+
+
+def _parse_json_object(raw: str | None) -> dict:
+    if not raw:
+        return {}
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError:
+        return {}
+    return data if isinstance(data, dict) else {}

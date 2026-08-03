@@ -42,6 +42,9 @@ class ValidatedClip:
     removed_context_warning: str | None
     caption: str
     hashtags: list[str]
+    suggested_titles: dict[str, str]
+    thumbnail_text: str
+    keywords: list[str]
     warnings: list[str] = field(default_factory=list)
     confidence: float = 1.0
 
@@ -277,6 +280,19 @@ def _validate_clip(
         removed_context_warning=clip.removed_context_warning,
         caption=clip.caption.strip(),
         hashtags=[tag.strip() for tag in clip.hashtags if tag.strip()][:20],
+        suggested_titles=(
+            clip.suggested_titles.model_dump(mode="json")
+            if clip.suggested_titles is not None
+            else {
+                "recommended": clip.title.strip(),
+                "direct": clip.title.strip(),
+                "emotional": clip.title.strip(),
+                "biblical": clip.title.strip(),
+                "search_focused": clip.title.strip(),
+            }
+        ),
+        thumbnail_text=clip.thumbnail_text.strip(),
+        keywords=[item.strip() for item in clip.keywords if item.strip()][:20],
         warnings=warnings,
         confidence=round(confidence, 3),
     )

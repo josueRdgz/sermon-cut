@@ -33,9 +33,8 @@ from app.services.ai.schemas import (
     AnalysisRequest,
     ProviderResult,
     SermonMetadata,
-    TranscriptSegmentInput,
-    TranscriptWordInput,
 )
+from app.services.ai.transcript import transcript_to_ai_inputs
 from app.services.analysis.chunking import chunk_segments, request_for_chunk
 from app.services.analysis.service import persist_candidates
 from app.services.analysis.validate import validate_analysis_response
@@ -162,8 +161,8 @@ class AnalysisManager:
             notice=(
                 None
                 if provider.name == "gemini"
-                else "Proveedor mock (sin Gemini). La app funciona igual; "
-                "configura SERMON_CUT_GEMINI_API_KEY para usar Gemini."
+                else "Motor local de evaluación estructural activo. Configure "
+                "SERMON_CUT_GEMINI_API_KEY para habilitar el análisis semántico avanzado."
             ),
         )
         db.add(job)
@@ -245,7 +244,7 @@ class AnalysisManager:
                 raise ValidationAppError("Project missing.", code="project_not_found")
 
             transcript = transcripts_service.get_transcript_for_project(session, job.project_id)
-            segments = _transcript_to_inputs(transcript)
+            segments = transcript_to_ai_inputs(transcript)
             video_duration = float(project.duration_seconds or segments[-1].end)
             settings = get_settings()
 
@@ -395,32 +394,6 @@ class AnalysisManager:
         shutdown = getattr(self._executor, "shutdown", None)
         if callable(shutdown):
             shutdown(wait=wait)
-
-
-def _transcript_to_inputs(transcript) -> list[TranscriptSegmentInput]:
-    items: list[TranscriptSegmentInput] = []
-    for segment in sorted(transcript.segments, key=lambda s: s.order):
-        if segment.start_seconds is None or segment.end_seconds is None:
-            continue
-        words = [
-            TranscriptWordInput(
-                start=float(word.start_seconds),
-                end=float(word.end_seconds),
-                text=word.text,
-            )
-            for word in sorted(segment.words, key=lambda w: w.order)
-            if word.start_seconds is not None and word.end_seconds is not None
-        ]
-        items.append(
-            TranscriptSegmentInput(
-                order=segment.order,
-                start=float(segment.start_seconds),
-                end=float(segment.end_seconds),
-                text=segment.text,
-                words=words,
-            )
-        )
-    return items
 
 
 _manager: AnalysisManager | None = None

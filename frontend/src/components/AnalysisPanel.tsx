@@ -193,7 +193,7 @@ export function AnalysisPanel({
   return (
     <section className="card analysis-panel">
       <div className="reel-editor__section-header">
-        <h2>Análisis editorial (IA opcional)</h2>
+        <h2>Análisis editorial asistido</h2>
         {job && (
           <span className={`badge badge--${job.status}`}>
             {STAGE_LABELS[job.status] ?? job.status}
@@ -202,39 +202,38 @@ export function AnalysisPanel({
       </div>
 
       <p className="muted">
-        Sugiere Reels a partir de la transcripción. Gemini es opcional: sin clave la app usa un
-        proveedor mock determinista (no Gemini). Ningún candidato se renderiza solo; debes aceptar
-        o descartar cada uno.
+        Genera propuestas de Reels a partir de la transcripción sincronizada. Cada propuesta
+        requiere aprobación editorial antes de incorporarse al flujo de renderizado.
       </p>
       <p className="muted">
-        Ritmo editorial: se prioriza un pasaje continuo y, por defecto, cada Reel tendrá como
-        máximo 3 fragmentos de al menos 8 segundos cada uno.
+        Ritmo editorial: se prioriza un pasaje continuo y, por defecto, cada Reel tendrá como máximo
+        3 fragmentos de al menos 8 segundos cada uno.
       </p>
 
       {provider?.gemini_configured && (
         <p className="error" role="note">
-          Aviso de privacidad: al usar Gemini, el texto de la predicación (transcripción) se
-          envía a los servidores de Google. Si el contenido es sensible o confidencial, usa solo el
-          mock local. Detalles en docs/PRIVACY.md.
+          Aviso de privacidad: al usar Gemini, la transcripción se procesa en los servidores de
+          Google. Para material confidencial, utilice exclusivamente el motor local. Consulte
+          docs/PRIVACY.md.
         </p>
       )}
 
       {provider && !provider.gemini_configured && (
         <p className="error" role="note">
-          Gemini no está configurado. El proveedor activo es el mock local. Para habilitar Gemini
-          en la app de escritorio, crea o edita el archivo{' '}
-          <code>~/Library/Application Support/app.sermoncut.desktop/.env</code> con
-          <code> SERMON_CUT_AI_PROVIDER=gemini</code>,{' '}
-          <code>SERMON_CUT_GEMINI_API_KEY</code> y opcionalmente{' '}
-          <code>SERMON_CUT_GEMINI_MODEL</code>, con permisos 0600, y reinicia la aplicación. En
-          desarrollo puedes usar el <code>.env</code> de la raíz del repositorio. La clave nunca
-          se incluye en el DMG.
+          El análisis avanzado no está configurado. El sistema utilizará el motor local de
+          evaluación estructural. Para habilitar Gemini en la aplicación de escritorio, cree o edite
+          el archivo <code>~/Library/Application Support/app.sermoncut.desktop/.env</code> con
+          <code> SERMON_CUT_AI_PROVIDER=gemini</code>, <code>SERMON_CUT_GEMINI_API_KEY</code> y
+          opcionalmente <code>SERMON_CUT_GEMINI_MODEL</code>, con permisos 0600, y reinicia la
+          aplicación. En desarrollo puedes usar el <code>.env</code> de la raíz del repositorio. La
+          clave nunca se incluye en el DMG.
         </p>
       )}
 
       {provider && (
         <p className="muted">
-          Proveedor activo: <strong>{provider.active}</strong>
+          Motor de análisis activo:{' '}
+          <strong>{provider.active === 'mock' ? 'local estructural' : provider.active}</strong>
           {provider.gemini_configured
             ? ` · Gemini configurado (${provider.gemini_model})`
             : ' · Gemini no configurado'}
@@ -242,7 +241,7 @@ export function AnalysisPanel({
             ? ' · SDK ausente: reinstala el sidecar o pip install -e ".[gemini]"'
             : ''}
           {provider.requested === 'gemini' && !provider.gemini_configured
-            ? ' · Se solicitó Gemini pero falta la clave; se usa mock.'
+            ? ' · La configuración solicitó Gemini, pero falta la credencial.'
             : ''}
         </p>
       )}
@@ -370,6 +369,23 @@ export function AnalysisPanel({
                     </p>
                     {candidate.hook && <p>{candidate.hook}</p>}
                     {candidate.summary && <p className="muted">{candidate.summary}</p>}
+                    {Object.keys(candidate.suggested_titles).length > 0 && (
+                      <div className="analysis-candidate__titles">
+                        <strong>Títulos estratégicos</strong>
+                        <ul>
+                          {Object.entries(candidate.suggested_titles).map(([category, title]) => (
+                            <li key={category}>
+                              <span className="muted">{titleCategory(category)}:</span> {title}
+                            </li>
+                          ))}
+                        </ul>
+                        {candidate.thumbnail_text && (
+                          <p className="muted">
+                            Miniatura: <strong>{candidate.thumbnail_text}</strong>
+                          </p>
+                        )}
+                      </div>
+                    )}
                     <ul className="analysis-candidate__segments">
                       {candidate.segments.map((segment, index) => (
                         <li key={`${candidate.id}-${index}`}>
@@ -423,4 +439,15 @@ export function AnalysisPanel({
       {error && <p className="error">{error}</p>}
     </section>
   );
+}
+
+function titleCategory(value: string): string {
+  const labels: Record<string, string> = {
+    recommended: 'Recomendado',
+    direct: 'Más directo',
+    emotional: 'Más emocional',
+    biblical: 'Más bíblico',
+    search_focused: 'Más orientado a búsquedas',
+  };
+  return labels[value] ?? value;
 }

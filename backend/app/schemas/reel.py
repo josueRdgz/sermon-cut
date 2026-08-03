@@ -9,6 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from app.models.reel import (
     AspectRatio,
+    ContentKind,
     ReelStatus,
     SubtitleGranularity,
     SubtitlePosition,
@@ -62,6 +63,7 @@ class ReelCreate(BaseModel):
     hook: str | None = Field(default=None, max_length=500)
     description: str | None = None
     editorial_score: float | None = Field(default=None, ge=0, le=10)
+    content_kind: ContentKind = ContentKind.short
     subtitle_style: SubtitleStyle = SubtitleStyle.reformed_sober
     subtitle_enabled: bool = True
     subtitle_granularity: SubtitleGranularity = SubtitleGranularity.auto
@@ -116,6 +118,9 @@ class ReelSegmentResponse(BaseModel):
     manual_crop_x: float | None = None
     manual_crop_y: float | None = None
     manual_crop_zoom: float | None = None
+    selection_reason: str | None = None
+    selection_score: float | None = None
+    narrative_category: str | None = None
 
 
 class ReelResponse(BaseModel):
@@ -129,6 +134,7 @@ class ReelResponse(BaseModel):
     hook: str | None
     description: str | None
     editorial_score: float | None
+    content_kind: ContentKind
     subtitle_style: SubtitleStyle
     subtitle_enabled: bool
     subtitle_granularity: SubtitleGranularity

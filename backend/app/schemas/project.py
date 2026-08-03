@@ -7,7 +7,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, HttpUrl
 
-from app.models.project import ProjectStatus
+from app.models.project import ProjectContentMode, ProjectStatus
 
 
 class ProjectCreate(BaseModel):
@@ -19,6 +19,7 @@ class ProjectCreate(BaseModel):
     church_name: str = Field(min_length=1, max_length=200)
     youtube_channel: str = Field(min_length=1, max_length=200)
     full_sermon_url: HttpUrl | None = None
+    content_mode: ProjectContentMode = ProjectContentMode.shorts
 
 
 class ProjectUpdate(BaseModel):
@@ -30,6 +31,7 @@ class ProjectUpdate(BaseModel):
     church_name: str | None = Field(default=None, min_length=1, max_length=200)
     youtube_channel: str | None = Field(default=None, min_length=1, max_length=200)
     full_sermon_url: HttpUrl | None = None
+    content_mode: ProjectContentMode | None = None
     status: ProjectStatus | None = None
 
 
@@ -45,6 +47,7 @@ class ProjectResponse(BaseModel):
     church_name: str
     youtube_channel: str
     full_sermon_url: str | None
+    content_mode: ProjectContentMode
 
     video_filename: str | None
     cover_filename: str | None

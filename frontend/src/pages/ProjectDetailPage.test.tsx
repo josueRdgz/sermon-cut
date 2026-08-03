@@ -39,6 +39,10 @@ vi.mock('../components/ReelEditor', () => ({
   ReelEditor: () => <div>Panel del editor</div>,
 }));
 
+vi.mock('../components/VideoHighlightsPanel', () => ({
+  VideoHighlightsPanel: () => <div>Panel de Video Highlights</div>,
+}));
+
 vi.mock('../components/ConfirmDialog', () => ({
   ConfirmDialog: () => null,
 }));
@@ -51,6 +55,7 @@ const PROJECT = {
   church_name: 'Iglesia Central',
   youtube_channel: '@iglesiacentral',
   full_sermon_url: null,
+  content_mode: 'both',
   video_filename: 'original.mp4',
   cover_filename: null,
   has_video: true,

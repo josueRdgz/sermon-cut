@@ -65,6 +65,13 @@ class ReelStatus(enum.StrEnum):
     failed = "failed"
 
 
+class ContentKind(enum.StrEnum):
+    """Editorial product represented by the shared timeline editor."""
+
+    short = "short"
+    highlight = "highlight"
+
+
 class Reel(Base):
     """A vertical (or other ratio) edit built from ordered, possibly non-contiguous clips.
 
@@ -86,6 +93,12 @@ class Reel(Base):
     hook: Mapped[str | None] = mapped_column(String(500), nullable=True)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     editorial_score: Mapped[float | None] = mapped_column(Float, nullable=True)
+    content_kind: Mapped[ContentKind] = mapped_column(
+        Enum(ContentKind, name="content_kind", native_enum=False, length=16),
+        nullable=False,
+        default=ContentKind.short,
+        index=True,
+    )
 
     subtitle_style: Mapped[SubtitleStyle] = mapped_column(
         Enum(SubtitleStyle, name="subtitle_style", native_enum=False, length=32),
@@ -181,5 +194,8 @@ class ReelSegment(Base):
     manual_crop_x: Mapped[float | None] = mapped_column(Float, nullable=True)
     manual_crop_y: Mapped[float | None] = mapped_column(Float, nullable=True)
     manual_crop_zoom: Mapped[float | None] = mapped_column(Float, nullable=True)
+    selection_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    selection_score: Mapped[float | None] = mapped_column(Float, nullable=True)
+    narrative_category: Mapped[str | None] = mapped_column(String(32), nullable=True)
 
     reel: Mapped[Reel] = relationship(back_populates="segments")

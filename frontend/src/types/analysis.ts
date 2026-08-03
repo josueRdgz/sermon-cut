@@ -45,6 +45,9 @@ export interface AnalysisCandidate {
   joined_script: string | null;
   caption: string | null;
   hashtags: string[];
+  suggested_titles: Record<string, string>;
+  thumbnail_text: string | null;
+  keywords: string[];
   segments: AnalysisCandidateSegment[];
   warnings: string[];
   removed_context_warning: string | null;

@@ -9,6 +9,29 @@ from app.models.export_profile import ExportPlatform, FpsMode
 # Filename token after ``clip-NN_`` — keep short and filesystem-safe.
 BUILTIN_PROFILES: tuple[dict[str, Any], ...] = (
     {
+        "slug": "youtube-highlight",
+        "name": "YouTube Video Highlights",
+        "description": (
+            "Salida horizontal H.264 + AAC que conserva la resolución y el encuadre "
+            "de la fuente. Duración máxima 30 minutos."
+        ),
+        "platform": ExportPlatform.youtube_video,
+        "width": 1920,
+        "height": 1080,
+        "aspect_ratio": "16:9",
+        "max_duration_seconds": 1800,
+        "fps_mode": FpsMode.original,
+        "safe_margin_x": 0.06,
+        "safe_top": 0.06,
+        "safe_bottom": 0.08,
+        "crf_draft": 26,
+        "crf_standard": 21,
+        "crf_high": 18,
+        "prefer_small_file": False,
+        "fragmentation_enabled": False,
+        "fragment_max_seconds": None,
+    },
+    {
         "slug": "youtube-short",
         "name": "YouTube Shorts",
         "description": (

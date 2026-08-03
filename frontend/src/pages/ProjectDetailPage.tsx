@@ -7,6 +7,7 @@ import { ConfirmDialog } from '../components/ConfirmDialog';
 import { ReelEditor } from '../components/ReelEditor';
 import { StatusRow } from '../components/StatusRow';
 import { TranscriptEditor } from '../components/TranscriptEditor';
+import { VideoHighlightsPanel } from '../components/VideoHighlightsPanel';
 import type { Project } from '../types/project';
 import { formatDate, formatDuration, statusLabel } from '../utils/format';
 
@@ -30,6 +31,11 @@ const WORKSPACE_SECTIONS = [
     id: 'editor',
     label: 'Editor de Reel',
     description: 'Editar y exportar',
+  },
+  {
+    id: 'highlights',
+    label: 'Video Highlights',
+    description: 'Resumen horizontal',
   },
 ] as const;
 
@@ -55,9 +61,25 @@ export function ProjectDetailPage() {
   const [reelRevision, setReelRevision] = useState(0);
   const [reelToFocus, setReelToFocus] = useState<string | null>(null);
   const requestedSection = searchParams.get('section');
-  const activeSection: WorkspaceSection = isWorkspaceSection(requestedSection)
+  const requestedWorkspaceSection: WorkspaceSection = isWorkspaceSection(requestedSection)
     ? requestedSection
     : 'project';
+  const sectionAllowed =
+    !project ||
+    !(
+      (project.content_mode === 'highlights' &&
+        (requestedWorkspaceSection === 'analysis' || requestedWorkspaceSection === 'editor')) ||
+      (project.content_mode === 'shorts' && requestedWorkspaceSection === 'highlights')
+    );
+  const activeSection: WorkspaceSection = sectionAllowed ? requestedWorkspaceSection : 'project';
+  const visibleSections = WORKSPACE_SECTIONS.filter((section) => {
+    if (!project) return section.id === 'project';
+    if (section.id === 'analysis' || section.id === 'editor') {
+      return project.content_mode !== 'highlights';
+    }
+    if (section.id === 'highlights') return project.content_mode !== 'shorts';
+    return true;
+  });
 
   const activateSection = useCallback(
     (section: WorkspaceSection) => {
@@ -166,7 +188,7 @@ export function ProjectDetailPage() {
 
       <nav className="workspace-nav" aria-label="Flujo del proyecto">
         <div className="workspace-nav__track" role="tablist" aria-label="Categorías">
-          {WORKSPACE_SECTIONS.map((section, index) => (
+          {visibleSections.map((section, index) => (
             <button
               key={section.id}
               id={`workspace-tab-${section.id}`}
@@ -201,6 +223,16 @@ export function ProjectDetailPage() {
             label="Estado"
             value={statusLabel(project.status)}
             ok={project.status !== 'failed'}
+          />
+          <StatusRow
+            label="Tipo de contenido"
+            value={
+              project.content_mode === 'both'
+                ? 'Shorts y Video Highlights'
+                : project.content_mode === 'highlights'
+                  ? 'Video Highlights'
+                  : 'Shorts'
+            }
           />
           <StatusRow label="Duración" value={formatDuration(project.duration_seconds)} />
           <StatusRow label="Resolución" value={project.resolution ?? '—'} />
@@ -242,6 +274,21 @@ export function ProjectDetailPage() {
         >
           Eliminar proyecto
         </button>
+      </div>
+
+      <div
+        id="workspace-panel-highlights"
+        role="tabpanel"
+        aria-labelledby="workspace-tab-highlights"
+        hidden={activeSection !== 'highlights'}
+      >
+        <VideoHighlightsPanel
+          projectId={project.id}
+          hasVideo={project.has_video}
+          hasCover={project.has_cover}
+          videoDuration={project.duration_seconds}
+          transcriptRevision={transcriptRevision}
+        />
       </div>
 
       <div

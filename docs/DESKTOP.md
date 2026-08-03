@@ -156,7 +156,7 @@ FFmpeg/FFprobe. No se suben releases a GitHub desde estos scripts.
 En macOS se generan normalmente:
 
 - `bundle/macos/Sermon Cut.app`
-- `bundle/dmg/Sermon Cut_0.2.0_aarch64.dmg` en Apple Silicon
+- `bundle/dmg/Sermon Cut_0.3.0_aarch64.dmg` en Apple Silicon
 
 Sin firma/notarización, otra Mac puede mostrar una advertencia de Gatekeeper. La
 persona usuaria puede abrir la aplicación desde Finder con clic secundario →

@@ -38,6 +38,7 @@ from app.services.export_profiles.report import (
 from app.services.export_profiles.service import (
     assert_duration_allowed,
     clip_index_for_reel,
+    default_highlight_profile,
     default_profile,
     fragmentation_note,
     get_profile,
@@ -200,8 +201,10 @@ class RenderManager:
                 code="render_in_progress",
             )
 
-        profile = (
-            get_profile(db, profile_id) if profile_id is not None else default_profile(db)
+        profile = get_profile(db, profile_id) if profile_id is not None else (
+            default_highlight_profile(db)
+            if getattr(reel.content_kind, "value", reel.content_kind) == "highlight"
+            else default_profile(db)
         )
         quality_enum = (
             quality if isinstance(quality, ExportQuality) else ExportQuality(quality)
@@ -485,7 +488,11 @@ class RenderManager:
                 except NotFoundError:
                     profile = None
             if profile is None:
-                profile = default_profile(session)
+                profile = (
+                    default_highlight_profile(session)
+                    if getattr(reel.content_kind, "value", reel.content_kind) == "highlight"
+                    else default_profile(session)
+                )
                 job.profile_id = profile.id
                 job.profile_slug = profile.slug
                 job.profile_name = profile.name
@@ -503,7 +510,12 @@ class RenderManager:
             job.publish_status = "local_only"
             job.expected_audio = True
 
-            preview_w, preview_h = profile.width, profile.height
+            is_highlight = getattr(reel.content_kind, "value", reel.content_kind) == "highlight"
+            if is_highlight and project.width and project.height and project.width > project.height:
+                preview_w = int(project.width) - int(project.width) % 2
+                preview_h = int(project.height) - int(project.height) % 2
+            else:
+                preview_w, preview_h = profile.width, profile.height
             job.aspect_ratio = profile.aspect_ratio
 
             subtitle_options = options_for_reel(reel).with_overrides(

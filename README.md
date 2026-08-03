@@ -1,7 +1,8 @@
 # Sermon Cut
 
 Aplicación **local** y de **código abierto** (macOS, Windows y Linux) para
-convertir un video de una predicación en **Shorts / Reels verticales**: importar
+convertir un video de una predicación en **Shorts / Reels verticales** y
+**Video Highlights horizontales**: importar
 la transcripción, identificar los mejores fragmentos, componer un Reel con
 varios segmentos no consecutivos y exportar un video vertical con subtítulos y
 una pantalla final. **No requiere Docker.**
@@ -13,6 +14,11 @@ una pantalla final. **No requiere Docker.**
 > **pantalla final obligatoria** + **análisis editorial opcional** (Gemini o
 > mock) + **perfiles de exportación** + **música de fondo local opcional**.
 > Ver [limitaciones actuales](docs/LIMITATIONS.md).
+
+Video Highlights incorpora detección confirmable del intervalo de predicación,
+selección narrativa por IA con duración objetivo, revisión manual, cinco títulos
+estratégicos, metadatos de YouTube y exportación a la resolución horizontal de
+la fuente con subtítulos quemados, SRT o ambos.
 
 ## Requisitos
 

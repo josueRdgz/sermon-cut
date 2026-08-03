@@ -9,6 +9,11 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.models.analysis import ACTIVE_ANALYSIS_STATUSES, AnalysisJob, AnalysisJobStatus
+from app.models.highlight import (
+    ACTIVE_HIGHLIGHT_STATUSES,
+    HighlightAnalysisJob,
+    HighlightAnalysisStatus,
+)
 from app.models.project import Project, ProjectStatus
 from app.models.render_job import ACTIVE_RENDER_STATUSES, RenderJob, RenderJobStatus
 from app.models.transcription_job import (
@@ -39,7 +44,13 @@ def reconcile_stale_jobs(session: Session) -> dict[str, int]:
     ``running`` / ``cancelling`` would permanently block new work.
     """
     now = _utc_now()
-    counts = {"render": 0, "transcription": 0, "analysis": 0, "youtube_import": 0}
+    counts = {
+        "render": 0,
+        "transcription": 0,
+        "analysis": 0,
+        "highlight_analysis": 0,
+        "youtube_import": 0,
+    }
 
     renders = list(
         session.scalars(
@@ -90,6 +101,24 @@ def reconcile_stale_jobs(session: Session) -> dict[str, int]:
             job.error_message = _INTERRUPT_MESSAGE
         job.finished_at = now
         counts["analysis"] += 1
+
+    highlight_analyses = list(
+        session.scalars(
+            select(HighlightAnalysisJob).where(
+                HighlightAnalysisJob.status.in_(tuple(ACTIVE_HIGHLIGHT_STATUSES))
+            )
+        ).all()
+    )
+    for job in highlight_analyses:
+        if job.status == HighlightAnalysisStatus.cancelling:
+            job.status = HighlightAnalysisStatus.cancelled
+            job.stage = "cancelled"
+        else:
+            job.status = HighlightAnalysisStatus.failed
+            job.stage = "failed"
+            job.error_message = _INTERRUPT_MESSAGE
+        job.finished_at = now
+        counts["highlight_analysis"] += 1
 
     youtube_imports = list(
         session.scalars(
@@ -145,11 +174,12 @@ def reconcile_stale_jobs(session: Session) -> dict[str, int]:
     if total:
         logger.warning(
             "Reconciled %s stale job(s): render=%s transcription=%s analysis=%s "
-            "youtube_import=%s",
+            "highlight_analysis=%s youtube_import=%s",
             total,
             counts["render"],
             counts["transcription"],
             counts["analysis"],
+            counts["highlight_analysis"],
             counts["youtube_import"],
         )
     return counts

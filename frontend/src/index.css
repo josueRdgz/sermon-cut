@@ -78,8 +78,8 @@ a:hover {
 
 .workspace-nav__track {
   display: grid;
-  grid-template-columns: repeat(4, minmax(185px, 1fr));
-  min-width: 760px;
+  grid-template-columns: repeat(5, minmax(185px, 1fr));
+  min-width: 925px;
 }
 
 .workspace-nav__tab,
@@ -326,6 +326,94 @@ a:hover {
   color: var(--text);
   padding: 0.65rem 0.75rem;
   font: inherit;
+}
+
+.field select,
+.field textarea {
+  width: 100%;
+  padding: 0.65rem 0.75rem;
+  color: var(--text);
+  font: inherit;
+  background: var(--bg);
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+}
+
+.field textarea {
+  resize: vertical;
+}
+
+.stack {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.form-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: 0.85rem;
+  margin: 1rem 0;
+}
+
+.card--nested {
+  margin: 0;
+  background: var(--bg);
+}
+
+.section-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.section-heading > div:last-child {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.4rem;
+}
+
+.media-player {
+  width: 100%;
+  max-height: 520px;
+  background: #000;
+  border-radius: var(--radius-md);
+}
+
+.choice-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+  padding: 0.85rem;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+}
+
+.choice-row input {
+  width: auto;
+  margin-top: 0.3rem;
+}
+
+.success {
+  color: var(--ok);
+}
+
+.warning {
+  color: #fde68a;
+}
+
+@media (max-width: 720px) {
+  .section-heading {
+    flex-direction: column;
+  }
+
+  .section-heading > div:last-child {
+    justify-content: flex-start;
+  }
 }
 
 .field input[type='file'] {

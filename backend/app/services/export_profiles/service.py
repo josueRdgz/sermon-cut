@@ -126,9 +126,9 @@ def update_profile(
     if "max_duration_seconds" in data and data["max_duration_seconds"] is not None:
         # YouTube Shorts: allow 60 or 180 (and values in between for custom).
         value = int(data["max_duration_seconds"])
-        if value < 5 or value > 180:
+        if value < 5 or value > 3600:
             raise ValidationAppError(
-                "max_duration_seconds must be between 5 and 180.",
+                "max_duration_seconds must be between 5 and 3600.",
                 code="invalid_max_duration",
             )
     if "fps_mode" in data and data["fps_mode"] is not None:
@@ -254,6 +254,11 @@ def default_profile(db: Session) -> ExportProfile:
     if not rows:
         raise NotFoundError("No export profiles available.", code="export_profile_not_found")
     return rows[0]
+
+
+def default_highlight_profile(db: Session) -> ExportProfile:
+    """Return the horizontal profile reserved for Video Highlights."""
+    return get_profile_by_slug(db, "youtube-highlight")
 
 
 def profile_count(db: Session) -> int:

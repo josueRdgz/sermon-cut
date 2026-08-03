@@ -78,6 +78,14 @@ class SuggestedSegment(BaseModel):
     reason: str = Field(default="", max_length=1000)
 
 
+class StrategicTitleSet(BaseModel):
+    recommended: str = Field(min_length=1, max_length=300)
+    direct: str = Field(min_length=1, max_length=300)
+    emotional: str = Field(min_length=1, max_length=300)
+    biblical: str = Field(min_length=1, max_length=300)
+    search_focused: str = Field(min_length=1, max_length=300)
+
+
 class SuggestedClip(BaseModel):
     """A Reel candidate that may join several non-consecutive segments."""
 
@@ -90,6 +98,9 @@ class SuggestedClip(BaseModel):
     removed_context_warning: str | None = Field(default=None, max_length=2000)
     caption: str = Field(default="", max_length=2200)
     hashtags: list[str] = Field(default_factory=list, max_length=20)
+    suggested_titles: StrategicTitleSet | None = None
+    thumbnail_text: str = Field(default="", max_length=120)
+    keywords: list[str] = Field(default_factory=list, max_length=20)
 
 
 class AnalysisResponse(BaseModel):

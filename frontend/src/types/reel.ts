@@ -29,6 +29,7 @@ export interface Reel {
   hook: string | null;
   description: string | null;
   editorial_score: number | null;
+  content_kind: 'short' | 'highlight';
   subtitle_style: SubtitleStyle;
   subtitle_enabled: boolean;
   subtitle_granularity: SubtitleGranularity;

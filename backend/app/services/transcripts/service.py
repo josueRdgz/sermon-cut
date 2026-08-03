@@ -45,6 +45,7 @@ def to_response(transcript: Transcript) -> TranscriptResponse:
             start_seconds=segment.start_seconds,
             end_seconds=segment.end_seconds,
             text=segment.text,
+            original_text=segment.original_text or segment.text,
             words=[
                 TranscriptWordResponse(
                     id=word.id,
@@ -66,6 +67,7 @@ def to_response(transcript: Transcript) -> TranscriptResponse:
         language=transcript.language,
         status=transcript.status,
         full_text=transcript.full_text,
+        original_full_text=transcript.original_full_text or transcript.full_text,
         has_word_timestamps=transcript.has_word_timestamps,
         created_at=transcript.created_at,
         updated_at=transcript.updated_at,
@@ -113,6 +115,7 @@ def _build_orm_from_parsed(
         language=parsed.language,
         status=status,
         full_text=_full_text(parsed),
+        original_full_text=_full_text(parsed),
         has_word_timestamps=parsed.has_word_timestamps,
     )
     for order, parsed_segment in enumerate(parsed.segments):
@@ -121,6 +124,7 @@ def _build_orm_from_parsed(
             start_seconds=parsed_segment.start,
             end_seconds=parsed_segment.end,
             text=parsed_segment.text,
+            original_text=parsed_segment.text,
         )
         for word_order, parsed_word in enumerate(parsed_segment.words):
             segment.words.append(

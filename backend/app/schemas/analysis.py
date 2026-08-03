@@ -45,6 +45,9 @@ class AnalysisCandidateResponse(BaseModel):
     joined_script: str | None
     caption: str | None
     hashtags: list[str] = Field(default_factory=list)
+    suggested_titles: dict[str, str] = Field(default_factory=dict)
+    thumbnail_text: str | None = None
+    keywords: list[str] = Field(default_factory=list)
     segments: list[AnalysisCandidateSegment] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
     removed_context_warning: str | None

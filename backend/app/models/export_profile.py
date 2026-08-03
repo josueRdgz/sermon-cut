@@ -19,6 +19,7 @@ def _utc_now() -> datetime:
 
 class ExportPlatform(enum.StrEnum):
     youtube_shorts = "youtube_shorts"
+    youtube_video = "youtube_video"
     facebook_reels = "facebook_reels"
     instagram_reels = "instagram_reels"
     whatsapp_status = "whatsapp_status"

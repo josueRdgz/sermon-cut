@@ -64,6 +64,9 @@ def _segment_response(segment: ReelSegment) -> ReelSegmentResponse:
         manual_crop_x=getattr(segment, "manual_crop_x", None),
         manual_crop_y=getattr(segment, "manual_crop_y", None),
         manual_crop_zoom=getattr(segment, "manual_crop_zoom", None),
+        selection_reason=getattr(segment, "selection_reason", None),
+        selection_score=getattr(segment, "selection_score", None),
+        narrative_category=getattr(segment, "narrative_category", None),
     )
 
 
@@ -88,6 +91,7 @@ def to_response(reel: Reel) -> ReelResponse:
         hook=reel.hook,
         description=reel.description,
         editorial_score=reel.editorial_score,
+        content_kind=reel.content_kind,
         subtitle_style=reel.subtitle_style,
         subtitle_enabled=reel.subtitle_enabled,
         subtitle_granularity=reel.subtitle_granularity,
@@ -183,6 +187,7 @@ def create_reel(db: Session, project_id: UUID, payload: ReelCreate) -> Reel:
         hook=payload.hook.strip() if payload.hook else None,
         description=payload.description,
         editorial_score=payload.editorial_score,
+        content_kind=payload.content_kind,
         subtitle_style=payload.subtitle_style,
         subtitle_enabled=payload.subtitle_enabled,
         subtitle_granularity=payload.subtitle_granularity,

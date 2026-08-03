@@ -15,6 +15,7 @@ from app.api.end_card import router as end_card_router
 from app.api.export_profiles import router as export_profiles_router
 from app.api.framing import router as framing_router
 from app.api.health import router as health_router
+from app.api.highlights import router as highlights_router
 from app.api.projects import router as projects_router
 from app.api.reels import router as reels_router
 from app.api.renders import router as renders_router
@@ -29,6 +30,7 @@ api_router.include_router(projects_router)
 api_router.include_router(transcripts_router)
 api_router.include_router(transcription_router)
 api_router.include_router(analysis_router)
+api_router.include_router(highlights_router)
 api_router.include_router(reels_router)
 api_router.include_router(cut_suggestions_router)
 api_router.include_router(framing_router)

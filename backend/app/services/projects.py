@@ -35,6 +35,7 @@ def to_response(project: Project) -> ProjectResponse:
         church_name=project.church_name,
         youtube_channel=project.youtube_channel,
         full_sermon_url=project.full_sermon_url,
+        content_mode=project.content_mode,
         video_filename=project.video_filename,
         cover_filename=project.cover_filename,
         has_video=bool(project.video_filename),
@@ -76,6 +77,7 @@ def create_project(db: Session, payload: ProjectCreate) -> Project:
         church_name=payload.church_name.strip(),
         youtube_channel=payload.youtube_channel.strip(),
         full_sermon_url=str(payload.full_sermon_url) if payload.full_sermon_url else None,
+        content_mode=payload.content_mode,
         status=ProjectStatus.created,
     )
     db.add(project)

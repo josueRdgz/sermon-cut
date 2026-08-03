@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.3.0] — 2026-08-03
+
+### Added
+
+- Video Highlights horizontal con detección y confirmación del intervalo de la
+  predicación, selección semántica, revisión editorial, metadatos estratégicos,
+  subtítulos opcionales y exportación FFmpeg.
+- Tipos de proyecto para Shorts, Video Highlights o ambos.
+- Persistencia de la transcripción original y corregida, rango de predicación,
+  fragmentos, configuración de exportación, metadatos e historial de
+  regeneraciones.
+- Cinco variantes de título, descripción, texto para miniatura, hashtags y
+  palabras clave para Shorts y Video Highlights.
+
 ## [0.2.0] — 2026-07-30
 
 ### Added

@@ -30,6 +30,7 @@ class TranscriptSegmentResponse(BaseModel):
     start_seconds: float | None
     end_seconds: float | None
     text: str
+    original_text: str
     words: list[TranscriptWordResponse] = Field(default_factory=list)
 
 
@@ -42,6 +43,7 @@ class TranscriptResponse(BaseModel):
     language: str | None
     status: TranscriptStatus
     full_text: str
+    original_full_text: str
     has_word_timestamps: bool
     created_at: datetime
     updated_at: datetime

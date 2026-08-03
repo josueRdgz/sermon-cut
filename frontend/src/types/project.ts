@@ -17,6 +17,7 @@ export interface Project {
   church_name: string;
   youtube_channel: string;
   full_sermon_url: string | null;
+  content_mode: 'shorts' | 'highlights' | 'both';
   video_filename: string | null;
   cover_filename: string | null;
   has_video: boolean;
@@ -46,6 +47,7 @@ export interface ProjectCreatePayload {
   church_name: string;
   youtube_channel: string;
   full_sermon_url?: string | null;
+  content_mode?: 'shorts' | 'highlights' | 'both';
 }
 
 export interface ApiErrorBody {

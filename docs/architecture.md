@@ -125,6 +125,28 @@ Organización por capas para separar responsabilidades:
   dispara un render.
 - Frontend: `AnalysisPanel` (preferencias, polling, aceptar/descartar).
 
+### Video Highlights
+
+- `models/highlight.py` persiste el intervalo detectado o confirmado, la duración
+  objetivo, la orientación editorial, el historial de regeneraciones y los
+  metadatos estratégicos. `Reel` sigue siendo la línea temporal compartida y se
+  distingue mediante `content_kind`, evitando duplicar edición, subtítulos y render.
+- `services/highlights/detection.py` combina continuidad de voz, densidad de
+  transcripción, pausas prolongadas y señales lingüísticas débiles. La confianza
+  baja obliga a confirmar manualmente el intervalo.
+- `services/highlights/ai.py` usa JSON Schema estricto, Pydantic, reintentos
+  limitados y validación de evidencia contra la transcripción corregida. No envía
+  el video a Gemini.
+- `services/highlights/manager.py` ejecuta el análisis fuera del hilo de la API,
+  persiste progreso y permite cancelación cooperativa.
+- `api/highlights.py` expone detección, confirmación, análisis, revisión completa,
+  metadatos, SRT y render.
+- El perfil `youtube-highlight` mantiene las dimensiones horizontales pares y el
+  FPS de la fuente; reutiliza el grafo FFmpeg, normalización, música, pantalla
+  final, progreso, cancelación, verificación y limpieza existentes.
+- `VideoHighlightsPanel.tsx` implementa el flujo de revisión y exportación sin
+  interferir con `AnalysisPanel` ni `ReelEditor`.
+
 ### Subtítulos (ASS)
 
 - `services/subtitles/timeline.py` coloca cada ventana del Reel en el reloj de
@@ -178,9 +200,10 @@ Organización por capas para separar responsabilidades:
 - `services/export_profiles/` define perfiles editables (YouTube Shorts, Facebook /
   Instagram Reels, WhatsApp Status), estimación de tamaño, naming seguro,
   verificación FFprobe, hash SHA-256, reporte JSON y «abrir carpeta» multiplataforma.
-- El `RenderManager` aplica CRF/preset/bitrate del perfil, fuerza el lienzo
-  1080×1920, ajusta márgenes de subtítulos a la safe area y **no publica** nada
-  automáticamente (`publish_status=local_only`).
+- El `RenderManager` aplica CRF/preset/bitrate del perfil. En Shorts usa el
+  lienzo del perfil; en Highlights conserva las dimensiones horizontales pares
+  de la fuente. Ajusta márgenes de subtítulos y **no publica** automáticamente
+  (`publish_status=local_only`).
 - Frontend: selector de perfil/calidad/CRF, estimación, historial y revelar carpeta
   en `RenderPanel`.
 

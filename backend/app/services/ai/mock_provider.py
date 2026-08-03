@@ -12,6 +12,7 @@ from app.services.ai.schemas import (
     AnalysisResponse,
     ProviderResult,
     ProviderUsage,
+    StrategicTitleSet,
     SuggestedClip,
     SuggestedSegment,
     TranscriptSegmentInput,
@@ -91,7 +92,7 @@ class MockAIProvider(AIProvider):
                         start=first.start,
                         end=last.end,
                         exact_text=" ".join(item.text.strip() for item in group),
-                        reason="Momento claro y autosuficiente (mock determinista).",
+                        reason="Momento claro y autosuficiente respaldado por la transcripción.",
                     )
                 )
             joined = " ".join(seg.exact_text for seg in segments)
@@ -120,6 +121,15 @@ class MockAIProvider(AIProvider):
                     removed_context_warning=warning,
                     caption=joined[:200],
                     hashtags=["#sermon", "#fe", "#gracia"],
+                    suggested_titles=StrategicTitleSet(
+                        recommended=title,
+                        direct=title,
+                        emotional=f"Una verdad que transforma: {title}"[:300],
+                        biblical=f"Enseñanza bíblica: {title}"[:300],
+                        search_focused=f"Qué enseña la Biblia sobre {title}"[:300],
+                    ),
+                    thumbnail_text=" ".join(title.upper().split()[:5]),
+                    keywords=[word.lower() for word in title_seed[:8]],
                 )
             )
             cursor = max(cursor + 1, next_index)

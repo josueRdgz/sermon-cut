@@ -53,6 +53,9 @@ sostuvo.
 6. Si un corte elimina contexto necesario, rellénalo en \
 `removed_context_warning`; si no, deja null.
 7. Devuelve únicamente JSON válido conforme al esquema.
+8. Para cada Short entrega cinco títulos fieles (`recommended`, `direct`, \
+`emotional`, `biblical`, `search_focused`), texto breve de miniatura y palabras \
+clave. No atribuyas al predicador frases ausentes.
 """
 
 

@@ -15,6 +15,7 @@ export interface TranscriptWord {
   start_seconds: number | null;
   end_seconds: number | null;
   text: string;
+  original_text?: string;
   confidence: number | null;
 }
 
@@ -34,6 +35,7 @@ export interface Transcript {
   language: string | null;
   status: TranscriptStatus;
   full_text: string;
+  original_full_text?: string;
   has_word_timestamps: boolean;
   created_at: string;
   updated_at: string;
