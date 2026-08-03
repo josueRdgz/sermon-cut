@@ -32,19 +32,19 @@ bundle.
 
 ## yt-dlp (importación opcional desde YouTube)
 
-La importación desde YouTube usa el ejecutable externo **`yt-dlp`**, que **no** se
-empaqueta ni se redistribuye con Sermon Cut: se detecta en el PATH (o mediante
-`SERMON_CUT_YTDLP_PATH`) y es una dependencia opcional que instala la persona
-usuaria (`pip install -U yt-dlp`). yt-dlp es software libre (**Unlicense**); su
-uso está sujeto a sus propios términos y a las condiciones de la plataforma de
-origen.
+La importación desde YouTube usa **`yt-dlp`**. La aplicación de escritorio lo
+incluye dentro de su sidecar; en desarrollo se instala como dependencia Python.
+`SERMON_CUT_YTDLP_PATH` permite seleccionar otro ejecutable explícitamente.
+yt-dlp es software libre (**Unlicense**); su uso está sujeto a sus propios
+términos y a las condiciones de la plataforma de origen.
 
 Notas:
 
 - La función es **opt-in**; la subida local es el método principal y el fallback
   estable.
-- YouTube cambia sus mecanismos con frecuencia: mantén `yt-dlp` actualizado.
-  Algunas URLs pueden dejar de funcionar temporalmente.
+- YouTube cambia sus mecanismos con frecuencia: genera una versión nueva de la
+  aplicación para actualizar el `yt-dlp` incluido. Algunas URLs pueden dejar de
+  funcionar temporalmente.
 - Importa únicamente contenido propio o autorizado. La responsabilidad sobre los
   derechos de autor y los términos del servicio recae en la persona usuaria.
 - La fusión de video/audio y la validación usan el `ffmpeg`/`ffprobe` del sistema

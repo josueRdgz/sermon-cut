@@ -141,8 +141,9 @@ La subida de archivos locales es el método **principal y estable**. De forma
 individual de YouTube**: la app lo descarga a tu almacenamiento local y luego lo
 procesa **exactamente igual** que un video subido manualmente.
 
-Requisitos: instalar el ejecutable **`yt-dlp`** (`pip install -U yt-dlp`) y tener
-**FFmpeg/FFprobe**. Comprueba el entorno con `python -m app.cli doctor`.
+La aplicación de escritorio incluye **`yt-dlp`**. En desarrollo desde el
+repositorio se instala como dependencia Python. En ambos casos también debes
+tener **FFmpeg/FFprobe**. Comprueba el entorno con `python -m app.cli doctor`.
 
 Flujo en la UI (**Nueva predicación → Origen del video → URL de YouTube**):
 

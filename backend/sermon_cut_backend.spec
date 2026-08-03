@@ -21,6 +21,7 @@ for package in (
     "faster_whisper",
     "tokenizers",
     "cv2",
+    "yt_dlp",
 ):
     package_datas, package_binaries, package_hiddenimports = collect_all(package)
     datas += package_datas

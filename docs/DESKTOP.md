@@ -149,9 +149,9 @@ Artefactos típicos:
 | Windows | `frontend/src-tauri/target/release/bundle/msi/` o `nsis/` |
 | Linux | `frontend/src-tauri/target/release/bundle/deb/` / `appimage/` |
 
-La app resultante incluye Python, FastAPI, Whisper, Gemini y las dependencias
-configuradas en el venv. La Mac de destino solo necesita FFmpeg/FFprobe. No se
-suben releases a GitHub desde estos scripts.
+La app resultante incluye Python, FastAPI, Whisper, Gemini, yt-dlp y las
+dependencias configuradas en el venv. La Mac de destino solo necesita
+FFmpeg/FFprobe. No se suben releases a GitHub desde estos scripts.
 
 En macOS se generan normalmente:
 

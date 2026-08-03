@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import shutil
 import subprocess
+import sys
 import threading
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -61,7 +62,7 @@ ProgressCallback = Callable[[DownloadProgress], None]
 
 
 def locate_ytdlp(settings: Settings) -> str | None:
-    """Resolve the yt-dlp executable from settings override or PATH."""
+    """Resolve yt-dlp from an override, the desktop bundle, or PATH."""
     override = (settings.ytdlp_path or "").strip()
     if override:
         candidate = Path(override).expanduser()
@@ -71,6 +72,16 @@ def locate_ytdlp(settings: Settings) -> str | None:
         if resolved:
             return resolved
         return None
+
+    # PyInstaller sets ``sys.frozen`` and points ``sys.executable`` at the
+    # bundled API binary. The desktop build places a yt-dlp-enabled copy beside
+    # it, so an installed .app never depends on the user's shell PATH/Python.
+    if getattr(sys, "frozen", False):
+        name = "yt-dlp.exe" if sys.platform == "win32" else "yt-dlp"
+        bundled = Path(sys.executable).with_name(name)
+        if bundled.is_file():
+            return str(bundled)
+
     return shutil.which("yt-dlp")
 
 

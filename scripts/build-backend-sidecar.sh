@@ -26,4 +26,13 @@ if [[ ! -x "$SIDECAR" ]]; then
   exit 1
 fi
 
+YTDLP="$ROOT/backend/dist/sermon-cut-backend/yt-dlp"
+cp "$SIDECAR" "$YTDLP"
+chmod +x "$YTDLP"
+if ! "$YTDLP" --version >/dev/null 2>&1; then
+  echo "Bundled yt-dlp self-check failed: $YTDLP" >&2
+  exit 1
+fi
+
 echo "Backend sidecar ready: $SIDECAR"
+echo "Bundled yt-dlp ready: $YTDLP"

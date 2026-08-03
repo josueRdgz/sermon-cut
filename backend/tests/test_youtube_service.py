@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
+import sys
+from pathlib import Path
+
 import pytest
+from app.core.config import Settings
 from app.services.youtube.errors import classify_error
 from app.services.youtube.format_selection import (
     build_format_selector,
@@ -13,7 +17,7 @@ from app.services.youtube.metadata import (
     assert_importable,
     parse_preview,
 )
-from app.services.youtube.ytdlp import _PROGRESS_PREFIX, _parse_progress_line
+from app.services.youtube.ytdlp import _PROGRESS_PREFIX, _parse_progress_line, locate_ytdlp
 
 
 def test_normalize_quality_falls_back() -> None:
@@ -148,3 +152,28 @@ def test_parse_progress_line_handles_missing_fields() -> None:
     assert update.downloaded_bytes is None
     assert update.total_bytes is None
     assert update.fraction is None
+
+
+def test_locate_ytdlp_prefers_bundled_executable(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    backend = tmp_path / "sermon-cut-backend"
+    backend.touch()
+    bundled = tmp_path / ("yt-dlp.exe" if sys.platform == "win32" else "yt-dlp")
+    bundled.touch()
+    monkeypatch.setattr(sys, "frozen", True, raising=False)
+    monkeypatch.setattr(sys, "executable", str(backend))
+    monkeypatch.setattr("shutil.which", lambda _name: "/external/yt-dlp")
+
+    assert locate_ytdlp(Settings()) == str(bundled)
+
+
+def test_locate_ytdlp_override_still_has_priority(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    override = tmp_path / "custom-yt-dlp"
+    override.touch()
+    monkeypatch.setattr(sys, "frozen", True, raising=False)
+    monkeypatch.setattr(sys, "executable", str(tmp_path / "sermon-cut-backend"))
+
+    assert locate_ytdlp(Settings(ytdlp_path=str(override))) == str(override)

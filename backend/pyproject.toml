@@ -14,6 +14,7 @@ dependencies = [
     "python-multipart>=0.0.9",  # required for UploadFile / multipart form uploads
     "pillow>=10.3",  # renders the mandatory end card locally (no browser)
     "qrcode>=7.4",  # optional QR on the end card, generated offline
+    "yt-dlp>=2026.7.4",  # bundled by the desktop build for YouTube imports
 ]
 
 [project.optional-dependencies]

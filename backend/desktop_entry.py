@@ -4,12 +4,26 @@ from __future__ import annotations
 
 import argparse
 import multiprocessing
+import sys
+from pathlib import Path
 
-import uvicorn
-from app.main import app
+
+def _running_as_ytdlp() -> bool:
+    """The desktop build copies this executable as ``yt-dlp`` beside the API."""
+    return Path(sys.argv[0]).stem == "yt-dlp"
 
 
 def main() -> None:
+    if _running_as_ytdlp():
+        from yt_dlp import main as ytdlp_main
+
+        raise SystemExit(ytdlp_main())
+
+    # Keep backend imports lazy: the same frozen executable is copied as
+    # ``yt-dlp`` and may be launched from a read-only mounted DMG.
+    import uvicorn
+    from app.main import app
+
     parser = argparse.ArgumentParser(description="Sermon Cut local API")
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, required=True)
