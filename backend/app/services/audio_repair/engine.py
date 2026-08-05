@@ -248,7 +248,7 @@ def analyze_and_repair_wav(
     *,
     silence_threshold: int = 8,
     min_dropout_ms: float = 2.0,
-    max_auto_repair_ms: float = 60.0,
+    max_auto_repair_ms: float = 200.0,
     max_review_ms: float = 250.0,
     context_ms: float = 25.0,
     min_context_rms: float = 160.0,

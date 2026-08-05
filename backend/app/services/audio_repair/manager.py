@@ -69,6 +69,7 @@ class AudioRepairManager:
         min_dropout_ms: float,
         max_auto_repair_ms: float,
         max_review_ms: float,
+        repair_review_items: bool = False,
     ) -> AudioRepairJob:
         project = db.get(Project, project_id)
         if project is None:
@@ -90,6 +91,8 @@ class AudioRepairManager:
                 code="audio_repair_in_progress",
             )
 
+        # Accepting review items raises the auto-repair ceiling to the review window.
+        effective_auto_ms = max_review_ms if repair_review_items else max_auto_repair_ms
         job = AudioRepairJob(
             project_id=project_id,
             status=AudioRepairJobStatus.queued,
@@ -97,7 +100,7 @@ class AudioRepairManager:
             progress=0,
             silence_threshold=silence_threshold,
             min_dropout_ms=min_dropout_ms,
-            max_auto_repair_ms=max_auto_repair_ms,
+            max_auto_repair_ms=effective_auto_ms,
             max_review_ms=max_review_ms,
         )
         db.add(job)

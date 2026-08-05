@@ -58,7 +58,7 @@ class AudioRepairJob(Base):
 
     silence_threshold: Mapped[int] = mapped_column(Integer, nullable=False, default=8)
     min_dropout_ms: Mapped[float] = mapped_column(Float, nullable=False, default=2.0)
-    max_auto_repair_ms: Mapped[float] = mapped_column(Float, nullable=False, default=60.0)
+    max_auto_repair_ms: Mapped[float] = mapped_column(Float, nullable=False, default=200.0)
     max_review_ms: Mapped[float] = mapped_column(Float, nullable=False, default=250.0)
 
     issue_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)

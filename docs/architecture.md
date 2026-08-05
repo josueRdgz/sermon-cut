@@ -51,7 +51,7 @@ Organización por capas para separar responsabilidades:
 - `services/audio_repair/engine.py` analiza WAV PCM en bloques para no cargar
   la predicación completa en RAM. Detecta secuencias casi digitales en cero y
   exige señal audible a ambos lados para evitar confundir pausas naturales.
-- Sólo los huecos menores al límite conservador (60 ms por defecto) se
+- Sólo los huecos menores al límite de auto-reparación (200 ms por defecto) se
   reconstruyen mezclando contexto anterior y posterior. Los huecos mayores se
   reportan para revisión y nunca se sintetizan como voz.
 - `AudioRepairManager` extrae PCM estéreo con FFmpeg, persiste progreso e

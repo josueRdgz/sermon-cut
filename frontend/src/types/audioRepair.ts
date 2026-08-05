@@ -39,4 +39,5 @@ export interface AudioRepairStartPayload {
   min_dropout_ms: number;
   max_auto_repair_ms: number;
   max_review_ms: number;
+  repair_review_items?: boolean;
 }

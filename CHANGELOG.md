@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.3.2] — 2026-08-05
+
+### Changed
+
+- Auto-reparación de microcortes hasta 200 ms por defecto (antes ~60–80 ms).
+
+## [0.3.1] — 2026-08-05
+
 ### Added
 
 - Reparación local y conservadora de microcortes: detecta huecos digitales
@@ -14,6 +22,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   largas para revisión y genera una copia del video sin modificar el original.
 - Nueva sección «Reparar audio» con progreso persistente, cancelación,
   comparación A/B, lista de incidencias y descarga del video reparado.
+- Opción «Aceptar y reparar todo» para reconstruir también los microcortes
+  marcados para revisión (hasta el umbral de revisión).
 
 ## [0.3.0] — 2026-08-03
 

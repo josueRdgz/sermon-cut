@@ -67,6 +67,37 @@ def test_reports_long_dropout_without_modifying_it(tmp_path: Path) -> None:
     assert output.read_bytes() == source.read_bytes()
 
 
+def test_repairs_review_length_when_auto_ceiling_raised(tmp_path: Path) -> None:
+    source = tmp_path / "source.wav"
+    output = tmp_path / "output.wav"
+    _write_tone_with_gap(source, gap_start=6000, gap_frames=1600)  # 100 ms
+
+    result = analyze_and_repair_wav(
+        source,
+        output,
+        max_auto_repair_ms=250,
+        max_review_ms=250,
+    )
+
+    assert result.repaired_count == 1
+    assert result.issues[0].repairable is True
+    assert result.issues[0].repaired is True
+    assert output.read_bytes() != source.read_bytes()
+
+
+def test_default_auto_threshold_repairs_up_to_200ms(tmp_path: Path) -> None:
+    source = tmp_path / "source.wav"
+    output = tmp_path / "output.wav"
+    # 180 ms gap at 16 kHz — within the 200 ms default auto ceiling.
+    _write_tone_with_gap(source, gap_start=6000, gap_frames=2880)
+
+    result = analyze_and_repair_wav(source, output)
+
+    assert result.repaired_count == 1
+    assert result.issues[0].duration_ms == pytest.approx(180.0, abs=0.1)
+    assert result.issues[0].repaired is True
+
+
 def test_ignores_normal_nonzero_audio(tmp_path: Path) -> None:
     source = tmp_path / "source.wav"
     output = tmp_path / "output.wav"

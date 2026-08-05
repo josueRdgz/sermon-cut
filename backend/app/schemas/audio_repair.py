@@ -13,8 +13,15 @@ class AudioRepairStartRequest(BaseModel):
 
     silence_threshold: int = Field(default=8, ge=0, le=128)
     min_dropout_ms: float = Field(default=2.0, ge=0.5, le=20)
-    max_auto_repair_ms: float = Field(default=60.0, ge=5, le=100)
+    max_auto_repair_ms: float = Field(default=200.0, ge=5, le=250)
     max_review_ms: float = Field(default=250.0, ge=100, le=1000)
+    repair_review_items: bool = Field(
+        default=False,
+        description=(
+            "When true, also reconstruct dropouts that would otherwise be left for review "
+            "(up to max_review_ms)."
+        ),
+    )
 
 
 class AudioRepairIssueResponse(BaseModel):

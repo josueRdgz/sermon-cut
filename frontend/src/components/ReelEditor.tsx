@@ -886,30 +886,65 @@ export function ReelEditor({
       )}
 
       {activeReel && (
-        <nav className="editor-tool-nav" aria-label="Herramientas del editor">
-          <div className="editor-tool-nav__track" role="tablist">
-            {REEL_TOOLS.map((tool, index) => (
-              <button
-                key={tool.id}
-                id={`reel-tool-tab-${tool.id}`}
-                type="button"
-                role="tab"
-                aria-selected={activeTool === tool.id}
-                aria-controls={`reel-tool-panel-${tool.id}`}
-                className={`editor-tool-nav__tab${
-                  activeTool === tool.id ? ' editor-tool-nav__tab--active' : ''
-                }`}
-                onClick={() => setActiveTool(tool.id)}
-              >
-                <span className="editor-tool-nav__number">{index + 1}</span>
-                <span>
-                  <strong>{tool.label}</strong>
-                  <small>{tool.description}</small>
-                </span>
-              </button>
-            ))}
+        <div className="reel-editor__sticky-header">
+          <div className="reel-editor__active-reel">
+            <div className="reel-editor__active-reel-title">
+              <small>Reel en edición</small>
+              <strong>
+                {reels.findIndex((reel) => reel.id === activeReel.id) + 1}. {activeReel.title}
+              </strong>
+              <span className={`badge badge--${activeReel.status}`}>{activeReel.status}</span>
+            </div>
+            {reels.length > 1 && (
+              <label className="reel-editor__active-reel-picker">
+                <span>Cambiar Reel</span>
+                <select
+                  aria-label="Reel en edición"
+                  value={activeReel.id}
+                  onChange={(event) => {
+                    const reel = reels.find((item) => item.id === event.target.value);
+                    if (!reel) return;
+                    stopPreview();
+                    setEditingSegmentId(null);
+                    setActiveReelId(reel.id);
+                    setAspect(reel.aspect_ratio);
+                  }}
+                >
+                  {reels.map((reel, index) => (
+                    <option key={reel.id} value={reel.id}>
+                      {index + 1}. {reel.title}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            )}
           </div>
-        </nav>
+
+          <nav className="editor-tool-nav" aria-label="Herramientas del editor">
+            <div className="editor-tool-nav__track" role="tablist">
+              {REEL_TOOLS.map((tool, index) => (
+                <button
+                  key={tool.id}
+                  id={`reel-tool-tab-${tool.id}`}
+                  type="button"
+                  role="tab"
+                  aria-selected={activeTool === tool.id}
+                  aria-controls={`reel-tool-panel-${tool.id}`}
+                  className={`editor-tool-nav__tab${
+                    activeTool === tool.id ? ' editor-tool-nav__tab--active' : ''
+                  }`}
+                  onClick={() => setActiveTool(tool.id)}
+                >
+                  <span className="editor-tool-nav__number">{index + 1}</span>
+                  <span>
+                    <strong>{tool.label}</strong>
+                    <small>{tool.description}</small>
+                  </span>
+                </button>
+              ))}
+            </div>
+          </nav>
+        </div>
       )}
 
       <div id="reel-tool-panel-cuts-create" hidden={Boolean(activeReel) && activeTool !== 'cuts'}>

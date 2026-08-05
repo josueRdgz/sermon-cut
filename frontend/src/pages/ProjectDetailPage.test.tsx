@@ -120,5 +120,8 @@ describe('ProjectDetailPage workspace', () => {
       );
     });
     expect(screen.getByText('Panel del editor')).toBeVisible();
+    expect(screen.getByRole('navigation', { name: 'Flujo del proyecto' })).toHaveClass(
+      'workspace-nav--editor-active',
+    );
   });
 });

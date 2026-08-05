@@ -192,7 +192,12 @@ export function ProjectDetailPage() {
         </p>
       </header>
 
-      <nav className="workspace-nav" aria-label="Flujo del proyecto">
+      <nav
+        className={`workspace-nav${
+          activeSection === 'editor' ? ' workspace-nav--editor-active' : ''
+        }`}
+        aria-label="Flujo del proyecto"
+      >
         <div className="workspace-nav__track" role="tablist" aria-label="Categorías">
           {visibleSections.map((section, index) => (
             <button
