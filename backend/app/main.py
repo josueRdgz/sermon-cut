@@ -46,6 +46,7 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
 
     try:
         from app.services.analysis.manager import get_analysis_manager
+        from app.services.audio_repair.manager import get_audio_repair_manager
         from app.services.highlights.manager import get_highlight_analysis_manager
         from app.services.render.manager import get_render_manager
         from app.services.whisper.manager import get_job_manager
@@ -54,6 +55,7 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         get_render_manager().shutdown(wait=False)
         get_job_manager().shutdown(wait=False)
         get_analysis_manager().shutdown(wait=False)
+        get_audio_repair_manager().shutdown(wait=False)
         get_highlight_analysis_manager().shutdown(wait=False)
         get_youtube_import_manager().shutdown(wait=False)
     except Exception:  # noqa: BLE001

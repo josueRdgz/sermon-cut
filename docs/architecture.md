@@ -46,6 +46,21 @@ Organización por capas para separar responsabilidades:
   `endcard/`, `render/` (argumentos FFmpeg, ejecución y administrador).
 - **`app/workers/`** — trabajos en segundo plano (futuros). Sin Celery ni Redis.
 
+### Reparación local de audio
+
+- `services/audio_repair/engine.py` analiza WAV PCM en bloques para no cargar
+  la predicación completa en RAM. Detecta secuencias casi digitales en cero y
+  exige señal audible a ambos lados para evitar confundir pausas naturales.
+- Sólo los huecos menores al límite conservador (60 ms por defecto) se
+  reconstruyen mezclando contexto anterior y posterior. Los huecos mayores se
+  reportan para revisión y nunca se sintetizan como voz.
+- `AudioRepairManager` extrae PCM estéreo con FFmpeg, persiste progreso e
+  incidencias en SQLite y admite cancelación cooperativa. El resultado es
+  `repaired-audio.wav` más una copia del contenedor con video copiado y audio
+  nuevo; `original.*` permanece intacto.
+- El frontend ofrece comparación Original/Reparado, acceso directo a cada
+  incidencia y descarga explícita. No usa servicios de IA ni sube audio.
+
 ### Transcripción local (faster-whisper)
 
 - `services/whisper/device.py` resuelve el dispositivo: `cuda` si hay GPU NVIDIA,

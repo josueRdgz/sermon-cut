@@ -78,8 +78,8 @@ a:hover {
 
 .workspace-nav__track {
   display: grid;
-  grid-template-columns: repeat(5, minmax(185px, 1fr));
-  min-width: 925px;
+  grid-template-columns: repeat(6, minmax(175px, 1fr));
+  min-width: 1050px;
 }
 
 .workspace-nav__tab,
@@ -170,6 +170,122 @@ a:hover {
 .card h2 {
   margin: 0 0 1rem;
   font-size: 1.1rem;
+}
+
+.audio-repair__settings {
+  margin: 1rem 0;
+  padding: 0.8rem 1rem;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+}
+
+.audio-repair__settings summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.audio-repair__settings label {
+  display: grid;
+  gap: 0.5rem;
+  margin-top: 0.8rem;
+}
+
+.audio-repair__metrics {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 0.75rem;
+  margin-bottom: 1rem;
+}
+
+.audio-repair__metrics div {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  padding: 1rem;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+}
+
+.audio-repair__metrics strong {
+  font-size: 1.7rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.audio-repair__metrics span,
+.audio-repair__notice {
+  font-size: 0.85rem;
+}
+
+.audio-repair__players {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+}
+
+.audio-repair__players label {
+  display: grid;
+  gap: 0.5rem;
+  color: var(--text-secondary);
+  font-weight: 600;
+}
+
+.audio-repair__players audio {
+  width: 100%;
+}
+
+.audio-repair__issues {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.audio-repair__issue {
+  display: grid;
+  grid-template-columns: minmax(120px, 1fr) auto minmax(170px, auto);
+  align-items: center;
+  gap: 1rem;
+  width: 100%;
+  padding: 0.8rem 1rem;
+  color: var(--text);
+  text-align: left;
+  font: inherit;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+}
+
+.audio-repair__issue:hover {
+  border-color: var(--accent);
+}
+
+.audio-repair__issue > span:first-child {
+  display: flex;
+  gap: 0.6rem;
+}
+
+.status-ok {
+  color: var(--ok);
+}
+
+.status-warning {
+  color: var(--warning, #fbbf24);
+}
+
+@media (max-width: 700px) {
+  .audio-repair__metrics,
+  .audio-repair__players {
+    grid-template-columns: 1fr;
+  }
+
+  .audio-repair__issue {
+    grid-template-columns: 1fr auto;
+  }
+
+  .audio-repair__issue > small {
+    grid-column: 1 / -1;
+  }
 }
 
 .status-row {

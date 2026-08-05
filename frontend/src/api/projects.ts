@@ -16,6 +16,10 @@ export function projectCoverUrl(id: string): string {
   return `${API_BASE_URL}/api/projects/${id}/media/cover`;
 }
 
+export function projectVideoUrl(id: string): string {
+  return `${API_BASE_URL}/api/projects/${id}/media/video`;
+}
+
 export function getProject(id: string): Promise<Project> {
   return apiGet<Project>(`/api/projects/${id}`);
 }

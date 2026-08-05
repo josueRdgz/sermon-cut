@@ -9,6 +9,11 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.models.analysis import ACTIVE_ANALYSIS_STATUSES, AnalysisJob, AnalysisJobStatus
+from app.models.audio_repair import (
+    ACTIVE_AUDIO_REPAIR_STATUSES,
+    AudioRepairJob,
+    AudioRepairJobStatus,
+)
 from app.models.highlight import (
     ACTIVE_HIGHLIGHT_STATUSES,
     HighlightAnalysisJob,
@@ -48,6 +53,7 @@ def reconcile_stale_jobs(session: Session) -> dict[str, int]:
         "render": 0,
         "transcription": 0,
         "analysis": 0,
+        "audio_repair": 0,
         "highlight_analysis": 0,
         "youtube_import": 0,
     }
@@ -101,6 +107,24 @@ def reconcile_stale_jobs(session: Session) -> dict[str, int]:
             job.error_message = _INTERRUPT_MESSAGE
         job.finished_at = now
         counts["analysis"] += 1
+
+    audio_repairs = list(
+        session.scalars(
+            select(AudioRepairJob).where(
+                AudioRepairJob.status.in_(tuple(ACTIVE_AUDIO_REPAIR_STATUSES))
+            )
+        ).all()
+    )
+    for job in audio_repairs:
+        if job.status == AudioRepairJobStatus.cancelling:
+            job.status = AudioRepairJobStatus.cancelled
+            job.stage = "cancelled"
+        else:
+            job.status = AudioRepairJobStatus.failed
+            job.stage = "failed"
+            job.error_message = _INTERRUPT_MESSAGE
+        job.finished_at = now
+        counts["audio_repair"] += 1
 
     highlight_analyses = list(
         session.scalars(
@@ -174,11 +198,12 @@ def reconcile_stale_jobs(session: Session) -> dict[str, int]:
     if total:
         logger.warning(
             "Reconciled %s stale job(s): render=%s transcription=%s analysis=%s "
-            "highlight_analysis=%s youtube_import=%s",
+            "audio_repair=%s highlight_analysis=%s youtube_import=%s",
             total,
             counts["render"],
             counts["transcription"],
             counts["analysis"],
+            counts["audio_repair"],
             counts["highlight_analysis"],
             counts["youtube_import"],
         )

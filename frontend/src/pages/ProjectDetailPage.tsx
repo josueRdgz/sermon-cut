@@ -3,6 +3,7 @@ import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 
 import { deleteProject, deleteProjectVideo, getProject } from '../api/projects';
 import { AnalysisPanel } from '../components/AnalysisPanel';
+import { AudioRepairPanel } from '../components/AudioRepairPanel';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { ReelEditor } from '../components/ReelEditor';
 import { StatusRow } from '../components/StatusRow';
@@ -16,6 +17,11 @@ const WORKSPACE_SECTIONS = [
     id: 'project',
     label: 'Proyecto',
     description: 'Archivo y datos',
+  },
+  {
+    id: 'audio',
+    label: 'Reparar audio',
+    description: 'Detectar microcortes',
   },
   {
     id: 'transcript',
@@ -274,6 +280,15 @@ export function ProjectDetailPage() {
         >
           Eliminar proyecto
         </button>
+      </div>
+
+      <div
+        id="workspace-panel-audio"
+        role="tabpanel"
+        aria-labelledby="workspace-tab-audio"
+        hidden={activeSection !== 'audio'}
+      >
+        <AudioRepairPanel projectId={project.id} hasVideo={project.has_video} />
       </div>
 
       <div

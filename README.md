@@ -10,6 +10,7 @@ una pantalla final. **No requiere Docker.**
 > **Estado actual:** proyectos locales + importación/normalización de
 > transcripciones (SRT, WebVTT, JSON interno, TXT) + **transcripción local con
 > faster-whisper** + **Reels compuestos por varios fragmentos no consecutivos**
+> + **reparación local conservadora de microcortes**
 > + **render real a MP4 con FFmpeg** + **subtítulos ASS incrustados** +
 > **pantalla final obligatoria** + **análisis editorial opcional** (Gemini o
 > mock) + **perfiles de exportación** + **música de fondo local opcional**.
@@ -128,15 +129,17 @@ Datos de prueba libres de derechos: carpeta [`demo/`](demo/README.md).
 1. **Crear proyecto** → rellena título, iglesia, canal; elige el **origen del
    video**: **archivo local** (método principal) o **URL de YouTube** (opcional,
    ver abajo); sube portada opcional.
-2. En el detalle del proyecto, **transcribe localmente** (elige modelo e idioma)
-   o importa una **transcripción** existente (SRT / VTT / JSON / TXT).
-3. Usa el buscador, edita segmentos y haz clic en uno para saltar en el video HTML5.
-4. En **Reels**, selecciona uno o más segmentos de la transcripción (pueden no ser
+2. Si el audio presenta cortes, abre **Reparar audio**, ejecuta el análisis y
+   compara Original/Reparado antes de descargar la copia corregida.
+3. **Transcribe localmente** (elige modelo e idioma) o importa una
+   **transcripción** existente (SRT / VTT / JSON / TXT).
+4. Usa el buscador, edita segmentos y haz clic en uno para saltar en el video HTML5.
+5. En **Reels**, selecciona uno o más segmentos de la transcripción (pueden no ser
    contiguos) y pulsa **Crear Reel desde selección**. Añade más fragmentos con
    **Añadir otro fragmento** o **Añadir selección al Reel actual**.
-5. Ajusta inicio/fin con precisión decimal (±1 s / ±0.1 s) y usa **Vista previa
+6. Ajusta inicio/fin con precisión decimal (±1 s / ±0.1 s) y usa **Vista previa
    lógica** para reproducir fragmento → salto → fragmento (sin generar un archivo).
-6. Exporta la transcripción a SRT, VTT o JSON interno cuando quieras.
+7. Exporta la transcripción a SRT, VTT o JSON interno cuando quieras.
 
 Los medios viven en `storage/projects/{uuid}/`. SQLite solo guarda metadatos.
 

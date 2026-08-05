@@ -9,6 +9,7 @@ from __future__ import annotations
 from fastapi import APIRouter
 
 from app.api.analysis import router as analysis_router
+from app.api.audio_repair import router as audio_repair_router
 from app.api.background_music import router as background_music_router
 from app.api.cut_suggestions import router as cut_suggestions_router
 from app.api.end_card import router as end_card_router
@@ -30,6 +31,7 @@ api_router.include_router(projects_router)
 api_router.include_router(transcripts_router)
 api_router.include_router(transcription_router)
 api_router.include_router(analysis_router)
+api_router.include_router(audio_repair_router)
 api_router.include_router(highlights_router)
 api_router.include_router(reels_router)
 api_router.include_router(cut_suggestions_router)

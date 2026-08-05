@@ -37,6 +37,12 @@ restricciones. Complementa el README.
 
 ## Media y calidad
 
+- La reparación automática se limita a **huecos digitales cortos**. Si faltó
+  una sílaba o una palabra, la app lo marca para revisión porque reconstruirla
+  con IA podría alterar el contenido de la predicación.
+- Los umbrales iniciales se calibraron con señales sintéticas. Grabaciones de
+  dispositivos o codificadores concretos pueden requerir ajustar el límite y
+  deben validarse con comparación A/B.
 - El render **siempre recodifica** (no hay `-c copy`); proyectos muy largos
   tardan y ocupan disco.
 - La **estimación de tamaño** de exportación es heurística, no exacta.

@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- Reparación local y conservadora de microcortes: detecta huecos digitales
+  breves rodeados de señal, reconstruye sólo los casos seguros, marca pérdidas
+  largas para revisión y genera una copia del video sin modificar el original.
+- Nueva sección «Reparar audio» con progreso persistente, cancelación,
+  comparación A/B, lista de incidencias y descarga del video reparado.
+
 ## [0.3.0] — 2026-08-03
 
 ### Added
