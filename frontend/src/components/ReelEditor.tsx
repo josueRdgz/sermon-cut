@@ -25,6 +25,11 @@ import { RenderPanel } from './RenderPanel';
 import { SubtitlePanel } from './SubtitlePanel';
 import type { CutSuggestion, CutSuggestionsReport } from '../types/cutSuggestions';
 import { acceptCutSuggestion, rejectCutSuggestion } from '../api/cutSuggestions';
+import {
+  previewTimelineIdentity,
+  resolvePreviewSeek,
+  type PreviewSeekTarget,
+} from '../utils/reelPreview';
 
 interface ReelEditorProps {
   projectId: string;
@@ -72,6 +77,25 @@ function audioTimeForVideo(videoTime: number, offsetMs: number): number {
   return Math.max(0, videoTime - offsetMs / 1000);
 }
 
+function setMediaTime(media: HTMLMediaElement, seconds: number, approximate = false): boolean {
+  if (media.readyState < HTMLMediaElement.HAVE_METADATA) return false;
+  const duration = Number.isFinite(media.duration) && media.duration > 0 ? media.duration : null;
+  const target = Math.max(0, duration == null ? seconds : Math.min(seconds, duration));
+  try {
+    const seekableMedia = media as HTMLMediaElement & { fastSeek?: (time: number) => void };
+    if (approximate && typeof seekableMedia.fastSeek === 'function') {
+      seekableMedia.fastSeek(target);
+    } else {
+      media.currentTime = target;
+    }
+    return true;
+  } catch {
+    // WebKit can reject a seek while metadata/ranges are being refreshed.
+    // Keeping the pending target allows loadedmetadata or the final commit to retry.
+    return false;
+  }
+}
+
 export function ReelEditor({
   projectId,
   hasVideo,
@@ -109,6 +133,12 @@ export function ReelEditor({
   const focusedReelRef = useRef<string | null>(null);
   const audioOffsetRef = useRef(0);
   const pendingAudioTimeRef = useRef<number | null>(null);
+  const pendingVideoTimeRef = useRef<number | null>(null);
+  const pendingPreviewSeekRef = useRef<PreviewSeekTarget | null>(null);
+  const seekAnimationFrameRef = useRef<number | null>(null);
+  const audioOffsetSeekTimerRef = useRef<number | null>(null);
+  const scrubbingRef = useRef(false);
+  const resumeAfterScrubRef = useRef(false);
 
   const activeReel = useMemo(
     () => reels.find((reel) => reel.id === activeReelId) ?? null,
@@ -456,6 +486,17 @@ export function ReelEditor({
 
   function stopPreview() {
     previewingRef.current = false;
+    scrubbingRef.current = false;
+    resumeAfterScrubRef.current = false;
+    pendingPreviewSeekRef.current = null;
+    if (seekAnimationFrameRef.current != null) {
+      window.cancelAnimationFrame(seekAnimationFrameRef.current);
+      seekAnimationFrameRef.current = null;
+    }
+    if (audioOffsetSeekTimerRef.current != null) {
+      window.clearTimeout(audioOffsetSeekTimerRef.current);
+      audioOffsetSeekTimerRef.current = null;
+    }
     setPreviewing(false);
     const video = videoRef.current;
     if (video) video.pause();
@@ -474,7 +515,7 @@ export function ReelEditor({
     if (audio.readyState < HTMLMediaElement.HAVE_METADATA) return;
     if (force) {
       audio.playbackRate = 1;
-      audio.currentTime = target;
+      if (!setMediaTime(audio, target)) return;
     } else {
       // Seeking the audio for every small clock difference produces audible
       // gaps in WebKit. Correct normal drift gradually and reserve hard seeks
@@ -493,6 +534,19 @@ export function ReelEditor({
   function applyAudioOffset(offsetMs: number) {
     audioOffsetRef.current = offsetMs;
     setAudioOffsetMs(offsetMs);
+    if (audioOffsetSeekTimerRef.current != null) return;
+    audioOffsetSeekTimerRef.current = window.setTimeout(() => {
+      audioOffsetSeekTimerRef.current = null;
+      const video = videoRef.current;
+      if (video) syncAudioToVideo(video.currentTime, true);
+    }, 80);
+  }
+
+  function commitAudioOffsetPreview() {
+    if (audioOffsetSeekTimerRef.current != null) {
+      window.clearTimeout(audioOffsetSeekTimerRef.current);
+      audioOffsetSeekTimerRef.current = null;
+    }
     const video = videoRef.current;
     if (video) syncAudioToVideo(video.currentTime, true);
   }
@@ -513,35 +567,76 @@ export function ReelEditor({
     }
   }
 
-  function seekPreview(outputSeconds: number) {
-    if (orderedSegments.length === 0 || !videoRef.current) return;
-    const total = orderedSegments.reduce(
-      (sum, segment) => sum + Math.max(0, segment.duration_seconds),
-      0,
-    );
-    const target = Math.max(0, Math.min(outputSeconds, total));
-    let elapsed = 0;
-    let targetIndex = orderedSegments.length - 1;
-    let sourceTarget = orderedSegments[targetIndex].source_end_seconds;
-
-    for (let index = 0; index < orderedSegments.length; index += 1) {
-      const segment = orderedSegments[index];
-      const duration = Math.max(0, segment.duration_seconds);
-      if (target <= elapsed + duration || index === orderedSegments.length - 1) {
-        targetIndex = index;
-        sourceTarget =
-          segment.source_start_seconds + Math.max(0, Math.min(target - elapsed, duration));
-        break;
-      }
-      elapsed += duration;
+  function applyPreviewSeek(target: PreviewSeekTarget, approximate: boolean) {
+    const video = videoRef.current;
+    if (!video) return;
+    pendingVideoTimeRef.current = target.sourceTime;
+    if (setMediaTime(video, target.sourceTime, approximate)) {
+      pendingVideoTimeRef.current = null;
     }
+    if (!approximate) syncAudioToVideo(target.sourceTime, true);
+  }
 
-    previewIndexRef.current = targetIndex;
-    setPreviewIndex(targetIndex);
-    setPreviewOutputTime(target);
-    setSourceTime(sourceTarget);
-    videoRef.current.currentTime = sourceTarget;
-    syncAudioToVideo(sourceTarget, true);
+  function schedulePreviewSeek(target: PreviewSeekTarget) {
+    pendingPreviewSeekRef.current = target;
+    if (seekAnimationFrameRef.current != null) return;
+    seekAnimationFrameRef.current = window.requestAnimationFrame(() => {
+      seekAnimationFrameRef.current = null;
+      const pending = pendingPreviewSeekRef.current;
+      if (pending) applyPreviewSeek(pending, true);
+    });
+  }
+
+  function seekPreview(outputSeconds: number) {
+    const target = resolvePreviewSeek(orderedSegments, outputSeconds);
+    if (!target || !videoRef.current) return;
+    previewIndexRef.current = target.segmentIndex;
+    setPreviewIndex(target.segmentIndex);
+    setPreviewOutputTime(target.outputTime);
+    setSourceTime(target.sourceTime);
+    pendingPreviewSeekRef.current = target;
+    if (scrubbingRef.current) {
+      // Keep the picture responsive while dragging, but do not make the second
+      // media element seek on every pointer event.
+      schedulePreviewSeek(target);
+    } else {
+      applyPreviewSeek(target, false);
+    }
+  }
+
+  function beginPreviewScrub() {
+    if (scrubbingRef.current) return;
+    scrubbingRef.current = true;
+    resumeAfterScrubRef.current = previewingRef.current;
+    videoRef.current?.pause();
+    if (audioRef.current) {
+      audioRef.current.pause();
+      audioRef.current.playbackRate = 1;
+    }
+  }
+
+  function endPreviewScrub() {
+    if (!scrubbingRef.current) return;
+    scrubbingRef.current = false;
+    if (seekAnimationFrameRef.current != null) {
+      window.cancelAnimationFrame(seekAnimationFrameRef.current);
+      seekAnimationFrameRef.current = null;
+    }
+    const target = pendingPreviewSeekRef.current;
+    if (target) applyPreviewSeek(target, false);
+    pendingPreviewSeekRef.current = null;
+
+    const shouldResume = resumeAfterScrubRef.current && previewingRef.current;
+    resumeAfterScrubRef.current = false;
+    const video = videoRef.current;
+    const audio = audioRef.current;
+    if (!shouldResume || !video || !audio) return;
+    audio.muted = previewMuted;
+    audio.volume = previewVolume;
+    void Promise.all([video.play(), audio.play()]).catch((err: unknown) => {
+      stopPreview();
+      setError(err instanceof Error ? err.message : 'No se pudo reanudar la reproducción');
+    });
   }
 
   function startPreview() {
@@ -574,7 +669,7 @@ export function ReelEditor({
           );
     void Promise.all([waitForMetadata(video), waitForMetadata(audio)])
       .then(async () => {
-        if (!previewingRef.current) return;
+        if (!previewingRef.current || scrubbingRef.current) return;
         syncAudioToVideo(video.currentTime, true);
         await Promise.all([video.play(), audio.play()]);
       })
@@ -619,6 +714,7 @@ export function ReelEditor({
     function onTimeUpdate() {
       if (!video) return;
       setSourceTime(video.currentTime);
+      if (scrubbingRef.current) return;
       if (!previewingRef.current || !activeReel) return;
       const ordered = [...activeReel.segments].sort((a, b) => a.order - b.order);
       const index = previewIndexRef.current;
@@ -656,22 +752,33 @@ export function ReelEditor({
     }
 
     function onSeeking() {
-      syncAudioToVideo(syncedVideo.currentTime, true);
+      if (!scrubbingRef.current) syncAudioToVideo(syncedVideo.currentTime, true);
+    }
+
+    function onVideoMetadata() {
+      if (pendingVideoTimeRef.current != null) {
+        if (setMediaTime(syncedVideo, pendingVideoTimeRef.current)) {
+          pendingVideoTimeRef.current = null;
+        }
+      }
     }
 
     function onAudioMetadata() {
       if (pendingAudioTimeRef.current != null) {
-        syncedAudio.currentTime = pendingAudioTimeRef.current;
-        pendingAudioTimeRef.current = null;
+        if (setMediaTime(syncedAudio, pendingAudioTimeRef.current)) {
+          pendingAudioTimeRef.current = null;
+        }
       }
     }
 
     syncedVideo.addEventListener('timeupdate', onTimeUpdate);
     syncedVideo.addEventListener('seeking', onSeeking);
+    syncedVideo.addEventListener('loadedmetadata', onVideoMetadata);
     syncedAudio.addEventListener('loadedmetadata', onAudioMetadata);
     return () => {
       syncedVideo.removeEventListener('timeupdate', onTimeUpdate);
       syncedVideo.removeEventListener('seeking', onSeeking);
+      syncedVideo.removeEventListener('loadedmetadata', onVideoMetadata);
       syncedAudio.removeEventListener('loadedmetadata', onAudioMetadata);
     };
   }, [activeReel]);
@@ -680,6 +787,7 @@ export function ReelEditor({
     () => (activeReel ? [...activeReel.segments].sort((a, b) => a.order - b.order) : []),
     [activeReel],
   );
+  const previewIdentity = previewTimelineIdentity(activeReel?.id, orderedSegments);
 
   useEffect(() => {
     previewingRef.current = false;
@@ -710,7 +818,19 @@ export function ReelEditor({
       video.addEventListener('loadedmetadata', showFirstFrame, { once: true });
       return () => video.removeEventListener('loadedmetadata', showFirstFrame);
     }
-  }, [activeReel?.id, orderedSegments]);
+  }, [previewIdentity]); // eslint-disable-line react-hooks/exhaustive-deps -- do not reset on metadata-only Reel updates
+
+  useEffect(
+    () => () => {
+      if (seekAnimationFrameRef.current != null) {
+        window.cancelAnimationFrame(seekAnimationFrameRef.current);
+      }
+      if (audioOffsetSeekTimerRef.current != null) {
+        window.clearTimeout(audioOffsetSeekTimerRef.current);
+      }
+    },
+    [],
+  );
 
   const timedTranscript = transcriptSegments.filter(
     (s) => s.start_seconds != null && s.end_seconds != null,
@@ -968,6 +1088,10 @@ export function ReelEditor({
                   disabled={orderedSegments.length === 0}
                   aria-label="Posición dentro del Reel"
                   onChange={(event) => seekPreview(Number(event.target.value))}
+                  onPointerDown={beginPreviewScrub}
+                  onPointerUp={endPreviewScrub}
+                  onPointerCancel={endPreviewScrub}
+                  onBlur={endPreviewScrub}
                 />
                 <span className="reel-preview__time">
                   {formatDuration(previewOutputTime)} /{' '}
@@ -1037,6 +1161,10 @@ export function ReelEditor({
                   step={10}
                   value={audioOffsetMs}
                   onChange={(event) => applyAudioOffset(Number(event.target.value))}
+                  onPointerUp={commitAudioOffsetPreview}
+                  onPointerCancel={commitAudioOffsetPreview}
+                  onKeyUp={commitAudioOffsetPreview}
+                  onBlur={commitAudioOffsetPreview}
                 />
                 <div className="reel-audio-sync__scale" aria-hidden="true">
                   <span>−1 s · adelantar</span>
