@@ -1,8 +1,14 @@
 """Detect and conceal short digital dropouts in PCM WAV audio.
 
 The detector intentionally targets a narrow, high-confidence failure mode:
-consecutive near-zero PCM frames surrounded by audible signal. Natural pauses
-and long missing passages are reported for review, never synthesized.
+consecutive near-zero PCM frames with *hard* amplitude edges on both sides
+(speech abruptly cut to silence). Soft landings into natural micro-pauses are
+ignored — repairing those used to inject mirrored speech and sounded like
+doubling / extra cuts.
+
+Reconstruction never copies or mirrors neighbouring speech. Short gaps are
+filled with a cosine fade through silence so edge clicks disappear without
+echoing the surrounding words.
 """
 
 from __future__ import annotations
@@ -52,6 +58,8 @@ class _Candidate:
     end_frame: int  # exclusive
     left_rms: float
     right_rms: float
+    left_edge: float
+    right_edge: float
 
 
 def _samples_from_bytes(data: bytes) -> array:
@@ -76,6 +84,12 @@ def _rms(samples: array) -> float:
     return math.sqrt(sum(int(value) * int(value) for value in samples) / len(samples))
 
 
+def _peak_abs(samples: array) -> float:
+    if not samples:
+        return 0.0
+    return float(max(abs(int(value)) for value in samples))
+
+
 def _context_rms(
     reader: wave.Wave_read,
     *,
@@ -88,6 +102,45 @@ def _context_rms(
     return _rms(_samples_from_bytes(reader.readframes(end_frame - start_frame)))
 
 
+def _context_peak(
+    reader: wave.Wave_read,
+    *,
+    start_frame: int,
+    end_frame: int,
+) -> float:
+    if end_frame <= start_frame:
+        return 0.0
+    reader.setpos(start_frame)
+    return _peak_abs(_samples_from_bytes(reader.readframes(end_frame - start_frame)))
+
+
+def _merge_runs(
+    runs: list[tuple[int, int]],
+    *,
+    merge_frames: int,
+    bridge_peaks: list[float],
+    max_bridge_peak: float,
+) -> list[tuple[int, int]]:
+    """Collapse bursty near-zero islands only when the bridge is also quiet.
+
+    Merging across audible samples glues natural pauses into fake dropouts, so
+    the peak of every bridged span must stay near the silence floor.
+    """
+    if not runs:
+        return []
+    merged: list[list[int]] = [[runs[0][0], runs[0][1]]]
+    for index, (start, end) in enumerate(runs[1:], start=0):
+        bridge_peak = bridge_peaks[index]
+        if (
+            start - merged[-1][1] <= merge_frames
+            and bridge_peak <= max_bridge_peak
+        ):
+            merged[-1][1] = end
+        else:
+            merged.append([start, end])
+    return [(start, end) for start, end in merged]
+
+
 def _scan_quiet_runs(
     input_path: Path,
     *,
@@ -96,6 +149,9 @@ def _scan_quiet_runs(
     max_review_ms: float,
     context_ms: float,
     min_context_rms: float,
+    edge_ms: float,
+    min_edge_peak: float,
+    merge_gap_ms: float,
     cancel_event: threading.Event | None,
     on_progress: ProgressCallback | None,
 ) -> tuple[wave._wave_params, list[_Candidate]]:  # type: ignore[attr-defined]
@@ -111,6 +167,7 @@ def _scan_quiet_runs(
         total_frames = params.nframes
         min_frames = max(1, round(rate * min_dropout_ms / 1000))
         max_frames = max(min_frames, round(rate * max_review_ms / 1000))
+        merge_frames = max(0, round(rate * merge_gap_ms / 1000))
         raw_runs: list[tuple[int, int]] = []
         run_start: int | None = None
         frame_index = 0
@@ -132,20 +189,49 @@ def _scan_quiet_runs(
                 if quiet and run_start is None:
                     run_start = absolute_frame
                 elif not quiet and run_start is not None:
-                    if min_frames <= absolute_frame - run_start <= max_frames:
+                    if absolute_frame - run_start >= min_frames:
                         raw_runs.append((run_start, absolute_frame))
                     run_start = None
             frame_index += actual_frames
             if on_progress is not None and total_frames:
                 on_progress(min(0.7, 0.7 * frame_index / total_frames))
 
-        if run_start is not None and min_frames <= total_frames - run_start <= max_frames:
+        if run_start is not None and total_frames - run_start >= min_frames:
             raw_runs.append((run_start, total_frames))
 
+    # Measure bridge peaks between consecutive qualifying runs for safe merges.
+    bridge_peaks: list[float] = []
+    with wave.open(str(input_path), "rb") as reader:
+        for (_, prev_end), (next_start, _) in zip(raw_runs, raw_runs[1:], strict=False):
+            if next_start <= prev_end:
+                bridge_peaks.append(0.0)
+            else:
+                bridge_peaks.append(
+                    _context_peak(
+                        reader,
+                        start_frame=prev_end,
+                        end_frame=next_start,
+                    )
+                )
+
+    max_bridge_peak = float(max(silence_threshold * 4, 32))
+    merged_runs = _merge_runs(
+        raw_runs,
+        merge_frames=merge_frames,
+        bridge_peaks=bridge_peaks,
+        max_bridge_peak=max_bridge_peak,
+    )
+    sized_runs = [
+        (start, end)
+        for start, end in merged_runs
+        if min_frames <= end - start <= max_frames
+    ]
+
     context_frames = max(1, round(params.framerate * context_ms / 1000))
+    edge_frames = max(1, round(params.framerate * edge_ms / 1000))
     candidates: list[_Candidate] = []
     with wave.open(str(input_path), "rb") as reader:
-        for start, end in raw_runs:
+        for start, end in sized_runs:
             if start < context_frames or end + context_frames > params.nframes:
                 continue
             left_rms = _context_rms(
@@ -158,15 +244,32 @@ def _scan_quiet_runs(
                 start_frame=end,
                 end_frame=end + context_frames,
             )
-            if left_rms >= min_context_rms and right_rms >= min_context_rms:
-                candidates.append(
-                    _Candidate(
-                        start_frame=start,
-                        end_frame=end,
-                        left_rms=left_rms,
-                        right_rms=right_rms,
-                    )
+            if left_rms < min_context_rms or right_rms < min_context_rms:
+                continue
+            # True digital dropouts cut mid-waveform. Soft landings into natural
+            # pauses have near-threshold samples on the edges and must be skipped.
+            left_edge = _context_peak(
+                reader,
+                start_frame=start - edge_frames,
+                end_frame=start,
+            )
+            right_edge = _context_peak(
+                reader,
+                start_frame=end,
+                end_frame=end + edge_frames,
+            )
+            if left_edge < min_edge_peak or right_edge < min_edge_peak:
+                continue
+            candidates.append(
+                _Candidate(
+                    start_frame=start,
+                    end_frame=end,
+                    left_rms=left_rms,
+                    right_rms=right_rms,
+                    left_edge=left_edge,
+                    right_edge=right_edge,
                 )
+            )
     return params, candidates
 
 
@@ -176,25 +279,32 @@ def _replacement_for(
     *,
     channels: int,
 ) -> array:
-    """Blend equally-sized context from both sides into the missing interval."""
+    """Fade through silence between the hard edges — never mirror speech.
+
+    Mirroring neighbouring PCM into the gap re-inserts reversed syllables and
+    is what made repairs sound doubled / stuttery. A cosine fade to zero and
+    back removes the boundary click without inventing speech content.
+    """
     gap_frames = candidate.end_frame - candidate.start_frame
-    reader.setpos(candidate.start_frame - gap_frames)
-    left = _samples_from_bytes(reader.readframes(gap_frames))
+    reader.setpos(candidate.start_frame - 1)
+    left = _samples_from_bytes(reader.readframes(1))
     reader.setpos(candidate.end_frame)
-    right = _samples_from_bytes(reader.readframes(gap_frames))
+    right = _samples_from_bytes(reader.readframes(1))
     replacement = array("h", [0]) * (gap_frames * channels)
 
     for frame in range(gap_frames):
-        alpha = (frame + 1) / (gap_frames + 1)
+        # First half decays from the left edge to silence; second half grows
+        # from silence to the right edge. No neighbouring speech is copied.
+        t = (frame + 1) / (gap_frames + 1)
+        if t <= 0.5:
+            gain = math.cos(math.pi * t)
+            source = left
+        else:
+            gain = math.cos(math.pi * (1.0 - t))
+            source = right
         for channel in range(channels):
-            index = frame * channels + channel
-            # Mirror both contexts so the first/last generated samples meet the
-            # real waveform at each boundary instead of introducing a new click.
-            mirrored_index = (gap_frames - 1 - frame) * channels + channel
-            value = round(
-                (1.0 - alpha) * left[mirrored_index] + alpha * right[mirrored_index]
-            )
-            replacement[index] = max(-32768, min(32767, value))
+            value = round(gain * source[channel])
+            replacement[frame * channels + channel] = max(-32768, min(32767, value))
     return replacement
 
 
@@ -251,7 +361,10 @@ def analyze_and_repair_wav(
     max_auto_repair_ms: float = 200.0,
     max_review_ms: float = 250.0,
     context_ms: float = 25.0,
-    min_context_rms: float = 160.0,
+    min_context_rms: float = 300.0,
+    edge_ms: float = 0.25,
+    min_edge_peak: float = 250.0,
+    merge_gap_ms: float = 5.0,
     cancel_event: threading.Event | None = None,
     on_progress: ProgressCallback | None = None,
 ) -> AudioRepairResult:
@@ -263,6 +376,9 @@ def analyze_and_repair_wav(
         max_review_ms=max_review_ms,
         context_ms=context_ms,
         min_context_rms=min_context_rms,
+        edge_ms=edge_ms,
+        min_edge_peak=min_edge_peak,
+        merge_gap_ms=merge_gap_ms,
         cancel_event=cancel_event,
         on_progress=on_progress,
     )
@@ -276,8 +392,8 @@ def analyze_and_repair_wav(
             duration_ms = 1000 * frame_count / rate
             repairable = duration_ms <= max_auto_repair_ms
             repaired = False
-            if repairable and candidate.start_frame >= frame_count:
-                if candidate.end_frame + frame_count <= params.nframes:
+            if repairable and candidate.start_frame >= 1:
+                if candidate.end_frame < params.nframes:
                     replacement = _replacement_for(
                         reader,
                         candidate,
@@ -288,8 +404,14 @@ def analyze_and_repair_wav(
                         replacement,
                     )
                     repaired = True
+            edge_strength = min(candidate.left_edge, candidate.right_edge)
             context_strength = min(candidate.left_rms, candidate.right_rms)
-            confidence = min(0.99, 0.72 + min(0.27, context_strength / 12000))
+            confidence = min(
+                0.99,
+                0.70
+                + min(0.18, edge_strength / 8000)
+                + min(0.11, context_strength / 12000),
+            )
             issues.append(
                 DropoutIssue(
                     start_seconds=candidate.start_frame / rate,

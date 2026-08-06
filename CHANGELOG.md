@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+
+- Reparación de audio: ya no trata micro-pausas naturales como dropouts ni
+  espeja voz vecina (eco/doble). Sólo actúa en cortes digitales con bordes
+  duros y suaviza el hueco con fade a silencio.
+
 ## [0.3.2] — 2026-08-05
 
 ### Changed

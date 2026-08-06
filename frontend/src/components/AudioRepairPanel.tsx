@@ -158,8 +158,9 @@ export function AudioRepairPanel({ projectId, hasVideo }: AudioRepairPanelProps)
       <section className="card">
         <h2>Reparar microcortes</h2>
         <p className="muted">
-          El análisis se ejecuta localmente. Sólo reconstruye huecos digitales breves con señal
-          activa a ambos lados; los pasajes dudosos quedan marcados para revisión.
+          El análisis se ejecuta localmente. Sólo suaviza cortes digitales bruscos (voz
+          interrumpida a silencio); no inventa ni espeja palabras. Las micro-pausas naturales
+          se dejan intactas y los huecos dudosos quedan para revisión.
         </p>
 
         <details className="audio-repair__settings" open={repairReviewItems || pendingReview}>
