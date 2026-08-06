@@ -7,11 +7,49 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.3.7] — 2026-08-06
+
+### Fixed
+
+- El editor de reel usa el audio reparado tras «Usar audio reparado en el proyecto».
+- Puente de reparación sin saturación (±32767) en huecos largos; min dropout 1 ms.
+- Comparación A/B con WAV seekable; video remux con faststart; descargas en Tauri.
+
+## [0.3.6] — 2026-08-06
+
+### Fixed
+
+- Detección de microcortes en audio real (AAC→WAV estéreo): umbral 96, media
+  entre canales, núcleo ajustado al suelo residual y puente Hermite para
+  eliminar el corte (sin dejar silencio ni espejar frases enteras).
+
+## [0.3.5] — 2026-08-06
+
+### Fixed
+
+- Reparación de microcortes: el hueco se puentea con smoothstep entre los
+  bordes reales (elimina el corte audible). Ya no se deja silencio en el
+  medio ni se espeja un tramo largo de voz.
+
+## [0.3.4] — 2026-08-06
+
+### Fixed
+
+- Detección de microcortes demasiado estricta: umbral de silencio 32 (suelo AAC),
+  contexto 160 RMS, bordes en ~1 ms y pico mínimo 120, sin tragar micro-pausas
+  naturales. Sigue sin espejar voz al reparar.
+
+## [0.3.3] — 2026-08-06
+
 ### Fixed
 
 - Reparación de audio: ya no trata micro-pausas naturales como dropouts ni
   espeja voz vecina (eco/doble). Sólo actúa en cortes digitales con bordes
-  duros y suaviza el hueco con fade a silencio.
+  duros.
+- Huecos cortos se interpolan; los largos sólo suavizan ~2.5 ms en cada borde
+  hacia silencio real (sin alargar el fonema del corte, que sonaba a tartamudeo).
+- El build de escritorio en macOS genera sólo el DMG y no deja un `.app`
+  suelto en el repo (evita duplicados en el selector / iCloud).
 
 ## [0.3.2] — 2026-08-05
 

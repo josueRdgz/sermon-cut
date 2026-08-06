@@ -34,9 +34,16 @@ from app.services.audio_repair.pipeline import (
 
 SessionFactory = Callable[[], Session]
 
+_ORIGINAL_BACKUP_STEM = "original-video"
+
 
 def _utc_now() -> datetime:
     return datetime.now(UTC)
+
+
+def _looks_like_original_backup(filename: str) -> bool:
+    """True when ``filename`` is already an ``original-video.*`` backup."""
+    return Path(filename).stem == _ORIGINAL_BACKUP_STEM
 
 
 class AudioRepairManager:
@@ -149,6 +156,15 @@ class AudioRepairManager:
             raise NotFoundError("Repaired audio file is missing.", code="repaired_audio_missing")
         return path
 
+    def original_audio_path(self, job: AudioRepairJob) -> Path:
+        """Seekable PCM extracted before repair (for A/B comparison)."""
+        if job.status != AudioRepairJobStatus.completed:
+            raise NotFoundError("Original audio is not ready.", code="original_audio_missing")
+        path = storage.resolve_inside_project(job.project_id, "original-audio.wav")
+        if not path.is_file():
+            raise NotFoundError("Original audio file is missing.", code="original_audio_missing")
+        return path
+
     def repaired_video_path(self, job: AudioRepairJob) -> Path:
         if job.status != AudioRepairJobStatus.completed or not job.repaired_video_filename:
             raise NotFoundError("Repaired video is not ready.", code="repaired_video_missing")
@@ -156,6 +172,54 @@ class AudioRepairManager:
         if not path.is_file():
             raise NotFoundError("Repaired video file is missing.", code="repaired_video_missing")
         return path
+
+    def apply_to_project(self, db: Session, job_id: UUID) -> AudioRepairJob:
+        """Point the project media source at the repaired video, keeping an original backup."""
+        job = self.get(db, job_id)
+        if job.status != AudioRepairJobStatus.completed:
+            raise ValidationAppError(
+                "Audio repair must complete before it can be applied.",
+                code="audio_repair_not_ready",
+            )
+        if not job.repaired_video_filename:
+            raise ValidationAppError(
+                "Repaired video is not available to apply.",
+                code="repaired_video_missing",
+            )
+        repaired_path = storage.resolve_inside_project(
+            job.project_id, job.repaired_video_filename
+        )
+        if not repaired_path.is_file():
+            raise NotFoundError(
+                "Repaired video file is missing.",
+                code="repaired_video_missing",
+            )
+
+        project = db.get(Project, job.project_id)
+        if project is None:
+            raise NotFoundError("Project not found.", code="project_not_found")
+
+        if project.video_filename == job.repaired_video_filename:
+            raise ConflictError(
+                "Repaired audio is already the project source.",
+                code="audio_repair_already_applied",
+            )
+
+        current_name = project.video_filename
+        if current_name and not _looks_like_original_backup(current_name):
+            suffix = Path(current_name).suffix or repaired_path.suffix
+            backup_name = f"{_ORIGINAL_BACKUP_STEM}{suffix}"
+            backup_path = storage.resolve_inside_project(project.id, backup_name)
+            current_path = storage.resolve_inside_project(project.id, current_name)
+            if not backup_path.exists() and current_path.is_file():
+                # Rename preserves the user original under a stable backup name.
+                current_path.rename(backup_path)
+            # If a backup already exists, keep it and leave the current file untouched.
+
+        project.video_filename = job.repaired_video_filename
+        db.commit()
+        db.refresh(job)
+        return job
 
     def _event_for(self, job_id: UUID) -> threading.Event:
         with self._lock:
@@ -230,6 +294,14 @@ class AudioRepairManager:
             shutil.copyfile(repaired_temp, audio_pending)
             audio_pending.replace(audio_output)
 
+            # Keep a seekable original WAV for A/B comparison (video moov-at-end
+            # files seek poorly in the desktop webview).
+            original_audio_name = "original-audio.wav"
+            original_audio_output = project_dir / original_audio_name
+            original_pending = project_dir / ".original-audio.pending.wav"
+            shutil.copyfile(extracted, original_pending)
+            original_pending.replace(original_audio_output)
+
             job.stage = "creating_video"
             job.progress = 0.82
             session.commit()
@@ -249,8 +321,9 @@ class AudioRepairManager:
             issues = [asdict(issue) for issue in result.issues]
             job.issue_count = len(issues)
             job.repaired_count = result.repaired_count
-            job.review_count = sum(not issue["repairable"] for issue in issues)
-            job.issues_json = json.dumps(issues, separators=(",", ":"))
+            job.review_count = sum(1 for issue in issues if not issue["repaired"])
+            # Cap persisted issue list so huge glitch storms don't bloat SQLite/UI.
+            job.issues_json = json.dumps(issues[:500], separators=(",", ":"))
             job.repaired_audio_filename = audio_name
             job.repaired_video_filename = video_name
             job.status = AudioRepairJobStatus.completed

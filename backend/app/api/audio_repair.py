@@ -13,6 +13,7 @@ from app.core.exceptions import NotFoundError
 from app.db.session import get_db
 from app.models.audio_repair import AudioRepairJob
 from app.schemas.audio_repair import AudioRepairJobResponse, AudioRepairStartRequest
+from app.services import storage
 from app.services.audio_repair.manager import AudioRepairManager, get_audio_repair_manager
 
 router = APIRouter(tags=["audio-repair"])
@@ -39,6 +40,11 @@ def _response(job: AudioRepairJob) -> AudioRepairJobResponse:
         issues=issues,
         has_repaired_audio=bool(job.repaired_audio_filename),
         has_repaired_video=bool(job.repaired_video_filename),
+        has_original_audio=storage.resolve_inside_project(
+            job.project_id, "original-audio.wav"
+        ).is_file()
+        if job.status.value == "completed"
+        else False,
         error_message=job.error_message,
         created_at=job.created_at,
         updated_at=job.updated_at,
@@ -92,6 +98,16 @@ def cancel_audio_repair(
     return _response(manager.cancel(db, job_id))
 
 
+@router.post("/audio-repair-jobs/{job_id}/apply", response_model=AudioRepairJobResponse)
+def apply_audio_repair(
+    job_id: UUID,
+    db: Session = Depends(get_db),
+    manager: AudioRepairManager = Depends(get_audio_repair_manager),
+) -> AudioRepairJobResponse:
+    """Make the repaired video the project media source (reel / transcript / render)."""
+    return _response(manager.apply_to_project(db, job_id))
+
+
 @router.get("/audio-repair-jobs/{job_id}/audio")
 def get_repaired_audio(
     job_id: UUID,
@@ -105,6 +121,23 @@ def get_repaired_audio(
         path,
         media_type="audio/wav",
         filename=job.repaired_audio_filename,
+        content_disposition_type="attachment" if download else "inline",
+    )
+
+
+@router.get("/audio-repair-jobs/{job_id}/original-audio")
+def get_original_audio(
+    job_id: UUID,
+    download: bool = False,
+    db: Session = Depends(get_db),
+    manager: AudioRepairManager = Depends(get_audio_repair_manager),
+) -> FileResponse:
+    job = manager.get(db, job_id)
+    path = manager.original_audio_path(job)
+    return FileResponse(
+        path,
+        media_type="audio/wav",
+        filename="original-audio.wav",
         content_disposition_type="attachment" if download else "inline",
     )
 

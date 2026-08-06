@@ -27,6 +27,7 @@ export interface AudioRepairJob {
   issues: AudioRepairIssue[];
   has_repaired_audio: boolean;
   has_repaired_video: boolean;
+  has_original_audio?: boolean;
   error_message: string | null;
   created_at: string;
   updated_at: string;

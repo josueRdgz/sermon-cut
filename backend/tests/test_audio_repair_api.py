@@ -7,6 +7,7 @@ import wave
 from array import array
 from collections.abc import Generator
 from pathlib import Path
+from uuid import UUID
 
 import pytest
 from app.core import paths
@@ -175,6 +176,43 @@ def test_audio_repair_endpoints(audio_repair_client) -> None:
     video = client.get(f"/api/audio-repair-jobs/{body['id']}/video")
     assert video.status_code == 200
     assert video.content == b"repaired-video"
+
+
+def test_apply_audio_repair_switches_project_video(audio_repair_client) -> None:
+    client, session_factory, projects_dir = audio_repair_client
+    project_id = _project_with_video(session_factory, projects_dir)
+
+    response = client.post(
+        f"/api/projects/{project_id}/audio-repair",
+        json={
+            "silence_threshold": 8,
+            "min_dropout_ms": 2,
+            "max_auto_repair_ms": 60,
+            "max_review_ms": 250,
+        },
+    )
+    assert response.status_code == 202, response.text
+    job_id = response.json()["id"]
+    assert response.json()["has_repaired_video"] is True
+
+    apply = client.post(f"/api/audio-repair-jobs/{job_id}/apply")
+    assert apply.status_code == 200, apply.text
+
+    project_dir = projects_dir / project_id
+    with session_factory() as session:
+        project = session.get(Project, UUID(project_id))
+        assert project is not None
+        assert project.video_filename == "repaired-video.mp4"
+    assert (project_dir / "repaired-video.mp4").is_file()
+    assert (project_dir / "original-video.mp4").is_file()
+    assert (project_dir / "original-video.mp4").read_bytes() == b"source"
+    # Original user content is kept as backup; repaired wav stays for preview/download.
+    assert (project_dir / "repaired-audio.wav").is_file()
+    assert not (project_dir / "original.mp4").exists()
+
+    again = client.post(f"/api/audio-repair-jobs/{job_id}/apply")
+    assert again.status_code == 409
+    assert again.json()["code"] == "audio_repair_already_applied"
 
 
 def test_audio_repair_requires_video(audio_repair_client) -> None:

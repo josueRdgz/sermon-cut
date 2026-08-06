@@ -279,8 +279,20 @@ a:hover {
   font-weight: 600;
 }
 
-.audio-repair__players audio {
+.audio-repair__players audio,
+.audio-repair__players video,
+.audio-repair__video-preview video {
   width: 100%;
+  max-height: 240px;
+  background: #111;
+}
+
+.audio-repair__video-preview {
+  display: grid;
+  gap: 0.5rem;
+  margin-top: 1rem;
+  color: var(--text-secondary);
+  font-weight: 600;
 }
 
 .audio-repair__issues {

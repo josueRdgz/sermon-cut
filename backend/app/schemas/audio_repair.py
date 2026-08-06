@@ -11,8 +11,8 @@ from pydantic import BaseModel, Field
 class AudioRepairStartRequest(BaseModel):
     """Tunable conservative detector thresholds."""
 
-    silence_threshold: int = Field(default=8, ge=0, le=128)
-    min_dropout_ms: float = Field(default=2.0, ge=0.5, le=20)
+    silence_threshold: int = Field(default=64, ge=0, le=512)
+    min_dropout_ms: float = Field(default=1.0, ge=0.1, le=20)
     max_auto_repair_ms: float = Field(default=200.0, ge=5, le=250)
     max_review_ms: float = Field(default=250.0, ge=100, le=1000)
     repair_review_items: bool = Field(
@@ -50,6 +50,7 @@ class AudioRepairJobResponse(BaseModel):
     issues: list[AudioRepairIssueResponse]
     has_repaired_audio: bool
     has_repaired_video: bool
+    has_original_audio: bool = False
     error_message: str | None
     created_at: datetime
     updated_at: datetime

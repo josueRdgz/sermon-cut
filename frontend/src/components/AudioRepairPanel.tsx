@@ -1,15 +1,17 @@
 import { useEffect, useRef, useState } from 'react';
 
 import {
+  applyAudioRepair,
   cancelAudioRepair,
+  downloadRepairFile,
   getAudioRepairJob,
   getLatestAudioRepair,
+  originalAudioUrl,
   repairedAudioUrl,
   repairedVideoUrl,
   startAudioRepair,
 } from '../api/audioRepair';
 import { ApiError } from '../api/client';
-import { projectVideoUrl } from '../api/projects';
 import type { AudioRepairJob, AudioRepairIssue } from '../types/audioRepair';
 import { formatDuration } from '../utils/format';
 import { ProgressBar } from './ProgressBar';
@@ -24,6 +26,7 @@ const DEFAULT_MAX_AUTO_MS = 200;
 const DEFAULT_MAX_REVIEW_MS = 250;
 const SLIDER_MIN_MS = 20;
 const SLIDER_MAX_MS = 200;
+const MAX_VISIBLE_ISSUES = 200;
 
 const STAGE_LABELS: Record<string, string> = {
   queued: 'En espera',
@@ -46,10 +49,12 @@ export function AudioRepairPanel({ projectId, hasVideo }: AudioRepairPanelProps)
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [applied, setApplied] = useState(false);
   const [maxAutoRepairMs, setMaxAutoRepairMs] = useState(DEFAULT_MAX_AUTO_MS);
   const [repairReviewItems, setRepairReviewItems] = useState(false);
-  const originalRef = useRef<HTMLAudioElement>(null);
-  const repairedRef = useRef<HTMLAudioElement>(null);
+  const originalAudioRef = useRef<HTMLAudioElement>(null);
+  const repairedAudioRef = useRef<HTMLAudioElement>(null);
+  const repairedVideoRef = useRef<HTMLVideoElement>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -96,11 +101,12 @@ export function AudioRepairPanel({ projectId, hasVideo }: AudioRepairPanelProps)
   async function runRepair(includeReviewItems: boolean) {
     setBusy(true);
     setError(null);
+    setApplied(false);
     setRepairReviewItems(includeReviewItems);
     try {
       const result = await startAudioRepair(projectId, {
-        silence_threshold: 8,
-        min_dropout_ms: 2,
+        silence_threshold: 64,
+        min_dropout_ms: 1.0,
         max_auto_repair_ms: maxAutoRepairMs,
         max_review_ms: DEFAULT_MAX_REVIEW_MS,
         repair_review_items: includeReviewItems,
@@ -125,11 +131,54 @@ export function AudioRepairPanel({ projectId, hasVideo }: AudioRepairPanelProps)
     }
   }
 
+  async function handleApply() {
+    if (!job) return;
+    setBusy(true);
+    setError(null);
+    try {
+      setJob(await applyAudioRepair(job.id));
+      setApplied(true);
+    } catch (err) {
+      if (err instanceof ApiError && err.code === 'audio_repair_already_applied') {
+        setApplied(true);
+      } else {
+        setError(err instanceof Error ? err.message : 'No se pudo aplicar la reparación');
+      }
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleDownload(url: string, filename: string) {
+    setBusy(true);
+    setError(null);
+    try {
+      await downloadRepairFile(url, filename);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'No se pudo descargar el archivo');
+    } finally {
+      setBusy(false);
+    }
+  }
+
   function seekComparison(issue: AudioRepairIssue) {
-    const target = Math.max(0, issue.start_seconds - 2);
-    if (originalRef.current) originalRef.current.currentTime = target;
-    if (repairedRef.current) repairedRef.current.currentTime = target;
-    originalRef.current?.play().catch(() => undefined);
+    const target = Math.max(0, issue.start_seconds - 0.5);
+    const players: Array<HTMLMediaElement | null> = [
+      originalAudioRef.current,
+      repairedAudioRef.current,
+      repairedVideoRef.current,
+    ];
+    for (const player of players) {
+      if (!player) continue;
+      try {
+        player.pause();
+        player.currentTime = target;
+      } catch {
+        // Seeking can throw before metadata is ready; ignore and still try play.
+      }
+    }
+    void originalAudioRef.current?.play().catch(() => undefined);
+    void repairedAudioRef.current?.play().catch(() => undefined);
   }
 
   if (loading) {
@@ -152,6 +201,9 @@ export function AudioRepairPanel({ projectId, hasVideo }: AudioRepairPanelProps)
   const active = job ? ACTIVE_STATUSES.has(job.status) : false;
   const completed = job?.status === 'completed';
   const pendingReview = completed && job ? job.review_count > 0 : false;
+  const visibleIssues = job ? job.issues.slice(0, MAX_VISIBLE_ISSUES) : [];
+  const hiddenIssueCount = job ? Math.max(0, job.issues.length - MAX_VISIBLE_ISSUES) : 0;
+  const hasOriginalAudio = Boolean(job?.has_original_audio);
 
   return (
     <div className="audio-repair">
@@ -277,38 +329,102 @@ export function AudioRepairPanel({ projectId, hasVideo }: AudioRepairPanelProps)
               </div>
             )}
 
-            {job.has_repaired_video && (
-              <a className="button button--inline" href={repairedVideoUrl(job.id, true)}>
-                Descargar video reparado
-              </a>
+            {job.has_repaired_video && !applied && (
+              <button
+                type="button"
+                className="button"
+                disabled={busy}
+                onClick={() => void handleApply()}
+              >
+                Usar audio reparado en el proyecto
+              </button>
             )}
+            {applied && (
+              <p className="status-ok">
+                Audio reparado aplicado. El editor de reel, la transcripción y el render usarán
+                esta pista.
+              </p>
+            )}
+
+            <div className="audio-repair__actions">
+              {job.has_repaired_video && (
+                <button
+                  type="button"
+                  className="button"
+                  disabled={busy}
+                  onClick={() =>
+                    void handleDownload(repairedVideoUrl(job.id, true), 'repaired-video.mp4')
+                  }
+                >
+                  Descargar video reparado
+                </button>
+              )}
+              {job.has_repaired_audio && (
+                <button
+                  type="button"
+                  className="button button--secondary"
+                  disabled={busy}
+                  onClick={() =>
+                    void handleDownload(repairedAudioUrl(job.id, true), 'repaired-audio.wav')
+                  }
+                >
+                  Descargar audio reparado
+                </button>
+              )}
+            </div>
             <p className="muted audio-repair__notice">
-              El video original permanece intacto. Esta copia sólo sustituye su pista de audio.
+              Tras reparar, pulsa «Usar audio reparado en el proyecto» para que el editor de reel
+              use esta pista. El video original se conserva como respaldo.
             </p>
           </section>
 
           <section className="card">
             <h2>Comparación A/B</h2>
+            <p className="muted audio-repair__notice">
+              Usa las pistas WAV (seek fiable). Pulsa una incidencia para saltar a ese punto. El
+              video reparado lleva faststart para poder adelantar/atrasar.
+            </p>
             <div className="audio-repair__players">
               <label>
-                <span>Original</span>
-                <audio
-                  ref={originalRef}
-                  controls
-                  preload="metadata"
-                  src={projectVideoUrl(projectId)}
-                />
+                <span>Original (audio)</span>
+                {hasOriginalAudio ? (
+                  <audio
+                    ref={originalAudioRef}
+                    controls
+                    preload="auto"
+                    src={originalAudioUrl(job.id)}
+                  />
+                ) : (
+                  <p className="muted">
+                    Vuelve a analizar para generar la pista original comparable.
+                  </p>
+                )}
               </label>
               <label>
-                <span>Reparado</span>
-                <audio
-                  ref={repairedRef}
-                  controls
-                  preload="metadata"
-                  src={repairedAudioUrl(job.id)}
-                />
+                <span>Reparado (audio)</span>
+                {job.has_repaired_audio ? (
+                  <audio
+                    ref={repairedAudioRef}
+                    controls
+                    preload="auto"
+                    src={repairedAudioUrl(job.id)}
+                  />
+                ) : (
+                  <p className="muted">Audio reparado no disponible.</p>
+                )}
               </label>
             </div>
+            {job.has_repaired_video && (
+              <label className="audio-repair__video-preview">
+                <span>Video reparado (vista)</span>
+                <video
+                  ref={repairedVideoRef}
+                  controls
+                  preload="metadata"
+                  src={repairedVideoUrl(job.id)}
+                />
+              </label>
+            )}
           </section>
 
           <section className="card">
@@ -319,25 +435,32 @@ export function AudioRepairPanel({ projectId, hasVideo }: AudioRepairPanelProps)
                 conserva el audio original.
               </p>
             ) : (
-              <div className="audio-repair__issues">
-                {job.issues.map((issue, index) => (
-                  <button
-                    key={`${issue.start_seconds}-${index}`}
-                    type="button"
-                    className="audio-repair__issue"
-                    onClick={() => seekComparison(issue)}
-                  >
-                    <span>
-                      <strong>{issueTime(issue)}</strong>
-                      <small>{issue.duration_ms.toFixed(1)} ms</small>
-                    </span>
-                    <span className={issue.repaired ? 'status-ok' : 'status-warning'}>
-                      {issue.repaired ? 'Reparado' : 'Revisar'}
-                    </span>
-                    <small>{Math.round(issue.confidence * 100)}% confianza · escuchar</small>
-                  </button>
-                ))}
-              </div>
+              <>
+                {hiddenIssueCount > 0 && (
+                  <p className="muted">
+                    Mostrando {MAX_VISIBLE_ISSUES} de {job.issues.length}
+                  </p>
+                )}
+                <div className="audio-repair__issues">
+                  {visibleIssues.map((issue, index) => (
+                    <button
+                      key={`${issue.start_seconds}-${index}`}
+                      type="button"
+                      className="audio-repair__issue"
+                      onClick={() => seekComparison(issue)}
+                    >
+                      <span>
+                        <strong>{issueTime(issue)}</strong>
+                        <small>{issue.duration_ms.toFixed(1)} ms</small>
+                      </span>
+                      <span className={issue.repaired ? 'status-ok' : 'status-warning'}>
+                        {issue.repaired ? 'Reparado' : 'Revisar'}
+                      </span>
+                      <small>{Math.round(issue.confidence * 100)}% confianza · escuchar</small>
+                    </button>
+                  ))}
+                </div>
+              </>
             )}
           </section>
         </>

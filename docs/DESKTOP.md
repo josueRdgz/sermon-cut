@@ -153,10 +153,13 @@ La app resultante incluye Python, FastAPI, Whisper, Gemini, yt-dlp y las
 dependencias configuradas en el venv. La Mac de destino solo necesita
 FFmpeg/FFprobe. No se suben releases a GitHub desde estos scripts.
 
-En macOS se generan normalmente:
+En macOS se genera:
 
-- `bundle/macos/Sermon Cut.app`
-- `bundle/dmg/Sermon Cut_0.3.2_aarch64.dmg` en Apple Silicon
+- `bundle/dmg/Sermon Cut_0.3.7_aarch64.dmg` en Apple Silicon
+
+No se deja un `.app` suelto junto al DMG (evita duplicados en Launchpad /
+Open With cuando iCloud crea copias «Sermon Cut 2»). Instala desde el DMG
+hacia `/Applications`.
 
 Sin firma/notarización, otra Mac puede mostrar una advertencia de Gatekeeper. La
 persona usuaria puede abrir la aplicación desde Finder con clic secundario →

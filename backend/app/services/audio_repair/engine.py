@@ -3,12 +3,12 @@
 The detector intentionally targets a narrow, high-confidence failure mode:
 consecutive near-zero PCM frames with *hard* amplitude edges on both sides
 (speech abruptly cut to silence). Soft landings into natural micro-pauses are
-ignored — repairing those used to inject mirrored speech and sounded like
-doubling / extra cuts.
+ignored.
 
-Reconstruction never copies or mirrors neighbouring speech. Short gaps are
-filled with a cosine fade through silence so edge clicks disappear without
-echoing the surrounding words.
+Reconstruction keeps duration (video sync). Short holes use a smoothstep bridge
+between the real edge samples (no tangent overshoot). Longer holes conceal with
+a short mirrored neighbourhood on each side plus a ducked center — never a
+full-phrase mirror and never an exploding Hermite through silence.
 """
 
 from __future__ import annotations
@@ -141,6 +141,49 @@ def _merge_runs(
     return [(start, end) for start, end in merged]
 
 
+def _tighten_run_to_floor(
+    reader: wave.Wave_read,
+    *,
+    start_frame: int,
+    end_frame: int,
+    channels: int,
+    floor: int,
+) -> tuple[int, int] | None:
+    """Shrink a loose quiet run to the true near-zero core.
+
+    A high AAC silence floor can swallow soft landings into the run. Tightening
+    restores the real digi-cut boundaries (or empties soft natural pauses).
+    """
+    if end_frame <= start_frame:
+        return None
+    reader.setpos(start_frame)
+    samples = _samples_from_bytes(reader.readframes(end_frame - start_frame))
+    frame_count = len(samples) // channels
+    if frame_count <= 0:
+        return None
+
+    def frame_quiet(index: int) -> bool:
+        offset = index * channels
+        mean_abs = sum(abs(samples[offset + channel]) for channel in range(channels)) / channels
+        return mean_abs <= floor
+
+    islands: list[tuple[int, int]] = []
+    island_start: int | None = None
+    for index in range(frame_count):
+        if frame_quiet(index):
+            if island_start is None:
+                island_start = index
+        elif island_start is not None:
+            islands.append((island_start, index))
+            island_start = None
+    if island_start is not None:
+        islands.append((island_start, frame_count))
+    if not islands:
+        return None
+    best_start, best_end = max(islands, key=lambda pair: pair[1] - pair[0])
+    return start_frame + best_start, start_frame + best_end
+
+
 def _scan_quiet_runs(
     input_path: Path,
     *,
@@ -181,10 +224,13 @@ def _scan_quiet_runs(
             actual_frames = len(samples) // channels
             for local_frame in range(actual_frames):
                 offset = local_frame * channels
-                quiet = all(
-                    abs(samples[offset + channel]) <= silence_threshold
-                    for channel in range(channels)
-                )
+                # Mean across channels: real stereo AAC often leaves residual on
+                # only one channel, so requiring *all* channels ≤ threshold misses
+                # the dropout entirely.
+                mean_abs = sum(
+                    abs(samples[offset + channel]) for channel in range(channels)
+                ) / channels
+                quiet = mean_abs <= silence_threshold
                 absolute_frame = frame_index + local_frame
                 if quiet and run_start is None:
                     run_start = absolute_frame
@@ -229,37 +275,101 @@ def _scan_quiet_runs(
 
     context_frames = max(1, round(params.framerate * context_ms / 1000))
     edge_frames = max(1, round(params.framerate * edge_ms / 1000))
+    # Core floor catches AAC residual (~25–50) but leaves soft landings (~80+)
+    # outside so natural pauses still fail the hard-edge check.
+    core_floor = max(24, min(48, silence_threshold // 2))
+    short_ms = 40.0
     candidates: list[_Candidate] = []
     with wave.open(str(input_path), "rb") as reader:
         for start, end in sized_runs:
-            if start < context_frames or end + context_frames > params.nframes:
+            tightened = _tighten_run_to_floor(
+                reader,
+                start_frame=start,
+                end_frame=end,
+                channels=params.nchannels,
+                floor=core_floor,
+            )
+            if tightened is None:
+                continue
+            start, end = tightened
+            frame_count = end - start
+            if frame_count < min_frames or frame_count > max_frames:
+                continue
+            # Short digi-glitches only need a tiny neighborhood (1–5 ms).
+            duration_ms = 1000.0 * frame_count / params.framerate
+            local_context = (
+                max(1, round(params.framerate * 0.005))
+                if duration_ms <= short_ms
+                else context_frames
+            )
+            if start < local_context or end + local_context > params.nframes:
                 continue
             left_rms = _context_rms(
                 reader,
-                start_frame=start - context_frames,
+                start_frame=start - local_context,
                 end_frame=start,
             )
             right_rms = _context_rms(
                 reader,
                 start_frame=end,
-                end_frame=end + context_frames,
+                end_frame=end + local_context,
             )
-            if left_rms < min_context_rms or right_rms < min_context_rms:
+            min_rms = 80.0 if duration_ms <= short_ms else min_context_rms
+            if left_rms < min_rms or right_rms < min_rms:
                 continue
-            # True digital dropouts cut mid-waveform. Soft landings into natural
-            # pauses have near-threshold samples on the edges and must be skipped.
+            gap_peak = _context_peak(
+                reader,
+                start_frame=start,
+                end_frame=end,
+            )
+            local_edge = max(1, edge_frames if duration_ms > short_ms else round(params.framerate * 0.002))
             left_edge = _context_peak(
                 reader,
-                start_frame=start - edge_frames,
+                start_frame=start - local_edge,
                 end_frame=start,
             )
             right_edge = _context_peak(
                 reader,
                 start_frame=end,
-                end_frame=end + edge_frames,
+                end_frame=end + local_edge,
             )
-            if left_edge < min_edge_peak or right_edge < min_edge_peak:
+            # Short clicks: require loud neighbors relative to the hole.
+            # Longer holes keep the stricter hard-edge floor.
+            if duration_ms <= short_ms:
+                edge_floor = max(200.0, gap_peak * 3.0)
+            else:
+                edge_floor = max(min_edge_peak, gap_peak * 3.0, float(core_floor * 4))
+            if left_edge < edge_floor or right_edge < edge_floor:
                 continue
+            # Soft natural pause: amplitude eases down before the hole. Digi-cuts
+            # stay loud until the boundary.
+            near_frames = max(local_edge, round(params.framerate * 0.005))
+            far_frames = max(near_frames * 2, round(params.framerate * 0.025))
+            if start >= far_frames and end + far_frames <= params.nframes:
+                left_near = _context_peak(
+                    reader,
+                    start_frame=start - near_frames,
+                    end_frame=start,
+                )
+                left_far = _context_peak(
+                    reader,
+                    start_frame=start - far_frames,
+                    end_frame=start - near_frames,
+                )
+                right_near = _context_peak(
+                    reader,
+                    start_frame=end,
+                    end_frame=end + near_frames,
+                )
+                right_far = _context_peak(
+                    reader,
+                    start_frame=end + near_frames,
+                    end_frame=end + far_frames,
+                )
+                soft_left = left_far > 400 and left_near < left_far * 0.25
+                soft_right = right_far > 400 and right_near < right_far * 0.25
+                if soft_left or soft_right:
+                    continue
             candidates.append(
                 _Candidate(
                     start_frame=start,
@@ -273,38 +383,113 @@ def _scan_quiet_runs(
     return params, candidates
 
 
+def _smoothstep(y0: float, y1: float, t: float) -> float:
+    """Cubic ease between endpoints with zero end slopes (no overshoot)."""
+    t = max(0.0, min(1.0, t))
+    ease = t * t * (3.0 - 2.0 * t)
+    return y0 + (y1 - y0) * ease
+
+
+def _clamp_pcm(value: float) -> int:
+    return max(-32768, min(32767, round(value)))
+
+
 def _replacement_for(
     reader: wave.Wave_read,
     candidate: _Candidate,
     *,
     channels: int,
+    sample_rate: int,
 ) -> array:
-    """Fade through silence between the hard edges — never mirror speech.
+    """Reconstruct the missing interval so the audible cut disappears.
 
-    Mirroring neighbouring PCM into the gap re-inserts reversed syllables and
-    is what made repairs sound doubled / stuttery. A cosine fade to zero and
-    back removes the boundary click without inventing speech content.
+    Short gaps (≤20 ms): smoothstep between the real edge samples — continuous,
+    no Hermite tangent blow-up.
+
+    Longer gaps: conceal with a short (≤15 ms) time-reversed neighbourhood on
+    each side and a ducked smoothstep in any remaining center. Never mirrors a
+    full neighbouring phrase (that doubled speech).
     """
     gap_frames = candidate.end_frame - candidate.start_frame
-    reader.setpos(candidate.start_frame - 1)
-    left = _samples_from_bytes(reader.readframes(1))
-    reader.setpos(candidate.end_frame)
-    right = _samples_from_bytes(reader.readframes(1))
+    if gap_frames <= 0:
+        return array("h")
+
+    total_frames = reader.getnframes()
+    reader.setpos(max(0, candidate.start_frame - 1))
+    left_edge_block = _samples_from_bytes(reader.readframes(1))
+    reader.setpos(min(candidate.end_frame, total_frames - 1))
+    right_edge_block = _samples_from_bytes(reader.readframes(1))
+    if len(left_edge_block) < channels or len(right_edge_block) < channels:
+        return array("h", [0]) * (gap_frames * channels)
+
+    short_limit = max(1, round(sample_rate * 0.020))
     replacement = array("h", [0]) * (gap_frames * channels)
 
+    if gap_frames <= short_limit:
+        for frame in range(gap_frames):
+            t = (frame + 1) / (gap_frames + 1)
+            for channel in range(channels):
+                y0 = float(left_edge_block[channel])
+                y1 = float(right_edge_block[channel])
+                replacement[frame * channels + channel] = _clamp_pcm(_smoothstep(y0, y1, t))
+        return replacement
+
+    mirror_frames = min(
+        gap_frames // 2,
+        max(1, round(sample_rate * 0.015)),
+        candidate.start_frame,
+        max(0, total_frames - candidate.end_frame),
+    )
+    left_ctx = array("h")
+    right_ctx = array("h")
+    if mirror_frames > 0:
+        reader.setpos(candidate.start_frame - mirror_frames)
+        left_ctx = _samples_from_bytes(reader.readframes(mirror_frames))
+        reader.setpos(candidate.end_frame)
+        right_ctx = _samples_from_bytes(reader.readframes(mirror_frames))
+
+    left_len = len(left_ctx) // channels
+    right_len = len(right_ctx) // channels
+    crossfade = max(1, min(mirror_frames, round(sample_rate * 0.004), gap_frames // 4))
+
     for frame in range(gap_frames):
-        # First half decays from the left edge to silence; second half grows
-        # from silence to the right edge. No neighbouring speech is copied.
         t = (frame + 1) / (gap_frames + 1)
-        if t <= 0.5:
-            gain = math.cos(math.pi * t)
-            source = left
-        else:
-            gain = math.cos(math.pi * (1.0 - t))
-            source = right
+        duck = 1.0 - 0.88 * math.sin(math.pi * t) ** 2
         for channel in range(channels):
-            value = round(gain * source[channel])
-            replacement[frame * channels + channel] = max(-32768, min(32767, value))
+            y0 = float(left_edge_block[channel])
+            y1 = float(right_edge_block[channel])
+            base = _smoothstep(y0, y1, t) * duck
+
+            left_v: float | None = None
+            right_v: float | None = None
+            if left_len > 0 and frame < left_len:
+                src = (left_len - 1 - frame) * channels + channel
+                left_v = float(left_ctx[src])
+            if right_len > 0 and frame >= gap_frames - right_len:
+                rev = gap_frames - 1 - frame
+                src = rev * channels + channel
+                if 0 <= src < len(right_ctx):
+                    right_v = float(right_ctx[src])
+
+            if left_v is not None and right_v is not None:
+                fade = (frame + 1) / (gap_frames + 1)
+                value = left_v * (1.0 - fade) + right_v * fade
+            elif left_v is not None:
+                if frame >= left_len - crossfade:
+                    fade = (frame - (left_len - crossfade) + 1) / (crossfade + 1)
+                    value = left_v * (1.0 - fade) + base * fade
+                else:
+                    value = left_v
+            elif right_v is not None:
+                idx = frame - (gap_frames - right_len)
+                if idx < crossfade:
+                    fade = (idx + 1) / (crossfade + 1)
+                    value = base * (1.0 - fade) + right_v * fade
+                else:
+                    value = right_v
+            else:
+                value = base
+            replacement[frame * channels + channel] = _clamp_pcm(value)
     return replacement
 
 
@@ -356,15 +541,18 @@ def analyze_and_repair_wav(
     input_path: Path,
     output_path: Path,
     *,
-    silence_threshold: int = 8,
-    min_dropout_ms: float = 2.0,
+    # Real extracted PCM (AAC→WAV) often sits well above exact zero.
+    silence_threshold: int = 64,
+    # Below ~1 ms, near-zero samples are usually waveform zero-crossings.
+    # Real digi-glitch plateaus in damaged sermon AAC sit above this.
+    min_dropout_ms: float = 1.0,
     max_auto_repair_ms: float = 200.0,
     max_review_ms: float = 250.0,
     context_ms: float = 25.0,
-    min_context_rms: float = 300.0,
-    edge_ms: float = 0.25,
-    min_edge_peak: float = 250.0,
-    merge_gap_ms: float = 5.0,
+    min_context_rms: float = 140.0,
+    edge_ms: float = 1.0,
+    min_edge_peak: float = 100.0,
+    merge_gap_ms: float = 2.0,
     cancel_event: threading.Event | None = None,
     on_progress: ProgressCallback | None = None,
 ) -> AudioRepairResult:
@@ -398,6 +586,7 @@ def analyze_and_repair_wav(
                         reader,
                         candidate,
                         channels=params.nchannels,
+                        sample_rate=rate,
                     )
                     replacements[candidate.start_frame] = (
                         candidate.end_frame,

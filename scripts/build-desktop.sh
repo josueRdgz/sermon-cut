@@ -26,14 +26,24 @@ elif [[ -f "$ROOT/scripts/seed-desktop-env.sh" ]]; then
   bash "$ROOT/scripts/seed-desktop-env.sh"
 fi
 
+BUNDLE_DIR="$ROOT/frontend/src-tauri/target/release/bundle"
+
 if [[ "$(uname -s)" == "Darwin" ]]; then
-  # Build the DMG first (its script removes the temporary .app), then leave a
-  # standalone .app alongside it for direct local use.
+  # Only produce the DMG installer. A leftover .app next to it (or iCloud
+  # "Sermon Cut 2.app" copies) shows up as duplicate apps in Launchpad/Open.
   npm run desktop:build -- --bundles dmg
-  npm run desktop:build -- --bundles app
+  # Tauri's DMG step already removes the temporary .app; sweep any leftovers /
+  # iCloud conflict copies just in case.
+  if [[ -d "$BUNDLE_DIR/macos" ]]; then
+    find "$BUNDLE_DIR/macos" -maxdepth 1 -name '*.app' -exec rm -rf {} +
+  fi
+  if [[ -d "$BUNDLE_DIR/dmg" ]]; then
+    find "$BUNDLE_DIR/dmg" -maxdepth 1 \( -name '* [0-9].dmg' -o -name '* [0-9].icns' -o -name '* [0-9].sh' \) -delete
+  fi
 else
   npm run desktop:build
 fi
 echo
 echo "Artifacts under: frontend/src-tauri/target/release/bundle/"
-echo "The .app contains Python/FastAPI. FFmpeg and FFprobe remain system dependencies."
+echo "Install from the DMG only — no standalone .app is kept in the repo tree."
+echo "The packaged app contains Python/FastAPI. FFmpeg and FFprobe remain system dependencies."

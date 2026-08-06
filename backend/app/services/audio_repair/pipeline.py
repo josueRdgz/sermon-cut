@@ -113,6 +113,8 @@ def mux_repaired_audio(
                 "-c:v",
                 "copy",
                 *audio_args,
+                "-movflags",
+                "+faststart",
                 "-shortest",
                 "-progress",
                 "pipe:1",
