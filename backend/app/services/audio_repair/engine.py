@@ -322,7 +322,10 @@ def _scan_quiet_runs(
                 start_frame=start,
                 end_frame=end,
             )
-            local_edge = max(1, edge_frames if duration_ms > short_ms else round(params.framerate * 0.002))
+            local_edge = max(
+                1,
+                edge_frames if duration_ms > short_ms else round(params.framerate * 0.002),
+            )
             left_edge = _context_peak(
                 reader,
                 start_frame=start - local_edge,

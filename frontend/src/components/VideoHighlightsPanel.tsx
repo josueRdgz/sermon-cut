@@ -340,9 +340,10 @@ export function VideoHighlightsPanel({
   useEffect(() => {
     const video = videoRef.current;
     if (!video) return;
+    const player = video;
 
     function onTimeUpdate() {
-      markActiveSegment(video.currentTime);
+      markActiveSegment(player.currentTime);
     }
 
     function onPlay() {
@@ -355,15 +356,15 @@ export function VideoHighlightsPanel({
       setPreviewing(false);
     }
 
-    video.addEventListener('timeupdate', onTimeUpdate);
-    video.addEventListener('play', onPlay);
-    video.addEventListener('pause', onPause);
-    video.addEventListener('ended', onPause);
+    player.addEventListener('timeupdate', onTimeUpdate);
+    player.addEventListener('play', onPlay);
+    player.addEventListener('pause', onPause);
+    player.addEventListener('ended', onPause);
     return () => {
-      video.removeEventListener('timeupdate', onTimeUpdate);
-      video.removeEventListener('play', onPlay);
-      video.removeEventListener('pause', onPause);
-      video.removeEventListener('ended', onPause);
+      player.removeEventListener('timeupdate', onTimeUpdate);
+      player.removeEventListener('play', onPlay);
+      player.removeEventListener('pause', onPause);
+      player.removeEventListener('ended', onPause);
     };
   }, [markActiveSegment, previewSrc]);
 
