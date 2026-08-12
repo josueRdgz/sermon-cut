@@ -8,6 +8,9 @@ export let API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? '';
 /** Default request timeout so hung backends never leave the UI waiting forever. */
 export const DEFAULT_FETCH_TIMEOUT_MS = 30_000;
 
+/** AI / long background jobs (Highlights, análisis) exceed the default 30s easily. */
+export const LONG_FETCH_TIMEOUT_MS = 180_000;
+
 /** Resolve API origin when running inside the Tauri desktop shell. */
 export async function prepareApiBaseUrl(): Promise<void> {
   if (API_BASE_URL) return;

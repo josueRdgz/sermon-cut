@@ -79,7 +79,7 @@ class Settings(BaseSettings):
     ai_provider: str = "auto"
     gemini_api_key: str | None = None
     gemini_model: str = "gemini-2.5-flash"
-    gemini_timeout_seconds: float = 90.0
+    gemini_timeout_seconds: float = 180.0
     gemini_max_attempts: int = 3
     ai_chunk_char_limit: int = 48_000
     # Editorial pacing: prefer long, continuous source windows over rapid cuts.

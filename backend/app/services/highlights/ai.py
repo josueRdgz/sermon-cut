@@ -8,19 +8,22 @@ import time
 from dataclasses import dataclass
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from app.core.config import Settings, get_settings
 from app.core.exceptions import AppError, ValidationAppError
+from app.services.ai.gemini_schema import serving_json_schema
 from app.services.ai.schemas import TranscriptSegmentInput
 from app.services.analysis.validate import normalize_text
+from app.services.highlights.salience import compact_transcript_lines as _compact_transcript_lines
 
 logger = logging.getLogger(__name__)
 _RETRYABLE = {408, 429, 500, 502, 503, 504}
 
 
 class _Strict(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    # Ignore unknown keys from Gemini after the serving schema was simplified.
+    model_config = ConfigDict(extra="ignore")
 
 
 class AITitles(_Strict):
@@ -31,6 +34,76 @@ class AITitles(_Strict):
     search_focused: str = Field(min_length=1, max_length=300)
 
 
+_HIGHLIGHT_CATEGORIES = (
+    "hook",
+    "theme",
+    "biblical",
+    "application",
+    "illustration",
+    "conclusion",
+)
+_CATEGORY_ALIASES = {
+    "hook": "hook",
+    "gancho": "hook",
+    "opening": "hook",
+    "intro": "hook",
+    "introduction": "hook",
+    "theme": "theme",
+    "tema": "theme",
+    "topic": "theme",
+    "biblical": "biblical",
+    "doctrinal": "biblical",
+    "development": "biblical",
+    "desarrollobiblico": "biblical",
+    "desarrollodoctrinal": "biblical",
+    "biblicaldoctrinal": "biblical",
+    "biblicaldoctrinaldevelopment": "biblical",
+    "application": "application",
+    "aplicacion": "application",
+    "apply": "application",
+    "illustration": "illustration",
+    "ilustracion": "illustration",
+    "example": "illustration",
+    "story": "illustration",
+    "historia": "illustration",
+    "conclusion": "conclusion",
+    "cierre": "conclusion",
+    "closing": "conclusion",
+    "close": "conclusion",
+    "outro": "conclusion",
+}
+
+
+def _fold_ascii(value: str) -> str:
+    table = str.maketrans("áéíóúüñÁÉÍÓÚÜÑ", "aeiouunAEIOUUN")
+    return value.translate(table)
+
+
+def _normalize_category(value: str) -> str:
+    raw = _fold_ascii(value).strip().lower()
+    compact = "".join(character for character in raw if character.isalnum())
+    if raw in _HIGHLIGHT_CATEGORIES:
+        return raw
+    if compact in _CATEGORY_ALIASES:
+        return _CATEGORY_ALIASES[compact]
+    for canonical in _HIGHLIGHT_CATEGORIES:
+        if canonical in compact:
+            return canonical
+    raise ValueError(
+        f"category must be one of {', '.join(_HIGHLIGHT_CATEGORIES)} (got {value!r})"
+    )
+
+
+def _normalize_score(value: float) -> float:
+    if 0.0 <= value <= 1.0:
+        return float(value)
+    if 1.0 < value <= 10.0:
+        return round(value / 10.0, 4)
+    if 10.0 < value <= 100.0:
+        return round(value / 100.0, 4)
+    raise ValueError("score must be between 0 and 1 (or 0–10 / 0–100)")
+
+
 class AIHighlightSegment(_Strict):
     start: float = Field(ge=0)
     end: float = Field(gt=0)
@@ -38,6 +111,16 @@ class AIHighlightSegment(_Strict):
     reason: str = Field(min_length=1, max_length=1000)
     score: float = Field(ge=0, le=1)
     category: str = Field(pattern="^(hook|theme|biblical|application|illustration|conclusion)$")
+
+    @field_validator("score", mode="before")
+    @classmethod
+    def coerce_score(cls, value: object) -> float:
+        return _normalize_score(float(value))  # type: ignore[arg-type]
+
+    @field_validator("category", mode="before")
+    @classmethod
+    def coerce_category(cls, value: object) -> str:
+        return _normalize_category(str(value))
 
     @model_validator(mode="after")
     def validate_range(self) -> AIHighlightSegment:
@@ -155,8 +238,8 @@ class HighlightProvider:
                     config={
                         "system_instruction": _SYSTEM_PROMPT,
                         "response_mime_type": "application/json",
-                        "response_json_schema": HighlightAIResponse.model_json_schema(),
-                        "temperature": 0.15,
+                        "response_json_schema": serving_json_schema(HighlightAIResponse),
+                        "temperature": 0.28,
                     },
                 )
                 text = getattr(raw, "text", None)
@@ -267,6 +350,11 @@ def validate_highlight_response(
             "La selección debe incluir un gancho y una conclusión.",
             code="highlight_structure_incomplete",
         )
+    if "application" not in categories:
+        raise ValidationAppError(
+            "La selección debe incluir al menos una aplicación concreta.",
+            code="highlight_application_missing",
+        )
     return response.model_copy(update={"highlights": adjusted})
 
 
@@ -304,37 +392,79 @@ def _build_prompt(
     target_duration_seconds: int,
     editorial_style: str,
 ) -> str:
+    style_guide = _STYLE_GUIDANCE.get(editorial_style, _STYLE_GUIDANCE["balanced"])
     lines = [
-        "Crea una edición horizontal coherente de Video Highlights.",
+        "Crea una edición horizontal de Video Highlights que alguien querría volver a ver.",
         f"Título del proyecto: {project_title}",
         f"Predicador: {preacher_name or 'No indicado'}",
         f"Referencia registrada: {bible_reference or 'No indicada'}",
         f"Intervalo confirmado: {sermon_start:.2f}-{sermon_end:.2f}s",
         f"Duración objetivo aproximada: {target_duration_seconds}s",
         f"Orientación editorial: {editorial_style}",
+        style_guide,
         "",
-        "Conserva preferentemente el orden cronológico. Estructura el resultado como "
-        "gancho, tema, desarrollo bíblico/doctrinal, aplicación y conclusión. "
-        "Selecciona ideas completas, con respiración natural y contexto suficiente.",
-        "No selecciones saludos, anuncios, repeticiones, pausas, errores ni oraciones "
-        "extensas sin contenido expositivo. No alteres el sentido doctrinal.",
+        "Prioridad de selección, en este orden:",
+        "1. Frases memorables: una idea que se podría citar, un contraste o una pregunta fuerte.",
+        "2. Aplicaciones concretas: qué cree, decide o hace el oyente esta semana.",
+        "3. El texto o argumento bíblico que sostiene esa frase, no toda la exposición.",
+        "4. Un gancho al inicio y un cierre que recoja la tesis, no un saludo ni un amén vacío.",
+        "Si hay que recortar para caber en la duración, recorta relleno expositivo, "
+        "repeticiones y transiciones. Nunca recortes la mejor frase ni la mejor aplicación.",
+        "Cada fragmento debe poder entenderse fuera de contexto, con respiración natural, "
+        "sin cortar a mitad de oración. Incluye al menos un highlight con category=application.",
+        "No selecciones saludos, anuncios, ofrendas, repeticiones, pausas, errores ni oraciones "
+        "extensas sin contenido. No alteres el sentido doctrinal.",
+        "Las líneas marcadas con ★ son candidatas fuertes: prefierelas si caben.",
         "Cada transcript debe copiar literalmente texto disponible dentro del intervalo. "
         "Los títulos, descripción, miniatura, hashtags y palabras clave deben estar "
         "respaldados por el contenido. Entrega cinco títulos con las categorías del esquema.",
+        "score es un número entre 0 y 1 (no 0–10). category debe ser exactamente uno de: "
+        "hook, theme, biblical, application, illustration, conclusion (minúsculas).",
         "",
         "TRANSCRIPCIÓN SINCRONIZADA:",
     ]
-    lines.extend(f"[{item.start:.2f}-{item.end:.2f}] {item.text.strip()}" for item in segments)
+    lines.extend(_compact_transcript_lines(segments, char_budget=_PROMPT_CHAR_BUDGET))
     return "\n".join(lines)
 
 
+_PROMPT_CHAR_BUDGET = 40_000
+
+_STYLE_GUIDANCE = {
+    "balanced": (
+        "Equilibrio: gancho memorable, tesis, el mejor pulso bíblico, al menos una "
+        "aplicación concreta y un cierre que la gente recuerde."
+    ),
+    "doctrinal": (
+        "Prioriza fidelidad al texto y al argumento, pero no entregues solo exposición: "
+        "incluye la aplicación pastoral de esa doctrina."
+    ),
+    "emotional": (
+        "Prioriza frases que tocan conciencia, esperanza o consuelo, y conviértelas en "
+        "aplicación concreta. Evita emoción sin tesis."
+    ),
+    "evangelistic": (
+        "Prioriza el problema humano, la frase más clara del evangelio y una invitación "
+        "o aplicación para responder a Cristo."
+    ),
+    "educational": (
+        "Prioriza la idea enseñable y una aplicación práctica para la semana, no un "
+        "resumen completo de todos los puntos."
+    ),
+    "brief": (
+        "3 a 5 bloques. Quédate solo con la mejor frase, la mejor aplicación y un cierre. "
+        "Corta desarrollo de relleno."
+    ),
+}
+
+
 _SYSTEM_PROMPT = """\
-Actúa como editor senior de contenido cristiano para YouTube. Tu prioridad es la \
-fidelidad al mensaje original, la coherencia narrativa y la precisión doctrinal. \
-No inventes palabras, referencias bíblicas, temas o promesas. Devuelve únicamente \
-JSON válido conforme al esquema estricto. Los tiempos siempre pertenecen al video \
-fuente y los fragmentos deben conservar orden cronológico salvo una razón editorial \
-indispensable que no cambie el sentido.
+Actúa como editor senior de contenido cristiano para YouTube. Tu trabajo no es \
+resumir el sermón entero: es extraer las mejores frases, la tesis y las \
+aplicaciones que un oyente citaría o pondría en práctica. Sé fiel al mensaje \
+original y a la doctrina; no inventes palabras, referencias bíblicas, temas o \
+promesas. Devuelve únicamente JSON válido conforme al esquema estricto. Los \
+tiempos siempre pertenecen al video fuente y los fragmentos deben conservar \
+orden cronológico salvo una razón editorial indispensable que no cambie el sentido.
 """
 
 
@@ -343,7 +473,11 @@ def _retryable(exc: Exception) -> bool:
     if isinstance(status, int) and status in _RETRYABLE:
         return True
     value = f"{type(exc).__name__} {exc}".lower()
-    return any(marker in value for marker in ("timeout", "429", "500", "503", "unavailable"))
+    if any(marker in value for marker in ("invalid_argument", "too many states")):
+        return False
+    if any(marker in value for marker in ("timeout", "timed out", "deadline", "cancelled")):
+        return False
+    return any(marker in value for marker in ("429", "500", "503", "unavailable"))
 
 
 def _optional_int(value: object) -> int | None:

@@ -5,14 +5,21 @@ import type {
   HighlightSegment,
   SubtitleDelivery,
 } from '../types/highlight';
-import { API_BASE_URL, apiGet, apiJson } from './client';
+import { API_BASE_URL, LONG_FETCH_TIMEOUT_MS, apiGet, apiJson } from './client';
 
 export function getHighlightPlan(projectId: string): Promise<HighlightPlan> {
   return apiGet(`/api/projects/${projectId}/highlights`);
 }
 
 export function detectSermon(projectId: string): Promise<HighlightPlan> {
-  return apiJson(`/api/projects/${projectId}/highlights/detect`, 'POST', {});
+  return apiJson(
+    `/api/projects/${projectId}/highlights/detect`,
+    'POST',
+    {},
+    {
+      timeoutMs: LONG_FETCH_TIMEOUT_MS,
+    },
+  );
 }
 
 export function updateSermonRange(
@@ -31,18 +38,30 @@ export function startHighlightAnalysis(
   targetDurationSeconds: number,
   editorialStyle: EditorialStyle,
 ): Promise<HighlightAnalysisJob> {
-  return apiJson(`/api/projects/${projectId}/highlights/analyze`, 'POST', {
-    target_duration_seconds: targetDurationSeconds,
-    editorial_style: editorialStyle,
-  });
+  return apiJson(
+    `/api/projects/${projectId}/highlights/analyze`,
+    'POST',
+    {
+      target_duration_seconds: targetDurationSeconds,
+      editorial_style: editorialStyle,
+    },
+    { timeoutMs: LONG_FETCH_TIMEOUT_MS },
+  );
 }
 
 export function getHighlightAnalysisJob(jobId: string): Promise<HighlightAnalysisJob> {
-  return apiGet(`/api/highlight-analysis-jobs/${jobId}`);
+  return apiGet(`/api/highlight-analysis-jobs/${jobId}`, LONG_FETCH_TIMEOUT_MS);
 }
 
 export function cancelHighlightAnalysis(jobId: string): Promise<HighlightAnalysisJob> {
-  return apiJson(`/api/highlight-analysis-jobs/${jobId}/cancel`, 'POST', {});
+  return apiJson(
+    `/api/highlight-analysis-jobs/${jobId}/cancel`,
+    'POST',
+    {},
+    {
+      timeoutMs: LONG_FETCH_TIMEOUT_MS,
+    },
+  );
 }
 
 export function saveHighlightReview(
@@ -85,6 +104,23 @@ export function renderHighlight(
   },
 ): Promise<{ render_job_id: string; srt_url: string | null }> {
   return apiJson(`/api/projects/${projectId}/highlights/render`, 'POST', payload);
+}
+
+export function prepareHighlightPreview(
+  projectId: string,
+  clips: Array<{ start: number; end: number }>,
+  signal?: AbortSignal,
+): Promise<{ ready: boolean; identity: string }> {
+  return apiJson(
+    `/api/projects/${projectId}/highlights/preview`,
+    'POST',
+    { clips },
+    { timeoutMs: LONG_FETCH_TIMEOUT_MS, signal },
+  );
+}
+
+export function highlightPreviewUrl(projectId: string, identity: string): string {
+  return `${API_BASE_URL}/api/projects/${projectId}/highlights/preview?v=${encodeURIComponent(identity)}`;
 }
 
 export function highlightSrtUrl(projectId: string): string {

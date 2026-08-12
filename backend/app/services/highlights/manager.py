@@ -145,7 +145,7 @@ class HighlightAnalysisManager:
         return job
 
     def _run(self, job_id: UUID) -> None:
-        db = self._session_factory()
+        db: Session | None = self._session_factory()
         try:
             job = db.get(HighlightAnalysisJob, job_id)
             if job is None:
@@ -165,7 +165,16 @@ class HighlightAnalysisManager:
             transcript = transcripts_service.get_transcript_for_project(db, job.project_id)
             if project is None or plan is None:
                 raise NotFoundError("El proyecto de Highlights ya no existe.")
-            inputs = transcript_to_ai_inputs(transcript)
+            analyze_kwargs = {
+                "project_title": project.title,
+                "preacher_name": project.preacher_name,
+                "bible_reference": project.bible_reference,
+                "segments": transcript_to_ai_inputs(transcript),
+                "sermon_start": float(plan.sermon_start_seconds),
+                "sermon_end": float(plan.sermon_end_seconds),
+                "target_duration_seconds": job.target_duration_seconds,
+                "editorial_style": job.editorial_style,
+            }
             if event.is_set():
                 self._cancelled(db, job)
                 return
@@ -173,16 +182,22 @@ class HighlightAnalysisManager:
             job.stage = "semantic_analysis"
             job.progress = 0.22
             db.commit()
-            result = self._provider_factory().analyze(
-                project_title=project.title,
-                preacher_name=project.preacher_name,
-                bible_reference=project.bible_reference,
-                segments=inputs,
-                sermon_start=float(plan.sermon_start_seconds),
-                sermon_end=float(plan.sermon_end_seconds),
-                target_duration_seconds=job.target_duration_seconds,
-                editorial_style=job.editorial_style,
+            # Release SQLite while Gemini runs so the UI can poll progress.
+            db.close()
+            db = None
+
+            result = self._provider_factory().analyze(**analyze_kwargs)
+
+            db = self._session_factory()
+            job = db.get(HighlightAnalysisJob, job_id)
+            project = db.get(Project, job.project_id) if job is not None else None
+            plan = (
+                db.get(highlights_service.HighlightPlan, job.plan_id)
+                if job is not None
+                else None
             )
+            if job is None or project is None or plan is None:
+                raise NotFoundError("El proyecto de Highlights ya no existe.")
             if event.is_set():
                 self._cancelled(db, job)
                 return
@@ -207,7 +222,10 @@ class HighlightAnalysisManager:
             project.status = ProjectStatus.editing
             db.commit()
         except Exception as exc:  # noqa: BLE001
-            db.rollback()
+            if db is None:
+                db = self._session_factory()
+            else:
+                db.rollback()
             job = db.get(HighlightAnalysisJob, job_id)
             if job is not None:
                 job.status = HighlightAnalysisStatus.failed
@@ -223,7 +241,8 @@ class HighlightAnalysisManager:
             with self._lock:
                 self._events.pop(job_id, None)
                 self._futures.pop(job_id, None)
-            db.close()
+            if db is not None:
+                db.close()
 
     def _event(self, job_id: UUID) -> threading.Event:
         with self._lock:

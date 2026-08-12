@@ -1,7 +1,7 @@
 import { render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { getHighlightPlan } from '../api/highlights';
+import { getHighlightPlan, prepareHighlightPreview } from '../api/highlights';
 import type { HighlightPlan } from '../types/highlight';
 import { VideoHighlightsPanel } from './VideoHighlightsPanel';
 
@@ -10,7 +10,12 @@ vi.mock('../api/highlights', () => ({
   detectSermon: vi.fn(),
   getHighlightAnalysisJob: vi.fn(),
   getHighlightPlan: vi.fn(),
+  highlightPreviewUrl: vi.fn(
+    (projectId: string, identity: string) =>
+      `/api/projects/${projectId}/highlights/preview?v=${identity}`,
+  ),
   highlightSrtUrl: vi.fn(),
+  prepareHighlightPreview: vi.fn(),
   renderHighlight: vi.fn(),
   saveHighlightMetadata: vi.fn(),
   saveHighlightReview: vi.fn(),
@@ -22,6 +27,14 @@ vi.mock('../api/renders', () => ({
   cancelRenderJob: vi.fn(),
   getRenderJob: vi.fn(),
   renderOutputUrl: vi.fn(),
+}));
+
+vi.mock('./BackgroundMusicPanel', () => ({
+  BackgroundMusicPanel: () => null,
+}));
+
+vi.mock('./EndCardPanel', () => ({
+  EndCardPanel: () => null,
 }));
 
 const PLAN: HighlightPlan = {
@@ -66,5 +79,48 @@ describe('VideoHighlightsPanel', () => {
     expect(screen.getByRole('heading', { name: 'Intervalo de la predicación' })).toBeVisible();
     expect(screen.getByDisplayValue('600')).toBeVisible();
     expect(screen.getByRole('option', { name: '5 minutos' })).toBeInTheDocument();
+  });
+
+  it('prepares an assembled preview before enabling play', async () => {
+    vi.mocked(getHighlightPlan).mockResolvedValue({
+      ...PLAN,
+      segments: [
+        {
+          id: '33333333-3333-3333-3333-333333333333',
+          order: 0,
+          start: 10,
+          end: 40,
+          duration: 30,
+          transcript: 'La gracia de Dios nos salva.',
+          reason: 'Gancho',
+          score: 0.9,
+          category: 'hook',
+          transition_type: 'hard_cut',
+          transition_duration_ms: 0,
+        },
+      ],
+      estimated_duration_seconds: 30,
+    });
+    vi.mocked(prepareHighlightPreview).mockResolvedValue({ ready: true, identity: 'abcd1234' });
+
+    render(
+      <VideoHighlightsPanel
+        projectId={PLAN.project_id}
+        hasVideo
+        hasCover={false}
+        videoDuration={3600}
+        transcriptRevision={0}
+      />,
+    );
+
+    await waitFor(() =>
+      expect(prepareHighlightPreview).toHaveBeenCalledWith(
+        PLAN.project_id,
+        [{ start: 10, end: 40 }],
+        expect.any(AbortSignal),
+      ),
+    );
+    expect(await screen.findByRole('button', { name: 'Reproducir Highlights' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Reproducir' })).toBeEnabled();
   });
 });

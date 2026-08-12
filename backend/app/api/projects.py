@@ -20,6 +20,7 @@ from app.schemas.project import (
 )
 from app.services import projects as projects_service
 from app.services import storage
+from app.services.media_audio import preview_audio_path
 
 router = APIRouter(prefix="/projects", tags=["projects"])
 
@@ -157,6 +158,25 @@ def stream_project_video(project_id: UUID, db: Session = Depends(get_db)) -> Fil
         path,
         media_type=media_type,
         filename=project.video_filename,
+        content_disposition_type="inline",
+    )
+
+
+@router.get("/{project_id}/media/audio")
+def stream_project_audio(project_id: UUID, db: Session = Depends(get_db)) -> FileResponse:
+    """Stream a dedicated AAC/WAV track for HTML5 ``<audio>`` preview."""
+    project = projects_service.get_project(db, project_id)
+    path = preview_audio_path(project.id, project.video_filename or "")
+    media_types = {
+        ".wav": "audio/wav",
+        ".m4a": "audio/mp4",
+        ".aac": "audio/aac",
+        ".mp3": "audio/mpeg",
+    }
+    return FileResponse(
+        path,
+        media_type=media_types.get(path.suffix.lower(), "audio/mp4"),
+        filename=path.name,
         content_disposition_type="inline",
     )
 

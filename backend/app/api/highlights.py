@@ -5,7 +5,7 @@ from __future__ import annotations
 from uuid import UUID
 
 from fastapi import APIRouter, Depends
-from fastapi.responses import PlainTextResponse
+from fastapi.responses import FileResponse, PlainTextResponse
 from sqlalchemy.orm import Session
 
 from app.core.exceptions import NotFoundError, ValidationAppError
@@ -19,16 +19,24 @@ from app.schemas.highlight import (
     HighlightAnalyzeRequest,
     HighlightExportRequest,
     HighlightPlanResponse,
+    HighlightPreviewRequest,
+    HighlightPreviewResponse,
     HighlightRenderResponse,
     HighlightReviewUpdate,
     SermonRangeUpdate,
 )
+from app.services import projects as projects_service
 from app.services.export_profiles.service import default_highlight_profile
 from app.services.highlights import service
 from app.services.highlights.manager import (
     HighlightAnalysisManager,
     get_highlight_analysis_manager,
     job_to_response,
+)
+from app.services.highlights.preview import (
+    clip_identity,
+    current_preview_path,
+    ensure_highlights_preview,
 )
 from app.services.render.manager import RenderManager, get_render_manager
 from app.services.subtitles.srt import render_srt_for_reel
@@ -152,6 +160,37 @@ def update_highlight_metadata(
     db: Session = Depends(get_db),
 ) -> HighlightPlanResponse:
     return service.to_response(db, service.update_metadata(db, project_id, payload))
+
+
+@router.post(
+    "/projects/{project_id}/highlights/preview",
+    response_model=HighlightPreviewResponse,
+)
+def prepare_highlight_preview(
+    project_id: UUID,
+    payload: HighlightPreviewRequest,
+    db: Session = Depends(get_db),
+) -> HighlightPreviewResponse:
+    project = projects_service.get_project(db, project_id)
+    if not project.video_filename:
+        raise NotFoundError("Project has no video.", code="video_not_found")
+    video_filename = project.video_filename
+    clips = [(item.start, item.end) for item in payload.clips]
+    db.close()
+    ensure_highlights_preview(project_id, video_filename, clips)
+    return HighlightPreviewResponse(ready=True, identity=clip_identity(clips))
+
+
+@router.get("/projects/{project_id}/highlights/preview")
+def get_highlight_preview(project_id: UUID) -> FileResponse:
+    path = current_preview_path(project_id)
+    return FileResponse(
+        path,
+        media_type="video/mp4",
+        filename="highlights-preview.mp4",
+        content_disposition_type="inline",
+        headers={"Cache-Control": "private, max-age=0, must-revalidate"},
+    )
 
 
 @router.get("/projects/{project_id}/highlights/subtitles.srt")

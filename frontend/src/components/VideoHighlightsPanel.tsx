@@ -1,18 +1,20 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import {
   cancelHighlightAnalysis,
   detectSermon,
   getHighlightAnalysisJob,
   getHighlightPlan,
+  highlightPreviewUrl,
   highlightSrtUrl,
+  prepareHighlightPreview,
   renderHighlight,
   saveHighlightMetadata,
   saveHighlightReview,
   startHighlightAnalysis,
   updateSermonRange,
 } from '../api/highlights';
-import { API_BASE_URL, ApiError } from '../api/client';
+import { ApiError } from '../api/client';
 import { cancelRenderJob, getRenderJob, renderOutputUrl, revealRenderOutput } from '../api/renders';
 import type {
   EditorialStyle,
@@ -24,6 +26,12 @@ import type {
 } from '../types/highlight';
 import type { RenderJob } from '../types/render';
 import { formatDuration } from '../utils/format';
+import { highlightPullQuote } from '../utils/highlightQuote';
+import {
+  highlightAssembledDuration,
+  highlightPreviewIdentity,
+  resolveHighlightPreviewSeek,
+} from '../utils/highlightPreview';
 import { ProgressBar } from './ProgressBar';
 import { BackgroundMusicPanel } from './BackgroundMusicPanel';
 import { EndCardPanel } from './EndCardPanel';
@@ -53,6 +61,14 @@ const STYLE_LABELS: Record<EditorialStyle, string> = {
   educational: 'Más educativo',
   brief: 'Más breve',
 };
+const STYLE_HELP: Record<EditorialStyle, string> = {
+  balanced: 'Gancho, mejor frase, pulso bíblico, aplicación concreta y cierre.',
+  doctrinal: 'Texto y argumento fieles, más la aplicación pastoral de esa doctrina.',
+  emotional: 'Frases que tocan conciencia o esperanza, convertidas en aplicación.',
+  evangelistic: 'Problema humano, frase clara del evangelio e invitación.',
+  educational: 'Una idea enseñable y una práctica para esta semana.',
+  brief: 'Solo la mejor frase, la mejor aplicación y un cierre.',
+};
 const CATEGORY_LABELS: Record<string, string> = {
   hook: 'Gancho',
   theme: 'Tema',
@@ -65,6 +81,18 @@ const CATEGORY_LABELS: Record<string, string> = {
 const wait = (milliseconds: number) =>
   new Promise<void>((resolve) => window.setTimeout(resolve, milliseconds));
 
+function setMediaTime(media: HTMLMediaElement, seconds: number): boolean {
+  if (media.readyState < HTMLMediaElement.HAVE_METADATA) return false;
+  const duration = Number.isFinite(media.duration) && media.duration > 0 ? media.duration : null;
+  const target = Math.max(0, duration == null ? seconds : Math.min(seconds, duration));
+  try {
+    media.currentTime = target;
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export function VideoHighlightsPanel({
   projectId,
   hasVideo,
@@ -73,6 +101,8 @@ export function VideoHighlightsPanel({
   transcriptRevision,
 }: Props) {
   const videoRef = useRef<HTMLVideoElement>(null);
+  const previewingRef = useRef(false);
+  const previewIndexRef = useRef(0);
   const mounted = useRef(true);
   const [plan, setPlan] = useState<HighlightPlan | null>(null);
   const [segments, setSegments] = useState<HighlightSegment[]>([]);
@@ -92,6 +122,11 @@ export function VideoHighlightsPanel({
   const [busy, setBusy] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [previewing, setPreviewing] = useState(false);
+  const [previewIndex, setPreviewIndex] = useState(0);
+  const [previewOutputTime, setPreviewOutputTime] = useState(0);
+  const [previewSrc, setPreviewSrc] = useState<string | null>(null);
+  const [previewPreparing, setPreviewPreparing] = useState(false);
 
   const applyPlan = useCallback((next: HighlightPlan) => {
     setPlan(next);
@@ -168,7 +203,14 @@ export function VideoHighlightsPanel({
       }
       if (job.status === 'completed' && job.plan) {
         applyPlan(job.plan);
-        setMessage('Selección narrativa y metadatos generados. Revise cada fragmento.');
+        const applications = job.plan.segments.filter(
+          (item) => item.category === 'application',
+        ).length;
+        setMessage(
+          applications
+            ? `Selección lista: ${job.plan.segments.length} fragmentos, ${applications} aplicación${applications === 1 ? '' : 'es'}. Revise las frases destacadas.`
+            : 'Selección generada. Revise cada fragmento y agregue una aplicación si falta.',
+        );
       } else if (job.status === 'failed') {
         setError(job.error_message ?? 'El análisis no se pudo completar.');
       }
@@ -204,19 +246,126 @@ export function VideoHighlightsPanel({
     });
   }
 
-  function previewSegment(segment: HighlightSegment) {
+  function stopPreview() {
+    previewingRef.current = false;
+    setPreviewing(false);
+    videoRef.current?.pause();
+  }
+
+  const markActiveSegment = useCallback(
+    (outputSeconds: number) => {
+      const target = resolveHighlightPreviewSeek(segments, outputSeconds);
+      if (!target) return;
+      if (previewIndexRef.current !== target.segmentIndex) {
+        previewIndexRef.current = target.segmentIndex;
+        setPreviewIndex(target.segmentIndex);
+      }
+      setPreviewOutputTime(target.outputTime);
+    },
+    [segments],
+  );
+
+  function seekPreview(outputSeconds: number) {
+    const target = resolveHighlightPreviewSeek(segments, outputSeconds);
+    if (!target) return;
+    markActiveSegment(target.outputTime);
+    const video = videoRef.current;
+    if (video) setMediaTime(video, target.outputTime);
+  }
+
+  function startPreview(fromOutput = previewOutputTime) {
+    const video = videoRef.current;
+    if (!video || !previewSrc || segments.length === 0) return;
+    const total = highlightAssembledDuration(segments);
+    const startAt = fromOutput >= total - 0.05 ? 0 : fromOutput;
+    const begin = () => {
+      seekPreview(startAt);
+      previewingRef.current = true;
+      setPreviewing(true);
+      void video.play().catch((reason: unknown) => {
+        stopPreview();
+        setError(reason instanceof Error ? reason.message : 'El navegador bloqueó la reproducción');
+      });
+    };
+    if (video.readyState >= HTMLMediaElement.HAVE_METADATA) begin();
+    else video.addEventListener('loadedmetadata', begin, { once: true });
+  }
+
+  function playFromSegment(index: number) {
+    const output = segments
+      .slice(0, index)
+      .reduce((sum, item) => sum + Math.max(0, item.end - item.start), 0);
+    startPreview(output);
+  }
+
+  const assembledDuration = useMemo(() => highlightAssembledDuration(segments), [segments]);
+  const previewIdentity = useMemo(() => highlightPreviewIdentity(segments), [segments]);
+  const applicationCount = useMemo(
+    () => segments.filter((item) => item.category === 'application').length,
+    [segments],
+  );
+
+  useEffect(() => {
+    if (segments.length === 0) {
+      setPreviewSrc(null);
+      setPreviewPreparing(false);
+      return;
+    }
+    const controller = new AbortController();
+    setPreviewPreparing(true);
+    setPreviewSrc(null);
+    previewingRef.current = false;
+    setPreviewing(false);
+    previewIndexRef.current = 0;
+    setPreviewIndex(0);
+    setPreviewOutputTime(0);
+    const clips = segments.map((item) => ({ start: item.start, end: item.end }));
+    prepareHighlightPreview(projectId, clips, controller.signal)
+      .then((result) => {
+        if (controller.signal.aborted) return;
+        setPreviewSrc(highlightPreviewUrl(projectId, result.identity));
+        setError(null);
+      })
+      .catch((reason: unknown) => {
+        if (controller.signal.aborted) return;
+        setPreviewSrc(null);
+        setError(errorText(reason));
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setPreviewPreparing(false);
+      });
+    return () => controller.abort();
+  }, [previewIdentity, projectId]); // eslint-disable-line react-hooks/exhaustive-deps -- clip times/order only
+
+  useEffect(() => {
     const video = videoRef.current;
     if (!video) return;
-    video.currentTime = segment.start;
-    void video.play();
-    const stop = () => {
-      if (video.currentTime >= segment.end) {
-        video.pause();
-        video.removeEventListener('timeupdate', stop);
-      }
+
+    function onTimeUpdate() {
+      markActiveSegment(video.currentTime);
+    }
+
+    function onPlay() {
+      previewingRef.current = true;
+      setPreviewing(true);
+    }
+
+    function onPause() {
+      previewingRef.current = false;
+      setPreviewing(false);
+    }
+
+    video.addEventListener('timeupdate', onTimeUpdate);
+    video.addEventListener('play', onPlay);
+    video.addEventListener('pause', onPause);
+    video.addEventListener('ended', onPause);
+    return () => {
+      video.removeEventListener('timeupdate', onTimeUpdate);
+      video.removeEventListener('play', onPlay);
+      video.removeEventListener('pause', onPause);
+      video.removeEventListener('ended', onPause);
     };
-    video.addEventListener('timeupdate', stop);
-  }
+  }, [markActiveSegment, previewSrc]);
 
   async function handleSaveReview() {
     setBusy('review');
@@ -394,6 +543,7 @@ export function VideoHighlightsPanel({
             </select>
           </label>
         </div>
+        <p className="muted">{STYLE_HELP[style]}</p>
         <button
           className="button"
           type="button"
@@ -436,36 +586,92 @@ export function VideoHighlightsPanel({
           <p className="eyebrow">Etapa 6 de 10 · Revisión editorial</p>
           <h2>Fragmentos seleccionados</h2>
           <p>
-            {segments.length} fragmentos · duración estimada{' '}
-            <strong>
-              {formatDuration(segments.reduce((sum, item) => sum + item.end - item.start, 0))}
-            </strong>
+            {segments.length} fragmentos · {applicationCount} aplicación
+            {applicationCount === 1 ? '' : 'es'} · duración estimada{' '}
+            <strong>{formatDuration(assembledDuration)}</strong>
           </p>
-          <video
-            ref={videoRef}
-            className="media-player"
-            controls
-            preload="metadata"
-            src={`${API_BASE_URL}/api/projects/${projectId}/media/video`}
-          />
+          <div className="reel-preview">
+            {previewSrc ? (
+              <video
+                key={previewSrc}
+                ref={videoRef}
+                className="media-player"
+                controls
+                disablePictureInPicture
+                playsInline
+                preload="metadata"
+                src={previewSrc}
+              />
+            ) : (
+              <div className="media-player media-player--placeholder" aria-busy={previewPreparing}>
+                {previewPreparing
+                  ? 'Preparando el preview con imagen y audio…'
+                  : 'El preview de Highlights no está listo.'}
+              </div>
+            )}
+            <div className="reel-preview__controls">
+              <button
+                type="button"
+                className="button button--secondary button--inline"
+                disabled={!previewSrc || previewPreparing}
+                onClick={() => (previewing ? stopPreview() : startPreview())}
+              >
+                {previewPreparing ? 'Preparando…' : previewing ? 'Pausar' : 'Reproducir Highlights'}
+              </button>
+              <input
+                type="range"
+                min={0}
+                max={Math.max(assembledDuration, 0.01)}
+                step={0.05}
+                value={Math.min(previewOutputTime, assembledDuration)}
+                aria-label="Posición en el video de Highlights"
+                disabled={!previewSrc}
+                onChange={(event) => seekPreview(Number(event.target.value))}
+              />
+              <span className="reel-preview__time">
+                {formatDuration(previewOutputTime)} / {formatDuration(assembledDuration)}
+              </span>
+            </div>
+            <p className="muted">
+              {previewPreparing
+                ? 'La primera vez puede tardar uno o dos minutos: se arma un MP4 corto solo con los fragmentos, con audio y seek.'
+                : 'Vista ensamblada: solo los fragmentos, en orden, con imagen y audio.'}
+              {segments[previewIndex]
+                ? ` Fragmento ${previewIndex + 1}: ${CATEGORY_LABELS[segments[previewIndex].category] ?? segments[previewIndex].category}.`
+                : ''}
+            </p>
+          </div>
           <div className="stack">
             {segments.map((segment, index) => (
-              <article className="card card--nested" key={segment.id || `segment-${index}`}>
+              <article
+                className={`card card--nested${previewIndex === index ? ' card--active' : ''}${segment.category === 'application' ? ' card--application' : ''}`}
+                key={segment.id || `segment-${index}`}
+              >
                 <div className="section-heading">
                   <div>
                     <p className="eyebrow">
                       {index + 1} · {CATEGORY_LABELS[segment.category] ?? segment.category}
+                      {segment.category === 'application' ? (
+                        <span className="badge badge--application">Aplicación</span>
+                      ) : null}
+                      {segment.score >= 0.85 ? (
+                        <span className="badge badge--quote">Frase fuerte</span>
+                      ) : null}
                     </p>
                     <strong>
                       {formatDuration(segment.end - segment.start)} · puntuación{' '}
                       {Math.round(segment.score * 100)}%
                     </strong>
+                    {segment.transcript.trim() ? (
+                      <p className="highlight-quote">“{highlightPullQuote(segment.transcript)}”</p>
+                    ) : null}
                   </div>
                   <div>
                     <button
                       type="button"
                       className="button button--secondary button--inline"
-                      onClick={() => previewSegment(segment)}
+                      disabled={!previewSrc || previewPreparing}
+                      onClick={() => playFromSegment(index)}
                     >
                       Reproducir
                     </button>

@@ -76,6 +76,26 @@ class ContentMetadataUpdate(StrictModel):
     keywords: list[str] | None = Field(default=None, max_length=20)
 
 
+class HighlightPreviewClip(StrictModel):
+    start: float = Field(ge=0)
+    end: float = Field(gt=0)
+
+    @model_validator(mode="after")
+    def validate_range(self) -> HighlightPreviewClip:
+        if self.end <= self.start:
+            raise ValueError("end must be greater than start")
+        return self
+
+
+class HighlightPreviewRequest(StrictModel):
+    clips: list[HighlightPreviewClip] = Field(min_length=1, max_length=40)
+
+
+class HighlightPreviewResponse(StrictModel):
+    ready: bool = True
+    identity: str
+
+
 class HighlightExportRequest(StrictModel):
     subtitle_delivery: SubtitleDelivery = SubtitleDelivery.burned
     normalize_loudness: bool = True

@@ -12,12 +12,14 @@ import pytest
 from app.core.exceptions import ValidationAppError
 from app.models.project import Project
 from app.models.transcript import Transcript, TranscriptSegment, TranscriptSource, TranscriptStatus
+from app.services.ai.gemini_schema import serving_json_schema
 from app.services.ai.schemas import TranscriptSegmentInput
 from app.services.highlights import service as highlight_service
 from app.services.highlights.ai import (
     AIHighlightSegment,
     AITitles,
     HighlightAIResponse,
+    _compact_transcript_lines,
     validate_highlight_response,
 )
 from app.services.highlights.detection import detect_sermon_range
@@ -133,6 +135,104 @@ def test_absence_of_expository_block_requires_manual_confirmation() -> None:
     result = detect_sermon_range(transcript, 900)
     assert result.requires_manual_range is True
     assert result.confidence < 0.68
+
+
+def test_validation_requires_application() -> None:
+    response = _ai_response()
+    transcript = [
+        TranscriptSegmentInput(
+            order=0,
+            start=0,
+            end=150,
+            text=" ".join(
+                [
+                    "La gracia de Dios nos salva y transforma nuestra vida completa.",
+                    "Somos salvos para buenas obras preparadas por Dios.",
+                    "Vivamos entonces con esperanza, gratitud y obediencia.",
+                ]
+            ),
+        )
+    ]
+    with pytest.raises(ValidationAppError) as caught:
+        validate_highlight_response(
+            response,
+            transcript=transcript,
+            sermon_start=0,
+            sermon_end=150,
+            target_duration_seconds=120,
+        )
+    assert caught.value.code == "highlight_application_missing"
+
+
+def test_compact_transcript_stays_within_budget() -> None:
+    segments = [
+        TranscriptSegmentInput(
+            order=index,
+            start=float(index),
+            end=float(index) + 0.8,
+            text=f"frase número {index} sobre la gracia de Dios",
+        )
+        for index in range(800)
+    ]
+    lines = _compact_transcript_lines(segments, char_budget=8_000)
+    assert sum(len(line) + 1 for line in lines) <= 8_200
+    assert lines[0].startswith("[0.00-")
+    assert "799" in lines[-1]
+
+
+def test_accepts_gemini_scores_and_category_aliases() -> None:
+    payload = _ai_response().model_dump()
+    payload["highlights"] = [
+        {
+            **payload["highlights"][0],
+            "score": 9,
+            "category": "Hook",
+        },
+        {
+            **payload["highlights"][1],
+            "score": 10,
+            "category": "Biblical/Doctrinal Development",
+        },
+        {
+            **payload["highlights"][2],
+            "score": 85,
+            "category": "Conclusion",
+        },
+    ]
+    parsed = HighlightAIResponse.model_validate(payload)
+    assert parsed.highlights[0].score == pytest.approx(0.9)
+    assert parsed.highlights[0].category == "hook"
+    assert parsed.highlights[1].score == pytest.approx(1.0)
+    assert parsed.highlights[1].category == "biblical"
+    assert parsed.highlights[2].score == pytest.approx(0.85)
+    assert parsed.highlights[2].category == "conclusion"
+
+
+def test_gemini_serving_schema_omits_stateful_constraints() -> None:
+    schema = serving_json_schema(HighlightAIResponse)
+    blob = json.dumps(schema)
+    forbidden = (
+        "minLength",
+        "maxLength",
+        "minItems",
+        "maxItems",
+        "minimum",
+        "maximum",
+        "exclusiveMinimum",
+        "pattern",
+    )
+    for key in forbidden:
+        assert f'"{key}"' not in blob
+    assert schema["type"] == "object"
+    properties = schema["properties"]
+    assert "highlights" in properties
+    assert "suggested_titles" in properties
+    # Field names must survive stripping of JSON Schema metadata keywords.
+    assert "description" in properties
+    assert properties["description"]["type"] == "string"
+    required = set(schema["required"])
+    assert required <= set(properties)
+    assert "description" in required
 
 
 def test_validation_rejects_invented_transcript() -> None:
@@ -338,3 +438,112 @@ def test_real_horizontal_render_preserves_source_frame_and_special_paths(
     stream = json.loads(probe.stdout)["streams"][0]
     assert stream == {"width": 640, "height": 360}
     assert output.is_file()
+
+
+def test_clip_identity_changes_with_order_and_bounds() -> None:
+    from app.services.highlights.preview import clip_identity
+
+    clips = [(10.0, 40.0), (80.0, 95.0)]
+    original = clip_identity(clips)
+    assert clip_identity(list(reversed(clips))) != original
+    assert clip_identity([(10.0, 41.0), (80.0, 95.0)]) != original
+    assert clip_identity([(10.0004, 40.0004), (80.0, 95.0)]) == original
+
+
+@pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="FFmpeg is not installed")
+def test_highlight_preview_api_builds_seekable_clip_reel(
+    client,
+    db_session_factory,
+    tmp_path: Path,
+) -> None:
+    from app.services import storage
+    from app.services.highlights.preview import clip_identity
+
+    ffmpeg = shutil.which("ffmpeg")
+    ffprobe = shutil.which("ffprobe")
+    assert ffmpeg is not None and ffprobe is not None
+    source = tmp_path / "source.mp4"
+    subprocess.run(
+        [
+            ffmpeg,
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-y",
+            "-f",
+            "lavfi",
+            "-i",
+            "testsrc=size=640x360:rate=24:duration=4",
+            "-f",
+            "lavfi",
+            "-i",
+            "sine=frequency=440:sample_rate=48000:duration=4",
+            "-c:v",
+            "libx264",
+            "-pix_fmt",
+            "yuv420p",
+            "-c:a",
+            "aac",
+            str(source),
+        ],
+        check=True,
+    )
+
+    db = db_session_factory()
+    project = Project(
+        title="Highlights preview",
+        church_name="Iglesia",
+        youtube_channel="@iglesia",
+        duration_seconds=4,
+        width=640,
+        height=360,
+        video_filename="source.mp4",
+    )
+    db.add(project)
+    db.commit()
+    project_id = project.id
+    dest = storage.resolve_inside_project(project_id, "source.mp4")
+    dest.write_bytes(source.read_bytes())
+    db.close()
+
+    clips = [{"start": 0.2, "end": 1.4}, {"start": 2.0, "end": 3.2}]
+    missing = client.get(f"/api/projects/{project_id}/highlights/preview")
+    assert missing.status_code == 404
+
+    prepared = client.post(
+        f"/api/projects/{project_id}/highlights/preview",
+        json={"clips": clips},
+    )
+    assert prepared.status_code == 200, prepared.text
+    assert prepared.json()["ready"] is True
+    assert prepared.json()["identity"] == clip_identity([(0.2, 1.4), (2.0, 3.2)])
+
+    preview = client.get(f"/api/projects/{project_id}/highlights/preview")
+    assert preview.status_code == 200
+    assert preview.headers["content-type"].startswith("video/mp4")
+    assert len(preview.content) > 2048
+
+    cached = client.post(
+        f"/api/projects/{project_id}/highlights/preview",
+        json={"clips": clips},
+    )
+    assert cached.status_code == 200
+
+    probe = subprocess.run(
+        [
+            ffprobe,
+            "-v",
+            "error",
+            "-show_entries",
+            "stream=codec_type,codec_name",
+            "-of",
+            "json",
+            str(storage.resolve_inside_project(project_id, "highlights-preview.mp4")),
+        ],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    kinds = {item["codec_type"]: item["codec_name"] for item in json.loads(probe.stdout)["streams"]}
+    assert kinds["video"] == "h264"
+    assert kinds["audio"] == "aac"

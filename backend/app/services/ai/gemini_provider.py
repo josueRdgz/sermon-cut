@@ -14,6 +14,7 @@ from typing import Any
 
 from app.core.exceptions import AppError, ValidationAppError
 from app.services.ai.base import AIProvider
+from app.services.ai.gemini_schema import serving_json_schema
 from app.services.ai.prompts import SYSTEM_PROMPT, build_merge_prompt, build_user_prompt
 from app.services.ai.schemas import (
     AnalysisRequest,
@@ -122,7 +123,7 @@ class GeminiProvider(AIProvider):
                     config={
                         "system_instruction": system,
                         "response_mime_type": "application/json",
-                        "response_json_schema": AnalysisResponse.model_json_schema(),
+                        "response_json_schema": serving_json_schema(AnalysisResponse),
                         "temperature": 0.2,
                     },
                 )

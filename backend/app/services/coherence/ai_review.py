@@ -14,6 +14,7 @@ from pydantic import BaseModel, Field
 
 from app.core.config import get_settings
 from app.schemas.coherence import CoherenceIssue, CoherenceSeverity
+from app.services.ai.gemini_schema import serving_json_schema
 
 logger = logging.getLogger(__name__)
 
@@ -90,7 +91,7 @@ def review_joined_script(
             config={
                 "system_instruction": _SYSTEM,
                 "response_mime_type": "application/json",
-                "response_json_schema": AiCoherenceResponse.model_json_schema(),
+                "response_json_schema": serving_json_schema(AiCoherenceResponse),
                 "temperature": 0.1,
             },
         )

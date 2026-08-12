@@ -5,7 +5,7 @@ import type {
   AnalysisStartPayload,
 } from '../types/analysis';
 import type { AspectRatio } from '../types/reel';
-import { apiGet, apiJson } from './client';
+import { LONG_FETCH_TIMEOUT_MS, apiGet, apiJson } from './client';
 
 export function getAnalysisProviderStatus(): Promise<AnalysisProviderStatus> {
   return apiGet('/api/analysis/provider');
@@ -15,19 +15,23 @@ export function startAnalysis(
   projectId: string,
   payload: AnalysisStartPayload,
 ): Promise<AnalysisJob> {
-  return apiJson(`/api/projects/${projectId}/analysis`, 'POST', payload);
+  return apiJson(`/api/projects/${projectId}/analysis`, 'POST', payload, {
+    timeoutMs: LONG_FETCH_TIMEOUT_MS,
+  });
 }
 
 export function getLatestAnalysis(projectId: string): Promise<AnalysisJob> {
-  return apiGet(`/api/projects/${projectId}/analysis`);
+  return apiGet(`/api/projects/${projectId}/analysis`, LONG_FETCH_TIMEOUT_MS);
 }
 
 export function getAnalysisJob(jobId: string): Promise<AnalysisJob> {
-  return apiGet(`/api/analysis-jobs/${jobId}`);
+  return apiGet(`/api/analysis-jobs/${jobId}`, LONG_FETCH_TIMEOUT_MS);
 }
 
 export function cancelAnalysisJob(jobId: string): Promise<AnalysisJob> {
-  return apiJson(`/api/analysis-jobs/${jobId}/cancel`, 'POST', {});
+  return apiJson(`/api/analysis-jobs/${jobId}/cancel`, 'POST', {}, {
+    timeoutMs: LONG_FETCH_TIMEOUT_MS,
+  });
 }
 
 export function listAnalysisCandidates(
