@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import pytest
+from app.services.ai.house_style import context_block
 from app.services.ai.mock_provider import MockAIProvider
 from app.services.ai.prompts import build_user_prompt
 from app.services.ai.schemas import (
@@ -219,12 +220,22 @@ def test_validate_rejects_more_than_three_source_segments() -> None:
     assert "too many segments" in report.rejected[0]
 
 
+def test_context_block_does_not_repeat_house_style() -> None:
+    lines = context_block(church_name="IBSJ", editorial_context="Prioriza la aplicación.")
+    blob = "\n".join(lines)
+    assert "IBSJ" in blob
+    assert "Prioriza la aplicación." in blob
+    assert "Iglesias que publican" not in blob
+
+
 def test_prompt_requests_long_passages_and_at_most_three_segments() -> None:
     prompt = build_user_prompt(_request())
 
     assert "Máximo de fragmentos/cortes por Reel: 3" in prompt
     assert "Duración mínima por fragmento: 8 s" in prompt
     assert "no cortes por cada frase" in prompt
+    assert "frase memorable" in prompt
+    assert "gancho audible" in prompt
 
 
 def test_chunk_segments_preserves_absolute_times() -> None:

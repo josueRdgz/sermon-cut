@@ -10,8 +10,8 @@ from pydantic import BaseModel, ConfigDict, Field
 
 class AnalysisStartRequest(BaseModel):
     max_reels: int = Field(default=5, ge=1, le=20)
-    min_duration_seconds: float = Field(default=20.0, ge=5.0, le=120.0)
-    max_duration_seconds: float = Field(default=60.0, ge=10.0, le=180.0)
+    min_duration_seconds: float = Field(default=25.0, ge=5.0, le=120.0)
+    max_duration_seconds: float = Field(default=45.0, ge=10.0, le=180.0)
     additional_instructions: str | None = Field(default=None, max_length=2000)
     doctrinal_orientation: str | None = Field(
         default=None,

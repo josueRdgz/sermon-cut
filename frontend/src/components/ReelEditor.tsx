@@ -16,6 +16,7 @@ import { getTranscript, projectVideoUrl } from '../api/transcripts';
 import type { AspectRatio, Reel, ReelSegment, TransitionType } from '../types/reel';
 import type { TranscriptSegment } from '../types/transcript';
 import { formatDuration, formatTimecode } from '../utils/format';
+import { pinWorkspaceNav } from '../utils/workspaceScroll';
 import { ConfirmDialog } from './ConfirmDialog';
 import { CutSuggestionMarkers, CutSuggestionsPanel } from './CutSuggestionsPanel';
 import { BackgroundMusicPanel } from './BackgroundMusicPanel';
@@ -851,7 +852,7 @@ export function ReelEditor({
       </p>
 
       {loading && <p className="muted">Cargando Reels…</p>}
-      {error && <p className="error">{error}</p>}
+      {error && !activeReel && <p className="error">{error}</p>}
 
       {reels.length > 0 && (
         <div className="reel-selection">
@@ -933,7 +934,10 @@ export function ReelEditor({
                   className={`editor-tool-nav__tab${
                     activeTool === tool.id ? ' editor-tool-nav__tab--active' : ''
                   }`}
-                  onClick={() => setActiveTool(tool.id)}
+                  onClick={() => {
+                    setActiveTool(tool.id);
+                    window.requestAnimationFrame(pinWorkspaceNav);
+                  }}
                 >
                   <span className="editor-tool-nav__number">{index + 1}</span>
                   <span>
@@ -944,6 +948,7 @@ export function ReelEditor({
               ))}
             </div>
           </nav>
+          {error && <p className="error editor-sticky-notice">{error}</p>}
         </div>
       )}
 

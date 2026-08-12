@@ -440,6 +440,30 @@ def test_real_horizontal_render_preserves_source_frame_and_special_paths(
     assert output.is_file()
 
 
+def test_highlight_prompt_includes_church_house_style() -> None:
+    from app.services.highlights.ai import _SYSTEM_PROMPT, _build_prompt
+
+    prompt = _build_prompt(
+        project_title="Gracia",
+        preacher_name="Juan",
+        bible_reference="Efesios 2",
+        segments=[
+            TranscriptSegmentInput(
+                order=0, start=10, end=40, text="La gracia de Dios nos salva y transforma."
+            )
+        ],
+        sermon_start=10,
+        sermon_end=40,
+        target_duration_seconds=120,
+        editorial_style="balanced",
+        church_name="IBSJ",
+        editorial_context="Prioriza frases que se puedan citar.",
+    )
+    assert "IBSJ" in prompt
+    assert "Prioriza frases que se puedan citar" in prompt
+    assert "Iglesias que publican" in _SYSTEM_PROMPT or "IBSJ" in _SYSTEM_PROMPT
+
+
 def test_clip_identity_changes_with_order_and_bounds() -> None:
     from app.services.highlights.preview import clip_identity
 

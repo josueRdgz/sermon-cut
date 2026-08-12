@@ -92,6 +92,7 @@ def start_highlight_analysis(
         project_id,
         target_duration_seconds=payload.target_duration_seconds,
         editorial_style=payload.editorial_style,
+        editorial_context=payload.editorial_context,
     )
     return job_to_response(db, manager.get(db, job.id), include_plan=False)
 

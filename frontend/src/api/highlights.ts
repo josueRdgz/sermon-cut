@@ -37,6 +37,7 @@ export function startHighlightAnalysis(
   projectId: string,
   targetDurationSeconds: number,
   editorialStyle: EditorialStyle,
+  editorialContext?: string | null,
 ): Promise<HighlightAnalysisJob> {
   return apiJson(
     `/api/projects/${projectId}/highlights/analyze`,
@@ -44,6 +45,7 @@ export function startHighlightAnalysis(
     {
       target_duration_seconds: targetDurationSeconds,
       editorial_style: editorialStyle,
+      editorial_context: editorialContext?.trim() || null,
     },
     { timeoutMs: LONG_FETCH_TIMEOUT_MS },
   );

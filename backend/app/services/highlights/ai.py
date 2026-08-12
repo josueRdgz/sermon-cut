@@ -13,6 +13,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 from app.core.config import Settings, get_settings
 from app.core.exceptions import AppError, ValidationAppError
 from app.services.ai.gemini_schema import serving_json_schema
+from app.services.ai.house_style import TITLE_PACKAGING, context_block, with_house_style
 from app.services.ai.schemas import TranscriptSegmentInput
 from app.services.analysis.validate import normalize_text
 from app.services.highlights.salience import compact_transcript_lines as _compact_transcript_lines
@@ -179,6 +180,8 @@ class HighlightProvider:
         sermon_end: float,
         target_duration_seconds: int,
         editorial_style: str,
+        church_name: str | None = None,
+        editorial_context: str | None = None,
     ) -> HighlightResult:
         eligible = [
             item
@@ -194,6 +197,8 @@ class HighlightProvider:
             project_title=project_title,
             preacher_name=preacher_name,
             bible_reference=bible_reference,
+            church_name=church_name,
+            editorial_context=editorial_context,
             segments=eligible,
             sermon_start=sermon_start,
             sermon_end=sermon_end,
@@ -391,6 +396,8 @@ def _build_prompt(
     sermon_end: float,
     target_duration_seconds: int,
     editorial_style: str,
+    church_name: str | None = None,
+    editorial_context: str | None = None,
 ) -> str:
     style_guide = _STYLE_GUIDANCE.get(editorial_style, _STYLE_GUIDANCE["balanced"])
     lines = [
@@ -398,6 +405,7 @@ def _build_prompt(
         f"Título del proyecto: {project_title}",
         f"Predicador: {preacher_name or 'No indicado'}",
         f"Referencia registrada: {bible_reference or 'No indicada'}",
+        f"Iglesia: {church_name or 'No indicada'}",
         f"Intervalo confirmado: {sermon_start:.2f}-{sermon_end:.2f}s",
         f"Duración objetivo aproximada: {target_duration_seconds}s",
         f"Orientación editorial: {editorial_style}",
@@ -417,9 +425,14 @@ def _build_prompt(
         "Las líneas marcadas con ★ son candidatas fuertes: prefierelas si caben.",
         "Cada transcript debe copiar literalmente texto disponible dentro del intervalo. "
         "Los títulos, descripción, miniatura, hashtags y palabras clave deben estar "
-        "respaldados por el contenido. Entrega cinco títulos con las categorías del esquema.",
+        "respaldados por el contenido. Entrega cinco títulos con las categorías del esquema. "
+        "recommended: 4 a 10 palabras, citable, como Reel de iglesia. "
+        "thumbnail_text: 2 a 5 palabras en mayúsculas con la tesis, no el tema genérico.",
+        TITLE_PACKAGING.strip(),
         "score es un número entre 0 y 1 (no 0–10). category debe ser exactamente uno de: "
         "hook, theme, biblical, application, illustration, conclusion (minúsculas).",
+        "",
+        *context_block(church_name=church_name, editorial_context=editorial_context),
         "",
         "TRANSCRIPCIÓN SINCRONIZADA:",
     ]
@@ -457,7 +470,7 @@ _STYLE_GUIDANCE = {
 }
 
 
-_SYSTEM_PROMPT = """\
+_SYSTEM_PROMPT = with_house_style("""\
 Actúa como editor senior de contenido cristiano para YouTube. Tu trabajo no es \
 resumir el sermón entero: es extraer las mejores frases, la tesis y las \
 aplicaciones que un oyente citaría o pondría en práctica. Sé fiel al mensaje \
@@ -465,7 +478,7 @@ original y a la doctrina; no inventes palabras, referencias bíblicas, temas o \
 promesas. Devuelve únicamente JSON válido conforme al esquema estricto. Los \
 tiempos siempre pertenecen al video fuente y los fragmentos deben conservar \
 orden cronológico salvo una razón editorial indispensable que no cambie el sentido.
-"""
+""")
 
 
 def _retryable(exc: Exception) -> bool:

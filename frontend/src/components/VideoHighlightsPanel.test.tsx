@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { getHighlightPlan, prepareHighlightPreview } from '../api/highlights';
@@ -78,7 +78,10 @@ describe('VideoHighlightsPanel', () => {
     await waitFor(() => expect(getHighlightPlan).toHaveBeenCalled());
     expect(screen.getByRole('heading', { name: 'Intervalo de la predicación' })).toBeVisible();
     expect(screen.getByDisplayValue('600')).toBeVisible();
-    expect(screen.getByRole('option', { name: '5 minutos' })).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: /Revisión/ })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('tab', { name: /Análisis/ }));
+    expect(screen.getByRole('option', { name: '5 minutos' })).toBeVisible();
+    expect(screen.getByRole('option', { name: /IBSJ/ })).toBeInTheDocument();
   });
 
   it('prepares an assembled preview before enabling play', async () => {

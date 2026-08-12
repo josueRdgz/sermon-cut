@@ -7,12 +7,14 @@ from app.services.highlights.salience import compact_transcript_lines, score_lin
 
 
 def test_score_prefers_application_and_quotable_over_announcements() -> None:
+    punch = score_line("Aquí está el punto: te voy a decir lo que Cristo hizo en la cruz.")
     application = score_line(
         "Por eso, hermano, esta semana cree el evangelio y obedece a Cristo en tu casa."
     )
     quote = score_line("La gracia no es un premio; la gracia es Cristo mismo dándose a ti.")
     filler = score_line("Bienvenidos, estos son los anuncios y la ofrenda de la semana.")
     assert application > quote > filler
+    assert punch > filler
 
 
 def test_compact_keeps_application_when_budget_is_tight() -> None:

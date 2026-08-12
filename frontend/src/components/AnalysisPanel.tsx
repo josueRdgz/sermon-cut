@@ -13,6 +13,12 @@ import { ApiError } from '../api/client';
 import { getTranscript } from '../api/transcripts';
 import type { AnalysisCandidate, AnalysisJob, AnalysisProviderStatus } from '../types/analysis';
 import { ACTIVE_ANALYSIS_STATUSES } from '../types/analysis';
+import {
+  CHURCH_REELS_CONTEXT,
+  EDITORIAL_PRESETS,
+  extraEditorialInstructions,
+  type EditorialPresetId,
+} from '../utils/editorialPresets';
 import { formatDuration, formatTimecode } from '../utils/format';
 import { ProgressBar } from './ProgressBar';
 
@@ -53,9 +59,10 @@ export function AnalysisPanel({
   const [job, setJob] = useState<AnalysisJob | null>(null);
   const [hasTranscript, setHasTranscript] = useState(false);
   const [maxReels, setMaxReels] = useState(5);
-  const [minDuration, setMinDuration] = useState(20);
-  const [maxDuration, setMaxDuration] = useState(60);
-  const [instructions, setInstructions] = useState('');
+  const [minDuration, setMinDuration] = useState(25);
+  const [maxDuration, setMaxDuration] = useState(45);
+  const [preset, setPreset] = useState<EditorialPresetId>('church');
+  const [instructions, setInstructions] = useState(CHURCH_REELS_CONTEXT);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [actionId, setActionId] = useState<string | null>(null);
@@ -125,7 +132,7 @@ export function AnalysisPanel({
         max_reels: maxReels,
         min_duration_seconds: minDuration,
         max_duration_seconds: maxDuration,
-        additional_instructions: instructions.trim() || null,
+        additional_instructions: extraEditorialInstructions(preset, instructions),
       });
       setJob(started);
     } catch (err) {
@@ -133,7 +140,7 @@ export function AnalysisPanel({
     } finally {
       setBusy(false);
     }
-  }, [projectId, maxReels, minDuration, maxDuration, instructions]);
+  }, [projectId, maxReels, minDuration, maxDuration, instructions, preset]);
 
   const handleCancel = useCallback(async () => {
     if (!job) return;
@@ -291,13 +298,35 @@ export function AnalysisPanel({
           </div>
 
           <label className="field">
-            <span>Instrucciones adicionales (opcional)</span>
+            <span>Estilo de clip</span>
+            <select
+              value={preset}
+              disabled={active || busy}
+              onChange={(event) => {
+                const next = event.target.value as EditorialPresetId;
+                setPreset(next);
+                const match = EDITORIAL_PRESETS.find((item) => item.id === next);
+                if (match && match.text) setInstructions(match.text);
+              }}
+            >
+              {EDITORIAL_PRESETS.map((item) => (
+                <option key={item.id} value={item.id}>
+                  {item.label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="field">
+            <span>Contexto para la IA</span>
             <textarea
-              rows={3}
+              rows={4}
               value={instructions}
               disabled={active || busy}
-              placeholder="p. ej. priorizar aplicación pastoral y frases memorables sobre la gracia"
-              onChange={(e) => setInstructions(e.target.value)}
+              placeholder="Cómo deben sentirse los Reels: gancho, una idea, aplicación, tono de iglesia…"
+              onChange={(e) => {
+                setPreset('custom');
+                setInstructions(e.target.value);
+              }}
             />
           </label>
 

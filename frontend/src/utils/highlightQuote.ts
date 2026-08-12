@@ -17,6 +17,12 @@ function quoteScore(sentence: string): number {
   let score = 0;
   if (words >= 6 && words <= 24) score += 2;
   if (/[?]/.test(sentence)) score += 1;
-  if (/\b(por eso|usted|hoy|gracia|cristo|jesús|fe)\b/i.test(sentence)) score += 2;
+  if (
+    /\b(por eso|usted|hoy|gracia|cristo|jesús|fe|aquí está el punto|esta semana|evangelio)\b/i.test(
+      sentence,
+    )
+  ) {
+    score += 2;
+  }
   return score;
 }

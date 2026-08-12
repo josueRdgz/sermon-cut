@@ -11,6 +11,7 @@ import { TranscriptEditor } from '../components/TranscriptEditor';
 import { VideoHighlightsPanel } from '../components/VideoHighlightsPanel';
 import type { Project } from '../types/project';
 import { formatDate, formatDuration, statusLabel } from '../utils/format';
+import { pinWorkspaceNav } from '../utils/workspaceScroll';
 
 const WORKSPACE_SECTIONS = [
   {
@@ -56,6 +57,7 @@ export function ProjectDetailPage() {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const workspaceRef = useRef<HTMLElement>(null);
+  const workspaceNavRef = useRef<HTMLElement>(null);
   const [project, setProject] = useState<Project | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -95,6 +97,7 @@ export function ProjectDetailPage() {
       const next = new URLSearchParams(searchParams);
       next.set('section', section);
       setSearchParams(next, { replace: true });
+      window.requestAnimationFrame(pinWorkspaceNav);
     },
     [searchParams, setSearchParams],
   );
@@ -111,6 +114,22 @@ export function ProjectDetailPage() {
     },
     [activateSection],
   );
+
+  useEffect(() => {
+    const workspace = workspaceRef.current;
+    const nav = workspaceNavRef.current;
+    if (!workspace || !nav) return;
+    const applyOffset = () => {
+      const styles = window.getComputedStyle(nav);
+      const margin = Number.parseFloat(styles.marginBottom) || 0;
+      workspace.style.setProperty('--workspace-nav-offset', `${nav.offsetHeight + margin}px`);
+    };
+    applyOffset();
+    if (typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(applyOffset);
+    observer.observe(nav);
+    return () => observer.disconnect();
+  }, [visibleSections.length, activeSection]);
 
   useEffect(() => {
     if (!projectId) return;
@@ -192,12 +211,7 @@ export function ProjectDetailPage() {
         </p>
       </header>
 
-      <nav
-        className={`workspace-nav${
-          activeSection === 'editor' ? ' workspace-nav--editor-active' : ''
-        }`}
-        aria-label="Flujo del proyecto"
-      >
+      <nav ref={workspaceNavRef} className="workspace-nav" aria-label="Flujo del proyecto">
         <div className="workspace-nav__track" role="tablist" aria-label="Categorías">
           {visibleSections.map((section, index) => (
             <button
@@ -215,7 +229,6 @@ export function ProjectDetailPage() {
               <span className="workspace-nav__number">{index + 1}</span>
               <span>
                 <strong>{section.label}</strong>
-                <small>{section.description}</small>
               </span>
             </button>
           ))}
@@ -308,6 +321,7 @@ export function ProjectDetailPage() {
           hasCover={project.has_cover}
           videoDuration={project.duration_seconds}
           transcriptRevision={transcriptRevision}
+          churchName={project.church_name}
         />
       </div>
 

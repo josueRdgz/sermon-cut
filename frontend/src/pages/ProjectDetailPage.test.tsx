@@ -89,19 +89,17 @@ function renderPage() {
 describe('ProjectDetailPage workspace', () => {
   beforeEach(() => {
     vi.mocked(getProject).mockResolvedValue(PROJECT);
+    Object.defineProperty(window, 'scrollTo', { configurable: true, value: vi.fn() });
   });
 
   it('shows one horizontal category at a time', async () => {
     renderPage();
     await screen.findByRole('heading', { name: PROJECT.title });
 
-    expect(screen.getByRole('tab', { name: /Proyecto Archivo/ })).toHaveAttribute(
-      'aria-selected',
-      'true',
-    );
+    expect(screen.getByRole('tab', { name: /Proyecto/ })).toHaveAttribute('aria-selected', 'true');
     expect(screen.getByText('Panel de transcripción')).not.toBeVisible();
 
-    fireEvent.click(screen.getByRole('tab', { name: /Transcripción Texto/ }));
+    fireEvent.click(screen.getByRole('tab', { name: /Transcripción/ }));
 
     expect(screen.getByText('Panel de transcripción')).toBeVisible();
     expect(screen.getByText('Panel del editor')).not.toBeVisible();
@@ -120,7 +118,7 @@ describe('ProjectDetailPage workspace', () => {
       );
     });
     expect(screen.getByText('Panel del editor')).toBeVisible();
-    expect(screen.getByRole('navigation', { name: 'Flujo del proyecto' })).toHaveClass(
+    expect(screen.getByRole('navigation', { name: 'Flujo del proyecto' })).not.toHaveClass(
       'workspace-nav--editor-active',
     );
   });

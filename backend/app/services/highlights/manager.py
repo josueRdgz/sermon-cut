@@ -46,6 +46,7 @@ class HighlightAnalysisManager:
         self._executor = executor or ThreadPoolExecutor(max_workers=1)
         self._events: dict[UUID, threading.Event] = {}
         self._futures: dict[UUID, Future] = {}
+        self._contexts: dict[UUID, str] = {}
         self._lock = threading.Lock()
 
     def start(
@@ -55,6 +56,7 @@ class HighlightAnalysisManager:
         *,
         target_duration_seconds: int,
         editorial_style: str,
+        editorial_context: str | None = None,
     ) -> HighlightAnalysisJob:
         project = db.get(Project, project_id)
         if project is None:
@@ -108,6 +110,8 @@ class HighlightAnalysisManager:
 
         with self._lock:
             self._events[job.id] = threading.Event()
+            if editorial_context and editorial_context.strip():
+                self._contexts[job.id] = editorial_context.strip()
         future = self._executor.submit(self._run, job.id)
         with self._lock:
             self._futures[job.id] = future
@@ -165,10 +169,14 @@ class HighlightAnalysisManager:
             transcript = transcripts_service.get_transcript_for_project(db, job.project_id)
             if project is None or plan is None:
                 raise NotFoundError("El proyecto de Highlights ya no existe.")
+            with self._lock:
+                editorial_context = self._contexts.pop(job_id, None)
             analyze_kwargs = {
                 "project_title": project.title,
                 "preacher_name": project.preacher_name,
                 "bible_reference": project.bible_reference,
+                "church_name": project.church_name,
+                "editorial_context": editorial_context,
                 "segments": transcript_to_ai_inputs(transcript),
                 "sermon_start": float(plan.sermon_start_seconds),
                 "sermon_end": float(plan.sermon_end_seconds),

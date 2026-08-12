@@ -36,6 +36,7 @@ class SermonRangeUpdate(StrictModel):
 class HighlightAnalyzeRequest(StrictModel):
     target_duration_seconds: int = Field(default=300, ge=60, le=900)
     editorial_style: EditorialStyle = "balanced"
+    editorial_context: str | None = Field(default=None, max_length=2000)
 
 
 class HighlightSegmentInput(StrictModel):

@@ -14,12 +14,14 @@ _APPLICATION = re.compile(
     r"la aplicacion|si usted|si tu|arrepient|cree(?:n|a|amos)?|confia|"
     r"obedece|perdona|vive(?:n)?|camina|decide|elige|no se trata|"
     r"esta semana|en tu casa|en tu trabajo|cuando salga[s]?|"
-    r"la invitacion|ponte de pie|ven a cristo)\b",
+    r"la invitacion|ponte de pie|ven a cristo|aqui esta el punto|"
+    r"esto es lo que|la pregunta es|fijate|te voy a decir)\b",
     re.IGNORECASE,
 )
 _QUOTABLE = re.compile(
     r"\b(cristo|jesus|evangelio|gracia|cruz|sangre|perdon|salvacion|"
-    r"esperanza|fe|amor|santidad|palabra de dios|reino|verdad)\b",
+    r"esperanza|fe|amor|santidad|palabra de dios|reino|verdad|"
+    r"arrepentimiento|justificacion|misericordia)\b",
     re.IGNORECASE,
 )
 _SCRIPTURE = re.compile(

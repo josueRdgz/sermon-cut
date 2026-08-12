@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+from app.services.ai.house_style import TITLE_PACKAGING, context_block, with_house_style
 from app.services.ai.schemas import AnalysisRequest
 
-SYSTEM_PROMPT = """\
+SYSTEM_PROMPT = with_house_style("""\
 Actúa como editor de contenido cristiano reformado. Selecciona momentos que \
 sean fieles al sermón, comprensibles fuera de contexto y apropiados para Shorts. \
 Prioriza un único fragmento continuo y de ritmo natural por Reel. Solo une \
@@ -56,7 +57,9 @@ sostuvo.
 8. Para cada Short entrega cinco títulos fieles (`recommended`, `direct`, \
 `emotional`, `biblical`, `search_focused`), texto breve de miniatura y palabras \
 clave. No atribuyas al predicador frases ausentes.
-"""
+9. `hook` debe ser la primera frase real del clip. `title` y `recommended` \
+deben sonar a Reel de iglesia: cortos, citables, no un encabezado de sermón.
+""")
 
 
 def build_user_prompt(request: AnalysisRequest) -> str:
@@ -81,9 +84,15 @@ def build_user_prompt(request: AnalysisRequest) -> str:
         "- Ritmo: conserva intervenciones continuas largas; no cortes por cada "
         "frase ni por cada línea de subtítulos.",
         f"- Orientación doctrinal/editorial: {prefs.doctrinal_orientation}",
+        "- Ritmo de redes: 25–45 s suele funcionar mejor, salvo que el usuario pida otra duración.",
+        TITLE_PACKAGING.strip(),
     ]
-    if prefs.additional_instructions:
-        lines.append(f"- Instrucciones adicionales del usuario: {prefs.additional_instructions}")
+    extra = context_block(
+        church_name=meta.church_name,
+        editorial_context=prefs.additional_instructions,
+    )
+    if extra:
+        lines.extend(extra)
 
     if request.chunk_count > 1:
         lines += [
@@ -134,6 +143,9 @@ def build_merge_prompt(
             "- Prioriza continuidad: conserva 1 segmento siempre que sea posible y no "
             "dividas frases consecutivas en cortes distintos.",
             f"- Orientación: {prefs.doctrinal_orientation}",
+            TITLE_PACKAGING.strip(),
+            "- Quédate con los clips que empezarían fuerte en un Reel de iglesia "
+            "y descarta saludos o resúmenes de todo el sermón.",
             "",
             "## Candidatos por bloque (JSON)",
             candidate_json,
