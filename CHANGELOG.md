@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.3.8] — 2026-08-13
+
+### Added
+
+- Preview ensamblado de Video Highlights (MP4 con imagen y audio) para que
+  Play no dependa del video fuente completo.
+- Estilo editorial de iglesia en redes (gancho, una idea, frase memorable y
+  aplicación) para Reels y Highlights, con presets en la UI.
+- Pestañas internas de Highlights (detección, análisis, revisión, título,
+  pantalla final, audio, exportar) y barra de proyecto siempre visible al
+  hacer scroll.
+
+### Changed
+
+- La compactación de transcripción prioriza frases citables y aplicaciones
+  antes de recortar por longitud.
+- Duración por defecto de Reels: 25–45 s.
+
 ## [0.3.7] — 2026-08-06
 
 ### Fixed
