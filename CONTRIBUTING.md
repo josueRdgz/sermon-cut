@@ -59,6 +59,8 @@ python -m app.cli doctor
 - Match existing style (Ruff on the backend, ESLint/Prettier on the frontend).
 - Do not commit: videos, personal transcripts, API keys, Whisper weights, renders,
   or local SQLite files.
+- Do not commit iCloud conflict copies (`audio_repair 2.py`, `Foo 2.tsx`). The
+  repo lives in iCloud Drive; keep only the file without the ` 2` suffix.
 - Do not add commercial music catalogues or automatic music downloads.
 - Keep the app usable **without** Gemini (mock provider) and without Docker.
 

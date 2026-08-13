@@ -103,6 +103,10 @@ Thumbs.db
 *.swp
 *~
 
+# iCloud Drive conflict copies ("audio_repair 2.py", "AudioRepairPanel 2.tsx")
+* 2.*
+* 2/
+
 # ---- Logs ----
 *.log
 logs/
