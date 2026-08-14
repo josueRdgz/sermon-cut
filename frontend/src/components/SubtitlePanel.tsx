@@ -130,6 +130,8 @@ export function SubtitlePanel({
     reel.subtitle_uppercase,
     reel.subtitle_bible_reference,
     reel.updated_at,
+    // Reload when any per-cut caption changes (fragment subtitle edits).
+    reel.segments.map((segment) => `${segment.id}:${segment.transcript_text ?? ''}`).join('|'),
   ]);
 
   const patch = useCallback(
@@ -154,27 +156,31 @@ export function SubtitlePanel({
   }, [reel, sourceTime, previewSegmentIndex]);
 
   const cue = activeCue(preview, outputTime);
-  const sample = cue?.text ?? preview?.cues[0]?.text ?? 'Así dice el Señor: buscadme y viviréis.';
-
-  const displayText = cue && outputTime != null ? highlightedText(cue, outputTime) : sample;
+  const liveCueText =
+    cue && outputTime != null ? highlightedText(cue, outputTime) : null;
+  const sample = preview?.cues[0]?.text ?? 'Así dice el Señor: buscadme y viviréis.';
+  const stageText = liveCueText ?? sample;
 
   const styleClass = `subtitle-overlay subtitle-overlay--${reel.subtitle_style} subtitle-overlay--${reel.subtitle_position}`;
   const overlayHost =
     typeof document !== 'undefined' ? document.getElementById('reel-subtitle-overlay') : null;
 
-  const overlayNode = reel.subtitle_enabled ? (
-    <div
-      className={`${styleClass} subtitle-overlay--on-player`}
-      style={{
-        fontSize: `${Math.round(reel.subtitle_font_size * 0.35)}px`,
-        opacity: reel.subtitle_opacity,
-        paddingBottom: `${Math.round(reel.subtitle_margin_bottom * 0.2)}px`,
-        textTransform: reel.subtitle_uppercase ? 'uppercase' : 'none',
-      }}
-    >
-      <span className="subtitle-overlay__text">{displayText}</span>
-    </div>
-  ) : null;
+  // Only paint on the player while a cue is active — never fall back to the
+  // first caption or a sample phrase during silence / between fragments.
+  const overlayNode =
+    reel.subtitle_enabled && liveCueText ? (
+      <div
+        className={`${styleClass} subtitle-overlay--on-player`}
+        style={{
+          fontSize: `${Math.round(reel.subtitle_font_size * 0.35)}px`,
+          opacity: reel.subtitle_opacity,
+          paddingBottom: `${Math.round(reel.subtitle_margin_bottom * 0.2)}px`,
+          textTransform: reel.subtitle_uppercase ? 'uppercase' : 'none',
+        }}
+      >
+        <span className="subtitle-overlay__text">{liveCueText}</span>
+      </div>
+    ) : null;
 
   return (
     <div className="subtitle-panel">
@@ -352,7 +358,7 @@ export function SubtitlePanel({
             textTransform: reel.subtitle_uppercase ? 'uppercase' : 'none',
           }}
         >
-          <span className="subtitle-overlay__text">{displayText}</span>
+          <span className="subtitle-overlay__text">{stageText}</span>
         </div>
         <p className="muted">
           Vista previa sobre el reproductor

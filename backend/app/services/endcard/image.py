@@ -13,7 +13,7 @@ from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageFilter, ImageFont, ImageOps
 
-from app.models.end_card import CALL_TO_ACTION_TEXT, EndCardLayout
+from app.models.end_card import CALL_TO_ACTION_TEXT, EndCardLayout, EndCardMessagePosition
 from app.services.endcard.layout import FittedText, SafeArea, fit_text, safe_area
 
 logger = logging.getLogger(__name__)
@@ -243,20 +243,40 @@ class _TextBlock:
         return round(self.fitted.font_size * 1.22) * len(self.fitted.lines)
 
 
+def _cta_top(
+    *,
+    position: EndCardMessagePosition,
+    area: SafeArea,
+    text_height: int,
+    height: int,
+    region_top: int,
+    region_bottom: int,
+) -> int:
+    """Place the CTA inside ``[region_top, region_bottom]`` according to position."""
+    available = max(1, region_bottom - region_top - text_height)
+    if position == EndCardMessagePosition.top:
+        return region_top
+    if position == EndCardMessagePosition.center:
+        return region_top + available // 2
+    return max(region_top, region_bottom - text_height - round(height * 0.01))
+
+
 def render_end_card(
     *,
     content: EndCardContent,
     layout: EndCardLayout | str,
     width: int,
     height: int,
+    message_position: EndCardMessagePosition | str = EndCardMessagePosition.bottom,
 ) -> Image.Image:
     """Compose a deliberately simple card: cover image, then one CTA line."""
     layout_value = EndCardLayout(layout)
+    position = EndCardMessagePosition(message_position)
     area = safe_area(width, height)
 
     if layout_value == EndCardLayout.cover_full:
         # Full-bleed means exactly that: no margins or letterboxing. The CTA is
-        # overlaid in the lower safe area so the image can occupy the full frame.
+        # overlaid in the safe area so the image can occupy the full frame.
         canvas = _cover_crop(content.cover_path, width, height)
         if canvas is None:
             canvas = Image.new("RGBA", (width, height), _CARD_BG)
@@ -275,7 +295,14 @@ def render_end_card(
             draw,
             fitted,
             center_x=area.center_x,
-            top=area.bottom - text_height - round(height * 0.025),
+            top=_cta_top(
+                position=position,
+                area=area,
+                text_height=text_height,
+                height=height,
+                region_top=area.top + round(height * 0.02),
+                region_bottom=area.bottom - round(height * 0.02),
+            ),
             color=_TEXT_COLOR,
             bold=True,
         )
@@ -326,7 +353,14 @@ def render_end_card(
         draw,
         fitted,
         center_x=area.center_x,
-        top=text_top + max(0, (text_available - text_height) // 2),
+        top=_cta_top(
+            position=position,
+            area=area,
+            text_height=text_height,
+            height=height,
+            region_top=text_top,
+            region_bottom=area.bottom,
+        ),
         color=_TEXT_COLOR,
         bold=True,
     )

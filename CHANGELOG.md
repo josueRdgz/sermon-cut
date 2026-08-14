@@ -7,6 +7,104 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.3.21] — 2026-08-14
+
+### Fixed
+
+- Guardar el subtítulo de un fragmento ahora persiste de verdad: el texto
+  editado es la fuente de verdad del corte, se comprueba al guardar, alimenta
+  la vista previa y ya no se descarta por heurísticas del builder.
+
+## [0.3.20] — 2026-08-14
+
+### Added
+
+- Al añadir otro fragmento se elige el pedazo con tiempo de inicio y fin
+  (también desde el tiempo actual del preview).
+
+### Fixed
+
+- El texto de subtítulos ya no se repite en todos los fragmentos: cada corte
+  guarda su propio caption, no reescribe la transcripción del proyecto, y un
+  texto largo heredado de Whisper no se vuelve a empaquetar en cada corte.
+- Al ajustar inicio/fin de un fragmento se invalida el caption heredado para
+  volver a usar las palabras del video en esa ventana.
+
+## [0.3.19] — 2026-08-14
+
+### Fixed
+
+- Editar el texto de un fragmento del Reel ya no reescribe toda la
+  transcripción compartida ni deja el resto de cortes sin subtítulos: cada
+  fragmento guarda su propio texto y solo actualiza el segmento Whisper si
+  cabe casi por completo en ese corte.
+
+## [0.3.18] — 2026-08-14
+
+### Fixed
+
+- Al editar subtítulos desde un fragmento del Reel (borrar o añadir palabras),
+  el texto completo vuelve a mostrarse: las palabras se reubican en el corte y
+  el builder de subtítulos usa el texto guardado si los tiempos no cubren el
+  fragmento.
+
+## [0.3.17] — 2026-08-14
+
+### Added
+
+- Posición del texto de la pantalla final (arriba / centro / abajo).
+- Transición visible en cada salto entre fragmentos (corte duro, fundido corto
+  o fundido a negro).
+- La música de fondo se escucha en el preview del Reel, con control de volumen
+  de voz y de música.
+
+### Fixed
+
+- Al acortar el texto de un fragmento para subtítulos, se conservan los tiempos
+  de las palabras que quedan (ya no desaparece parte del subtítulo).
+
+## [0.3.16] — 2026-08-14
+
+### Added
+
+- Se puede cambiar o subir de nuevo la portada del proyecto (pantalla final y
+  ficha del proyecto) después de crearlo.
+
+## [0.3.15] — 2026-08-14
+
+### Added
+
+- En el editor de Reel se puede corregir el texto de transcripción de cada
+  fragmento (segmentos solapados) sin volver a la pestaña de transcripción.
+
+### Fixed
+
+- Los subtítulos del preview del Reel ya no muestran la primera frase cuando
+  no hay habla (silencio o entre fragmentos).
+
+## [0.3.14] — 2026-08-14
+
+### Fixed
+
+- Preview de Reels con varios cortes: imagen y audio van en el mismo video
+  (sin segundo elemento que busca aparte), así el salto al siguiente fragmento
+  y pausar/reanudar ya no dejan silencios ni video congelado.
+
+## [0.3.13] — 2026-08-14
+
+### Fixed
+
+- El recorte de predicación y la alineación A/V ya no re-codifican el AAC por
+  diferencias normales de frames: se copia el bitstream original; solo se
+  re-encodea audio (320k) como último recurso ante un desfase grande.
+
+## [0.3.12] — 2026-08-14
+
+### Fixed
+
+- El preview del editor de Reel vuelve a reproducir fragmentos: usa el video de
+  trabajo para imagen y audio (sin esperar la extracción `/media/audio`).
+
 ## [0.3.11] — 2026-08-14
 
 ### Fixed

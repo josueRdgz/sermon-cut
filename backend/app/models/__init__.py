@@ -22,6 +22,7 @@ from app.models.background_music import (
 from app.models.end_card import (
     EndCardAudioMode,
     EndCardLayout,
+    EndCardMessagePosition,
     EndCardSettings,
 )
 from app.models.export_profile import (
@@ -81,6 +82,7 @@ __all__ = [
     "BackgroundMusicSettings",
     "EndCardAudioMode",
     "EndCardLayout",
+    "EndCardMessagePosition",
     "EndCardSettings",
     "ContentKind",
     "ContentMetadata",

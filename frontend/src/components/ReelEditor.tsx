@@ -13,7 +13,8 @@ import {
   updateReelSegment,
 } from '../api/reels';
 import { getTranscript } from '../api/transcripts';
-import { projectAudioUrl, projectVideoUrl } from '../api/projects';
+import { projectVideoUrl } from '../api/projects';
+import type { Project } from '../types/project';
 import type { AspectRatio, Reel, ReelSegment, TransitionType } from '../types/reel';
 import type { TranscriptSegment } from '../types/transcript';
 import { formatDuration, formatTimecode } from '../utils/format';
@@ -28,10 +29,117 @@ import { SubtitlePanel } from './SubtitlePanel';
 import type { CutSuggestion, CutSuggestionsReport } from '../types/cutSuggestions';
 import { acceptCutSuggestion, rejectCutSuggestion } from '../api/cutSuggestions';
 import {
+  backgroundMusicAudioUrl,
+  getBackgroundMusic,
+  saveBackgroundMusic,
+} from '../api/backgroundMusic';
+import type { BackgroundMusicSettings } from '../types/backgroundMusic';
+import {
   previewTimelineIdentity,
   resolvePreviewSeek,
   type PreviewSeekTarget,
 } from '../utils/reelPreview';
+
+function overlappingTranscriptSegments(
+  segments: TranscriptSegment[],
+  start: number,
+  end: number,
+): TranscriptSegment[] {
+  return segments
+    .filter(
+      (item) =>
+        item.start_seconds != null &&
+        item.end_seconds != null &&
+        item.start_seconds < end &&
+        item.end_seconds > start,
+    )
+    .sort((a, b) => (a.start_seconds ?? 0) - (b.start_seconds ?? 0));
+}
+
+/** Caption text that actually falls inside a reel cut (not the whole Whisper span). */
+function transcriptTextInWindow(
+  segment: TranscriptSegment,
+  start: number,
+  end: number,
+): string {
+  const words = [...segment.words]
+    .filter(
+      (word) =>
+        word.start_seconds != null &&
+        word.end_seconds != null &&
+        word.start_seconds < end &&
+        word.end_seconds > start,
+    )
+    .sort((a, b) => (a.start_seconds ?? 0) - (b.start_seconds ?? 0));
+  if (words.length > 0) {
+    return words
+      .map((word) => word.text.trim())
+      .filter(Boolean)
+      .join(' ');
+  }
+  // Only fall back to the full span when it itself sits mostly inside the cut.
+  if (
+    segment.start_seconds != null &&
+    segment.end_seconds != null &&
+    segment.start_seconds >= start - 0.05 &&
+    segment.end_seconds <= end + 0.05
+  ) {
+    return segment.text.trim();
+  }
+  return '';
+}
+
+/** Joined caption preview for one reel cut from all overlapping Whisper spans. */
+function captionPreviewForCut(
+  segments: TranscriptSegment[],
+  start: number,
+  end: number,
+): string {
+  return overlappingTranscriptSegments(segments, start, end)
+    .map((item) => transcriptTextInWindow(item, start, end))
+    .filter(Boolean)
+    .join(' ')
+    .trim();
+}
+
+/**
+ * Saved per-cut caption wins. If missing, show Whisper words inside the cut.
+ * Legacy builds sometimes stored the full Whisper span on every fragment — ignore
+ * that for display so the textarea shows the cut window, not the whole sermon.
+ */
+function fragmentCaptionBaseline(
+  segment: ReelSegment,
+  transcriptSegments: TranscriptSegment[],
+): string {
+  const preview = captionPreviewForCut(
+    transcriptSegments,
+    segment.source_start_seconds,
+    segment.source_end_seconds,
+  );
+  const saved = segment.transcript_text?.trim() ?? '';
+  if (!saved) return preview;
+
+  const liveJoined = overlappingTranscriptSegments(
+    transcriptSegments,
+    segment.source_start_seconds,
+    segment.source_end_seconds,
+  )
+    .map((item) => item.text.trim())
+    .filter(Boolean)
+    .join(' ')
+    .trim();
+  const savedTokens = saved.split(/\s+/).filter(Boolean);
+  const previewTokens = preview.split(/\s+/).filter(Boolean);
+  if (
+    liveJoined &&
+    saved.toLocaleLowerCase() === liveJoined.toLocaleLowerCase() &&
+    previewTokens.length > 0 &&
+    savedTokens.length > previewTokens.length + 1
+  ) {
+    return preview;
+  }
+  return saved;
+}
 
 interface ReelEditorProps {
   projectId: string;
@@ -41,6 +149,7 @@ interface ReelEditorProps {
   mediaRevision?: string | number | null;
   refreshToken?: number;
   focusReelId?: string | null;
+  onCoverUpdated?: (project: Project) => void;
 }
 
 const ASPECT_OPTIONS: AspectRatio[] = ['9:16', '1:1', '16:9'];
@@ -80,10 +189,14 @@ function audioTimeForVideo(videoTime: number, offsetMs: number): number {
   return Math.max(0, videoTime - offsetMs / 1000);
 }
 
+function clampMediaTime(media: HTMLMediaElement, seconds: number): number {
+  const duration = Number.isFinite(media.duration) && media.duration > 0 ? media.duration : null;
+  return Math.max(0, duration == null ? seconds : Math.min(seconds, duration));
+}
+
 function setMediaTime(media: HTMLMediaElement, seconds: number, approximate = false): boolean {
   if (media.readyState < HTMLMediaElement.HAVE_METADATA) return false;
-  const duration = Number.isFinite(media.duration) && media.duration > 0 ? media.duration : null;
-  const target = Math.max(0, duration == null ? seconds : Math.min(seconds, duration));
+  const target = clampMediaTime(media, seconds);
   try {
     const seekableMedia = media as HTMLMediaElement & { fastSeek?: (time: number) => void };
     if (approximate && typeof seekableMedia.fastSeek === 'function') {
@@ -99,6 +212,27 @@ function setMediaTime(media: HTMLMediaElement, seconds: number, approximate = fa
   }
 }
 
+function waitForSeek(media: HTMLMediaElement, seconds: number): Promise<void> {
+  if (media.readyState < HTMLMediaElement.HAVE_METADATA) return Promise.resolve();
+  const target = clampMediaTime(media, seconds);
+  if (!media.seeking && Math.abs(media.currentTime - target) < 0.04) {
+    return Promise.resolve();
+  }
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      media.removeEventListener('seeked', finish);
+      window.clearTimeout(timer);
+      resolve();
+    };
+    const timer = window.setTimeout(finish, 900);
+    media.addEventListener('seeked', finish, { once: true });
+    if (!setMediaTime(media, target)) finish();
+  });
+}
+
 export function ReelEditor({
   projectId,
   hasVideo,
@@ -107,9 +241,11 @@ export function ReelEditor({
   mediaRevision = null,
   refreshToken = 0,
   focusReelId = null,
+  onCoverUpdated,
 }: ReelEditorProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const audioRef = useRef<HTMLAudioElement>(null);
+  const musicRef = useRef<HTMLAudioElement>(null);
   const [reels, setReels] = useState<Reel[]>([]);
   const [activeReelId, setActiveReelId] = useState<string | null>(null);
   const [transcriptSegments, setTranscriptSegments] = useState<TranscriptSegment[]>([]);
@@ -132,6 +268,13 @@ export function ReelEditor({
   const [sourceTime, setSourceTime] = useState<number | null>(null);
   const [cutReport, setCutReport] = useState<CutSuggestionsReport | null>(null);
   const [cutBusy, setCutBusy] = useState(false);
+  const [transcriptDrafts, setTranscriptDrafts] = useState<Record<string, string>>({});
+  const [transcriptSavingId, setTranscriptSavingId] = useState<string | null>(null);
+  const [showAddFragment, setShowAddFragment] = useState(false);
+  const [addFragmentStart, setAddFragmentStart] = useState(0);
+  const [addFragmentEnd, setAddFragmentEnd] = useState(5);
+  const [backgroundMusic, setBackgroundMusic] = useState<BackgroundMusicSettings | null>(null);
+  const [musicVolumeSaving, setMusicVolumeSaving] = useState(false);
   const previewIndexRef = useRef(0);
   const previewingRef = useRef(false);
   const focusedReelRef = useRef<string | null>(null);
@@ -143,6 +286,10 @@ export function ReelEditor({
   const audioOffsetSeekTimerRef = useRef<number | null>(null);
   const scrubbingRef = useRef(false);
   const resumeAfterScrubRef = useRef(false);
+  const jumpingRef = useRef(false);
+  const jumpTokenRef = useRef(0);
+  const previewMutedRef = useRef(false);
+  const previewVolumeRef = useRef(1);
 
   const activeReel = useMemo(
     () => reels.find((reel) => reel.id === activeReelId) ?? null,
@@ -345,29 +492,49 @@ export function ReelEditor({
 
   async function handleAddManualFragment() {
     if (!activeReel) return;
-    const lastSeg = activeReel.segments[activeReel.segments.length - 1];
-    const start = lastSeg?.source_end_seconds ?? 0;
-    const end = Math.min(videoDuration ?? start + 5, start + 5);
-    if (end - start < 0.1) {
-      setError('No queda margen en el video para otro fragmento.');
+    const start = round3(addFragmentStart);
+    const end = round3(addFragmentEnd);
+    if (!(end > start + 0.05)) {
+      setError('El fin debe ser mayor que el inicio (mínimo ~0.1 s).');
+      return;
+    }
+    if (videoDuration != null && end > videoDuration + 0.05) {
+      setError('El fin supera la duración del video.');
+      return;
+    }
+    if (start < 0) {
+      setError('El inicio no puede ser negativo.');
       return;
     }
     setBusy(true);
+    setError(null);
     try {
       const updated = await addReelSegment(projectId, activeReel.id, {
-        source_start_seconds: round3(start + 1),
-        source_end_seconds: round3(Math.min(end + 1, videoDuration ?? end + 1)),
+        source_start_seconds: start,
+        source_end_seconds: end,
         transition_type: 'hard_cut',
         transition_duration_ms: 0,
       });
       replaceReel(updated);
       const last = updated.segments[updated.segments.length - 1];
       if (last) setEditingSegmentId(last.id);
+      setShowAddFragment(false);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'No se pudo añadir el fragmento');
     } finally {
       setBusy(false);
     }
+  }
+
+  function openAddFragmentForm() {
+    const lastSeg = activeReel?.segments[activeReel.segments.length - 1];
+    const hint = sourceTime ?? lastSeg?.source_end_seconds ?? 0;
+    const start = round3(Math.max(0, hint));
+    const rawEnd = Math.min(videoDuration ?? start + 5, start + 5);
+    setAddFragmentStart(start);
+    setAddFragmentEnd(round3(rawEnd > start ? rawEnd : start + 5));
+    setShowAddFragment(true);
+    setError(null);
   }
 
   async function handleSaveTitle() {
@@ -465,6 +632,58 @@ export function ReelEditor({
     }
   }
 
+  async function saveFragmentCaption(segment: ReelSegment) {
+    if (!activeReel) return;
+    const baseline = fragmentCaptionBaseline(segment, timedTranscript);
+    const draft = (transcriptDrafts[segment.id] ?? baseline).trim();
+    if (!draft) {
+      setError('El subtítulo del fragmento no puede quedar vacío. Usa “Texto del video” para restablecer.');
+      return;
+    }
+    setTranscriptSavingId(segment.id);
+    setError(null);
+    try {
+      const updated = await updateReelSegment(projectId, activeReel.id, segment.id, {
+        transcript_text: draft,
+      });
+      const saved = updated.segments.find((item) => item.id === segment.id);
+      if (!saved || (saved.transcript_text ?? '').trim() !== draft) {
+        throw new Error('El servidor no persistió el subtítulo del fragmento.');
+      }
+      replaceReel(updated);
+      setTranscriptDrafts((current) => {
+        const next = { ...current };
+        delete next[segment.id];
+        return next;
+      });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'No se pudo guardar el texto del fragmento');
+    } finally {
+      setTranscriptSavingId(null);
+    }
+  }
+
+  async function clearFragmentCaption(segment: ReelSegment) {
+    if (!activeReel) return;
+    setTranscriptSavingId(segment.id);
+    setError(null);
+    try {
+      const updated = await updateReelSegment(projectId, activeReel.id, segment.id, {
+        transcript_text: null,
+      });
+      replaceReel(updated);
+      setTranscriptDrafts((current) => {
+        const next = { ...current };
+        delete next[segment.id];
+        return next;
+      });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'No se pudo restablecer el texto');
+    } finally {
+      setTranscriptSavingId(null);
+    }
+  }
+
   async function moveSegment(segmentId: string, direction: -1 | 1) {
     if (!activeReel) return;
     const ordered = [...activeReel.segments].sort((a, b) => a.order - b.order);
@@ -488,10 +707,97 @@ export function ReelEditor({
     }
   }
 
+  function usesSeparateAudio(): boolean {
+    // Offset needs a second clock. Otherwise keep A/V locked in one element so
+    // hard cuts do not desync or leave silence while the second element seeks.
+    return Math.abs(audioOffsetRef.current) >= 1;
+  }
+
+  function musicPreviewActive(settings: BackgroundMusicSettings | null = backgroundMusic): boolean {
+    return Boolean(
+      settings?.enabled &&
+        settings.music_filename &&
+        settings.scope === 'full_reel' &&
+        settings.preset !== 'none',
+    );
+  }
+
+  function applyMusicGain(settings: BackgroundMusicSettings | null = backgroundMusic) {
+    const music = musicRef.current;
+    if (!music) return;
+    const muted = previewMutedRef.current;
+    const bed = musicPreviewActive(settings) ? Math.max(0, Math.min(1, settings?.volume ?? 0)) : 0;
+    music.muted = muted || bed <= 0;
+    music.volume = muted ? 0 : bed;
+  }
+
+  function syncMusicToOutput(outputSeconds: number, force = false) {
+    const music = musicRef.current;
+    const settings = backgroundMusic;
+    if (!music || !musicPreviewActive(settings) || !settings) return;
+    const start = settings.start_seconds ?? 0;
+    const end = settings.end_seconds;
+    const target = start + Math.max(0, outputSeconds);
+    if (end != null && target >= end) {
+      music.pause();
+      return;
+    }
+    if (music.readyState < HTMLMediaElement.HAVE_METADATA) return;
+    const drift = target - music.currentTime;
+    if (force || Math.abs(drift) >= 0.12) {
+      void waitForSeek(music, target);
+    }
+  }
+
+  async function playMusicForOutput(outputSeconds: number) {
+    const music = musicRef.current;
+    const settings = backgroundMusic;
+    if (!music || !musicPreviewActive(settings) || !settings || previewMutedRef.current) {
+      music?.pause();
+      return;
+    }
+    applyMusicGain(settings);
+    const start = settings.start_seconds ?? 0;
+    const end = settings.end_seconds;
+    const target = start + Math.max(0, outputSeconds);
+    if (end != null && target >= end) {
+      music.pause();
+      return;
+    }
+    await waitForSeek(music, target);
+    try {
+      await music.play();
+    } catch {
+      // Autoplay can fail if the bed is still buffering; voice preview continues.
+    }
+  }
+
+  function applyPreviewGain() {
+    const video = videoRef.current;
+    const audio = audioRef.current;
+    const separate = usesSeparateAudio();
+    const muted = previewMutedRef.current;
+    const volume = previewVolumeRef.current;
+    if (video) {
+      video.muted = separate ? true : muted;
+      video.volume = separate ? 1 : muted ? 0 : volume;
+    }
+    if (audio) {
+      audio.muted = separate ? muted : true;
+      audio.volume = separate ? (muted ? 0 : volume) : 0;
+      if (!separate) {
+        audio.pause();
+        audio.playbackRate = 1;
+      }
+    }
+    applyMusicGain();
+  }
+
   function stopPreview() {
     previewingRef.current = false;
     scrubbingRef.current = false;
     resumeAfterScrubRef.current = false;
+    jumpingRef.current = false;
     pendingPreviewSeekRef.current = null;
     if (seekAnimationFrameRef.current != null) {
       window.cancelAnimationFrame(seekAnimationFrameRef.current);
@@ -509,9 +815,11 @@ export function ReelEditor({
       audio.pause();
       audio.playbackRate = 1;
     }
+    musicRef.current?.pause();
   }
 
   function syncAudioToVideo(videoTime: number, force = false) {
+    if (!usesSeparateAudio()) return;
     const audio = audioRef.current;
     if (!audio) return;
     const target = audioTimeForVideo(videoTime, audioOffsetRef.current);
@@ -525,14 +833,75 @@ export function ReelEditor({
     pendingAudioTimeRef.current = null;
   }
 
+  async function jumpPreviewToSource(sourceTimeSeconds: number, resume: boolean) {
+    const video = videoRef.current;
+    if (!video) return;
+    const token = ++jumpTokenRef.current;
+    jumpingRef.current = true;
+    video.pause();
+    const audio = audioRef.current;
+    if (audio) {
+      audio.pause();
+      audio.playbackRate = 1;
+    }
+    musicRef.current?.pause();
+    const seeks = [waitForSeek(video, sourceTimeSeconds)];
+    if (usesSeparateAudio() && audio) {
+      seeks.push(
+        waitForSeek(audio, audioTimeForVideo(sourceTimeSeconds, audioOffsetRef.current)),
+      );
+    }
+    await Promise.all(seeks);
+    if (token !== jumpTokenRef.current) return;
+    pendingVideoTimeRef.current = null;
+    pendingAudioTimeRef.current = null;
+    jumpingRef.current = false;
+    setSourceTime(sourceTimeSeconds);
+    if (!resume || !previewingRef.current || scrubbingRef.current) return;
+    applyPreviewGain();
+    try {
+      if (usesSeparateAudio() && audio) {
+        await Promise.all([video.play(), audio.play()]);
+      } else {
+        await video.play();
+      }
+      if (token !== jumpTokenRef.current) return;
+      const ordered = activeReel
+        ? [...activeReel.segments].sort((a, b) => a.order - b.order)
+        : [];
+      const index = previewIndexRef.current;
+      const current = ordered[index];
+      if (current) {
+        const elapsedBefore = ordered
+          .slice(0, index)
+          .reduce((sum, segment) => sum + Math.max(0, segment.duration_seconds), 0);
+        const local = Math.max(
+          0,
+          Math.min(sourceTimeSeconds - current.source_start_seconds, current.duration_seconds),
+        );
+        await playMusicForOutput(elapsedBefore + local);
+      }
+    } catch (err: unknown) {
+      if (token !== jumpTokenRef.current) return;
+      stopPreview();
+      setError(err instanceof Error ? err.message : 'No se pudo reanudar la reproducción');
+    }
+  }
+
   function applyAudioOffset(offsetMs: number) {
     audioOffsetRef.current = offsetMs;
     setAudioOffsetMs(offsetMs);
+    applyPreviewGain();
     if (audioOffsetSeekTimerRef.current != null) return;
     audioOffsetSeekTimerRef.current = window.setTimeout(() => {
       audioOffsetSeekTimerRef.current = null;
       const video = videoRef.current;
-      if (video) syncAudioToVideo(video.currentTime, true);
+      if (!video) return;
+      if (usesSeparateAudio()) {
+        syncAudioToVideo(video.currentTime, true);
+      } else if (previewingRef.current) {
+        void jumpPreviewToSource(video.currentTime, true);
+      }
     }, 80);
   }
 
@@ -542,7 +911,11 @@ export function ReelEditor({
       audioOffsetSeekTimerRef.current = null;
     }
     const video = videoRef.current;
-    if (video) syncAudioToVideo(video.currentTime, true);
+    if (!video) return;
+    applyPreviewGain();
+    if (usesSeparateAudio()) {
+      syncAudioToVideo(video.currentTime, true);
+    }
   }
 
   async function saveAudioOffset(offsetMs = audioOffsetMs) {
@@ -565,10 +938,13 @@ export function ReelEditor({
     const video = videoRef.current;
     if (!video) return;
     pendingVideoTimeRef.current = target.sourceTime;
-    if (setMediaTime(video, target.sourceTime, approximate)) {
-      pendingVideoTimeRef.current = null;
+    if (approximate) {
+      if (setMediaTime(video, target.sourceTime, true)) {
+        pendingVideoTimeRef.current = null;
+      }
+      return;
     }
-    if (!approximate) syncAudioToVideo(target.sourceTime, true);
+    void jumpPreviewToSource(target.sourceTime, previewingRef.current);
   }
 
   function schedulePreviewSeek(target: PreviewSeekTarget) {
@@ -607,6 +983,7 @@ export function ReelEditor({
       audioRef.current.pause();
       audioRef.current.playbackRate = 1;
     }
+    musicRef.current?.pause();
   }
 
   function endPreviewScrub() {
@@ -617,24 +994,16 @@ export function ReelEditor({
       seekAnimationFrameRef.current = null;
     }
     const target = pendingPreviewSeekRef.current;
-    if (target) applyPreviewSeek(target, false);
-    pendingPreviewSeekRef.current = null;
-
     const shouldResume = resumeAfterScrubRef.current && previewingRef.current;
     resumeAfterScrubRef.current = false;
-    const video = videoRef.current;
-    const audio = audioRef.current;
-    if (!shouldResume || !video || !audio) return;
-    audio.muted = previewMuted;
-    audio.volume = previewVolume;
-    void Promise.all([video.play(), audio.play()]).catch((err: unknown) => {
-      stopPreview();
-      setError(err instanceof Error ? err.message : 'No se pudo reanudar la reproducción');
-    });
+    if (target) {
+      void jumpPreviewToSource(target.sourceTime, shouldResume);
+    }
+    pendingPreviewSeekRef.current = null;
   }
 
   function startPreview() {
-    if (!activeReel || activeReel.segments.length === 0 || !videoRef.current || !audioRef.current) {
+    if (!activeReel || activeReel.segments.length === 0 || !videoRef.current) {
       return;
     }
     const video = videoRef.current;
@@ -643,35 +1012,52 @@ export function ReelEditor({
       (sum, segment) => sum + Math.max(0, segment.duration_seconds),
       0,
     );
-    if (previewOutputTime >= total - 0.05) {
-      seekPreview(0);
-    } else {
-      seekPreview(previewOutputTime);
-    }
-    // WKWebView does not reliably expose video.volume. Keep the picture muted
-    // and route the same source through a dedicated, synchronized audio element.
-    video.muted = true;
-    audio.muted = previewMuted;
-    audio.volume = previewVolume;
+    const target =
+      previewOutputTime >= total - 0.05
+        ? resolvePreviewSeek(orderedSegments, 0)
+        : resolvePreviewSeek(orderedSegments, previewOutputTime);
+    if (!target) return;
+    previewIndexRef.current = target.segmentIndex;
+    setPreviewIndex(target.segmentIndex);
+    setPreviewOutputTime(target.outputTime);
+    setSourceTime(target.sourceTime);
+    pendingPreviewSeekRef.current = target;
+    previewMutedRef.current = previewMuted;
+    previewVolumeRef.current = previewVolume;
+    // Prefer a single element (locked A/V). Separate audio only when the user
+    // requested an explicit offset — dual seekers break hard cuts in WKWebView.
+    applyPreviewGain();
     previewingRef.current = true;
     setPreviewing(true);
     const waitForMetadata = (media: HTMLMediaElement) =>
       media.readyState >= HTMLMediaElement.HAVE_METADATA
         ? Promise.resolve()
-        : new Promise<void>((resolve) =>
-            media.addEventListener('loadedmetadata', () => resolve(), { once: true }),
-          );
-    void Promise.all([waitForMetadata(video), waitForMetadata(audio)])
+        : new Promise<void>((resolve, reject) => {
+            const onReady = () => {
+              media.removeEventListener('error', onError);
+              resolve();
+            };
+            const onError = () => {
+              media.removeEventListener('loadedmetadata', onReady);
+              reject(new Error('No se pudo cargar el medio para el preview'));
+            };
+            media.addEventListener('loadedmetadata', onReady, { once: true });
+            media.addEventListener('error', onError, { once: true });
+          });
+    const mediaReady =
+      usesSeparateAudio() && audio
+        ? Promise.all([waitForMetadata(video), waitForMetadata(audio)])
+        : waitForMetadata(video);
+    void mediaReady
       .then(async () => {
         if (!previewingRef.current || scrubbingRef.current) return;
-        syncAudioToVideo(video.currentTime, true);
-        await Promise.all([video.play(), audio.play()]);
+        await jumpPreviewToSource(target.sourceTime, true);
       })
       .catch((err: unknown) => {
         previewingRef.current = false;
         setPreviewing(false);
         video.pause();
-        audio.pause();
+        audio?.pause();
         setError(err instanceof Error ? err.message : 'El navegador bloqueó la reproducción');
       });
   }
@@ -681,10 +1067,9 @@ export function ReelEditor({
     const nextVolume = !nextMuted && previewVolume === 0 ? 0.8 : previewVolume;
     if (nextVolume !== previewVolume) setPreviewVolume(nextVolume);
     setPreviewMuted(nextMuted);
-    if (audioRef.current) {
-      audioRef.current.volume = nextVolume;
-      audioRef.current.muted = nextMuted;
-    }
+    previewMutedRef.current = nextMuted;
+    previewVolumeRef.current = nextVolume;
+    applyPreviewGain();
   }
 
   function changePreviewVolume(value: number) {
@@ -692,21 +1077,58 @@ export function ReelEditor({
     const nextMuted = nextVolume === 0;
     setPreviewVolume(nextVolume);
     setPreviewMuted(nextMuted);
-    if (audioRef.current) {
-      audioRef.current.volume = nextVolume;
-      audioRef.current.muted = nextMuted;
+    previewMutedRef.current = nextMuted;
+    previewVolumeRef.current = nextVolume;
+    applyPreviewGain();
+  }
+
+  async function savePreviewMusicVolume(volume: number) {
+    const clamped = Math.max(0, Math.min(volume, 1));
+    setMusicVolumeSaving(true);
+    try {
+      const next = await saveBackgroundMusic(projectId, { volume: clamped });
+      setBackgroundMusic(next);
+      applyMusicGain(next);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'No se pudo guardar el volumen de la música');
+    } finally {
+      setMusicVolumeSaving(false);
     }
   }
 
   useEffect(() => {
+    previewMutedRef.current = previewMuted;
+    previewVolumeRef.current = previewVolume;
+    applyPreviewGain();
+  }, [previewMuted, previewVolume]);
+
+  useEffect(() => {
+    applyMusicGain(backgroundMusic);
+  }, [backgroundMusic]);
+
+  useEffect(() => {
+    let cancelled = false;
+    getBackgroundMusic(projectId)
+      .then((data) => {
+        if (!cancelled) setBackgroundMusic(data);
+      })
+      .catch(() => {
+        if (!cancelled) setBackgroundMusic(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [projectId]);
+
+  useEffect(() => {
     const video = videoRef.current;
     const previewAudio = audioRef.current;
-    if (!video || !previewAudio || !activeReel) return;
+    if (!video || !activeReel) return;
     const syncedVideo: HTMLVideoElement = video;
-    const syncedAudio: HTMLAudioElement = previewAudio;
+    const syncedAudio = previewAudio;
 
     function onTimeUpdate() {
-      if (!video) return;
+      if (!video || jumpingRef.current) return;
       setSourceTime(video.currentTime);
       if (scrubbingRef.current) return;
       if (!previewingRef.current || !activeReel) return;
@@ -730,8 +1152,14 @@ export function ReelEditor({
             ),
         ),
       );
-      const audio = audioRef.current;
-      if (audio) syncAudioToVideo(video.currentTime);
+      const outputNow =
+        elapsedBefore +
+        Math.min(
+          Math.max(0, video.currentTime - current.source_start_seconds),
+          current.duration_seconds,
+        );
+      if (usesSeparateAudio()) syncAudioToVideo(video.currentTime);
+      syncMusicToOutput(outputNow);
       if (video.currentTime >= current.source_end_seconds - 0.04) {
         const nextIndex = index + 1;
         if (nextIndex >= ordered.length) {
@@ -740,13 +1168,14 @@ export function ReelEditor({
         }
         previewIndexRef.current = nextIndex;
         setPreviewIndex(nextIndex);
-        video.currentTime = ordered[nextIndex].source_start_seconds;
-        if (audio) syncAudioToVideo(ordered[nextIndex].source_start_seconds, true);
+        void jumpPreviewToSource(ordered[nextIndex].source_start_seconds, true);
       }
     }
 
     function onSeeking() {
-      if (!scrubbingRef.current) syncAudioToVideo(syncedVideo.currentTime, true);
+      if (!scrubbingRef.current && !jumpingRef.current && usesSeparateAudio()) {
+        syncAudioToVideo(syncedVideo.currentTime, true);
+      }
     }
 
     function onVideoMetadata() {
@@ -758,22 +1187,21 @@ export function ReelEditor({
     }
 
     function onAudioMetadata() {
-      if (pendingAudioTimeRef.current != null) {
-        if (setMediaTime(syncedAudio, pendingAudioTimeRef.current)) {
-          pendingAudioTimeRef.current = null;
-        }
+      if (!syncedAudio || pendingAudioTimeRef.current == null) return;
+      if (setMediaTime(syncedAudio, pendingAudioTimeRef.current)) {
+        pendingAudioTimeRef.current = null;
       }
     }
 
     syncedVideo.addEventListener('timeupdate', onTimeUpdate);
     syncedVideo.addEventListener('seeking', onSeeking);
     syncedVideo.addEventListener('loadedmetadata', onVideoMetadata);
-    syncedAudio.addEventListener('loadedmetadata', onAudioMetadata);
+    syncedAudio?.addEventListener('loadedmetadata', onAudioMetadata);
     return () => {
       syncedVideo.removeEventListener('timeupdate', onTimeUpdate);
       syncedVideo.removeEventListener('seeking', onSeeking);
       syncedVideo.removeEventListener('loadedmetadata', onVideoMetadata);
-      syncedAudio.removeEventListener('loadedmetadata', onAudioMetadata);
+      syncedAudio?.removeEventListener('loadedmetadata', onAudioMetadata);
     };
   }, [activeReel]);
 
@@ -801,7 +1229,8 @@ export function ReelEditor({
     audio?.pause();
     const showFirstFrame = () => {
       video.currentTime = first.source_start_seconds;
-      if (audio) {
+      applyPreviewGain();
+      if (usesSeparateAudio() && audio) {
         syncAudioToVideo(first.source_start_seconds, true);
       }
       setSourceTime(first.source_start_seconds);
@@ -1037,7 +1466,7 @@ export function ReelEditor({
             <button
               type="button"
               className="button button--secondary"
-              onClick={() => void handleAddManualFragment()}
+              onClick={() => openAddFragmentForm()}
               disabled={busy}
             >
               Añadir otro fragmento
@@ -1051,6 +1480,93 @@ export function ReelEditor({
               Eliminar Reel
             </button>
           </div>
+
+          {showAddFragment && (
+            <div className="reel-add-fragment">
+              <p className="reel-add-fragment__title">Nuevo fragmento</p>
+              <p className="muted reel-add-fragment__hint">
+                Elige el pedazo del video fuente (inicio y fin). Duración:{' '}
+                {formatDuration(Math.max(0, addFragmentEnd - addFragmentStart))}
+                {videoDuration != null ? ` · Video ${formatDuration(videoDuration)}` : ''}
+              </p>
+              <div className="reel-add-fragment__row">
+                <label className="field field--inline">
+                  <span>Inicio (s)</span>
+                  <input
+                    type="number"
+                    min={0}
+                    step="0.01"
+                    value={addFragmentStart}
+                    disabled={busy}
+                    onChange={(event) => setAddFragmentStart(Number(event.target.value))}
+                  />
+                </label>
+                <button
+                  type="button"
+                  className="button button--inline"
+                  disabled={busy || sourceTime == null}
+                  onClick={() => sourceTime != null && setAddFragmentStart(round3(sourceTime))}
+                >
+                  Usar tiempo actual
+                </button>
+                <button
+                  type="button"
+                  className="button button--inline"
+                  disabled={busy}
+                  onClick={() => void jumpPreviewToSource(addFragmentStart, false)}
+                >
+                  Ir al inicio
+                </button>
+              </div>
+              <div className="reel-add-fragment__row">
+                <label className="field field--inline">
+                  <span>Fin (s)</span>
+                  <input
+                    type="number"
+                    min={0}
+                    step="0.01"
+                    value={addFragmentEnd}
+                    disabled={busy}
+                    onChange={(event) => setAddFragmentEnd(Number(event.target.value))}
+                  />
+                </label>
+                <button
+                  type="button"
+                  className="button button--inline"
+                  disabled={busy || sourceTime == null}
+                  onClick={() => sourceTime != null && setAddFragmentEnd(round3(sourceTime))}
+                >
+                  Usar tiempo actual
+                </button>
+                <button
+                  type="button"
+                  className="button button--inline"
+                  disabled={busy}
+                  onClick={() => void jumpPreviewToSource(addFragmentEnd, false)}
+                >
+                  Ir al fin
+                </button>
+              </div>
+              <div className="reel-add-fragment__actions">
+                <button
+                  type="button"
+                  className="button"
+                  disabled={busy}
+                  onClick={() => void handleAddManualFragment()}
+                >
+                  Añadir fragmento
+                </button>
+                <button
+                  type="button"
+                  className="button button--secondary"
+                  disabled={busy}
+                  onClick={() => setShowAddFragment(false)}
+                >
+                  Cancelar
+                </button>
+              </div>
+            </div>
+          )}
 
           <div className="reel-summary">
             <p>
@@ -1089,9 +1605,8 @@ export function ReelEditor({
                   className="transcript-editor__video"
                   controls={false}
                   disablePictureInPicture
-                  muted
                   playsInline
-                  preload="metadata"
+                  preload="auto"
                   src={projectVideoUrl(projectId, mediaRevision)}
                 >
                   Tu navegador no soporta video HTML5.
@@ -1100,10 +1615,18 @@ export function ReelEditor({
               </div>
               <audio
                 ref={audioRef}
-                preload="metadata"
-                src={projectAudioUrl(projectId, mediaRevision)}
+                preload="auto"
+                src={projectVideoUrl(projectId, mediaRevision)}
                 aria-hidden="true"
               />
+              {musicPreviewActive() && backgroundMusic?.music_filename && (
+                <audio
+                  ref={musicRef}
+                  preload="auto"
+                  src={backgroundMusicAudioUrl(projectId, backgroundMusic.music_filename)}
+                  aria-hidden="true"
+                />
+              )}
               <div className="reel-preview__controls">
                 <button
                   type="button"
@@ -1139,7 +1662,7 @@ export function ReelEditor({
                   {previewMuted ? 'Activar audio' : 'Silenciar'}
                 </button>
                 <label className="reel-preview__volume">
-                  <span>Volumen</span>
+                  <span>Voz</span>
                   <input
                     type="range"
                     min={0}
@@ -1149,6 +1672,32 @@ export function ReelEditor({
                     onChange={(event) => changePreviewVolume(Number(event.target.value))}
                   />
                 </label>
+                {musicPreviewActive() && backgroundMusic && (
+                  <label className="reel-preview__volume">
+                    <span>Música {Math.round(backgroundMusic.volume * 100)}%</span>
+                    <input
+                      type="range"
+                      min={0}
+                      max={1}
+                      step={0.01}
+                      value={previewMuted ? 0 : backgroundMusic.volume}
+                      disabled={musicVolumeSaving}
+                      onChange={(event) => {
+                        const volume = Number(event.target.value);
+                        setBackgroundMusic({ ...backgroundMusic, volume });
+                        applyMusicGain({ ...backgroundMusic, volume });
+                      }}
+                      onPointerUp={(event) =>
+                        void savePreviewMusicVolume(
+                          Number((event.target as HTMLInputElement).value),
+                        )
+                      }
+                      onBlur={(event) =>
+                        void savePreviewMusicVolume(Number(event.target.value))
+                      }
+                    />
+                  </label>
+                )}
               </div>
               <div className="reel-audio-sync" hidden={activeTool !== 'audio'}>
                 <div className="reel-audio-sync__header">
@@ -1308,9 +1857,55 @@ export function ReelEditor({
                       </div>
                     </div>
 
-                    {segment.transcript_text && (
-                      <p className="reel-timeline__text">{segment.transcript_text}</p>
-                    )}
+                    {(() => {
+                      const baseline = fragmentCaptionBaseline(segment, timedTranscript);
+                      const draft = transcriptDrafts[segment.id] ?? baseline;
+                      const dirty = draft !== baseline;
+                      const saving = transcriptSavingId === segment.id;
+                      const hasCustom = Boolean(segment.transcript_text?.trim());
+                      return (
+                        <div className="reel-transcript-form">
+                          <p className="reel-transcript-form__label">
+                            Subtítulos de este fragmento
+                          </p>
+                          <p className="muted reel-transcript-form__meta">
+                            Solo afecta a este corte. No modifica la transcripción del proyecto.
+                          </p>
+                          <textarea
+                            rows={3}
+                            value={draft}
+                            disabled={saving || busy}
+                            placeholder="Texto que debe verse en este fragmento…"
+                            onChange={(event) =>
+                              setTranscriptDrafts((current) => ({
+                                ...current,
+                                [segment.id]: event.target.value,
+                              }))
+                            }
+                          />
+                          <div className="reel-transcript-form__actions">
+                            <button
+                              type="button"
+                              className="button button--inline"
+                              disabled={saving || busy || !dirty || !draft.trim()}
+                              onClick={() => void saveFragmentCaption(segment)}
+                            >
+                              {saving ? 'Guardando…' : 'Guardar subtítulo'}
+                            </button>
+                            {hasCustom && (
+                              <button
+                                type="button"
+                                className="button button--inline button--secondary"
+                                disabled={saving || busy}
+                                onClick={() => void clearFragmentCaption(segment)}
+                              >
+                                Texto del video
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })()}
 
                     <CutSuggestionMarkers
                       suggestions={cutReport?.suggestions ?? []}
@@ -1424,12 +2019,24 @@ export function ReelEditor({
                         ) : (
                           <span>Continúa casi sin hueco</span>
                         )}
-                        {segment.transition_type !== 'hard_cut' && (
-                          <span className="muted">
-                            {' '}
-                            · {segment.transition_type} {segment.transition_duration_ms} ms
-                          </span>
-                        )}
+                        <label className="reel-jump__transition">
+                          <span className="visually-hidden">Transición</span>
+                          <select
+                            value={segment.transition_type}
+                            disabled={busy}
+                            onChange={(e) =>
+                              void handleSegmentField(segment, {
+                                transition_type: e.target.value as TransitionType,
+                              })
+                            }
+                          >
+                            {TRANSITION_OPTIONS.map((option) => (
+                              <option key={option.value} value={option.value}>
+                                {option.label}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
                       </div>
                     )}
                   </li>
@@ -1448,6 +2055,7 @@ export function ReelEditor({
               projectId={projectId}
               aspectRatio={activeReel.aspect_ratio}
               hasCover={hasCover}
+              onCoverUpdated={onCoverUpdated}
             />
           </div>
 
@@ -1457,7 +2065,13 @@ export function ReelEditor({
             aria-labelledby="reel-tool-tab-audio"
             hidden={activeTool !== 'audio'}
           >
-            <BackgroundMusicPanel projectId={projectId} />
+            <BackgroundMusicPanel
+              projectId={projectId}
+              onSettingsChange={(settings) => {
+                setBackgroundMusic(settings);
+                applyMusicGain(settings);
+              }}
+            />
           </div>
 
           <div

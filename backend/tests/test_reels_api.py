@@ -256,7 +256,75 @@ def test_from_transcript_creates_segments(
     assert len(body["segments"]) == 2
     assert body["segments"][0]["source_start_seconds"] == pytest.approx(5.0)
     assert body["segments"][1]["source_start_seconds"] == pytest.approx(40.0)
-    assert body["segments"][0]["transcript_text"] == "Uno"
+    assert body["segments"][0]["transcript_text"] is None
+
+
+def test_patch_fragment_caption_persists_and_drives_preview(
+    client: TestClient, project_with_duration: str
+) -> None:
+    """Editing a fragment subtitle must persist and appear in subtitle-preview."""
+    project_id = project_with_duration
+    import json
+
+    transcript = {
+        "language": "es",
+        "segments": [
+            {
+                "start": 0.0,
+                "end": 10.0,
+                "text": "uno dos tres cuatro",
+                "words": [
+                    {"start": 0.5, "end": 1.5, "text": "uno"},
+                    {"start": 1.5, "end": 2.5, "text": "dos"},
+                    {"start": 2.5, "end": 3.5, "text": "tres"},
+                    {"start": 3.5, "end": 4.5, "text": "cuatro"},
+                ],
+            }
+        ],
+    }
+    files = {
+        "file": ("t.json", json.dumps(transcript).encode("utf-8"), "application/json")
+    }
+    up = client.post(f"/api/projects/{project_id}/transcript", files=files)
+    assert up.status_code == 201, up.text
+
+    created = client.post(
+        f"/api/projects/{project_id}/reels",
+        json={
+            "title": "Caption persist",
+            "segments": [
+                {
+                    "source_start_seconds": 0.0,
+                    "source_end_seconds": 5.0,
+                    "transition_type": "hard_cut",
+                    "transition_duration_ms": 0,
+                }
+            ],
+        },
+    )
+    assert created.status_code == 201, created.text
+    reel = created.json()
+    segment_id = reel["segments"][0]["id"]
+
+    edited = client.patch(
+        f"/api/projects/{project_id}/reels/{reel['id']}/segments/{segment_id}",
+        json={"transcript_text": "uno dos editado"},
+    )
+    assert edited.status_code == 200, edited.text
+    assert edited.json()["segments"][0]["transcript_text"] == "uno dos editado"
+
+    fetched = client.get(f"/api/projects/{project_id}/reels/{reel['id']}")
+    assert fetched.status_code == 200, fetched.text
+    assert fetched.json()["segments"][0]["transcript_text"] == "uno dos editado"
+
+    preview = client.get(
+        f"/api/projects/{project_id}/reels/{reel['id']}/subtitle-preview"
+    )
+    assert preview.status_code == 200, preview.text
+    joined = " ".join(cue["text"] for cue in preview.json()["cues"]).lower()
+    assert "editado" in joined
+    assert "tres" not in joined
+    assert "cuatro" not in joined
 
 
 def test_reorder_incomplete_rejected(

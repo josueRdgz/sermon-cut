@@ -1,5 +1,6 @@
 export type EndCardLayout = 'cover_full' | 'cover_card' | 'minimal';
 export type EndCardAudioMode = 'silence' | 'continue_with_fade' | 'local_music';
+export type EndCardMessagePosition = 'top' | 'center' | 'bottom';
 
 export interface EndCardLayoutInfo {
   id: EndCardLayout;
@@ -22,6 +23,7 @@ export interface EndCardSettings {
   qr_url: string | null;
   channel_handle: string | null;
   custom_message: string | null;
+  message_position: EndCardMessagePosition;
   /** False when the project inherits the global configuration. */
   is_project_override: boolean;
   /** The end card cannot be turned off. */
@@ -44,5 +46,6 @@ export type EndCardSettingsPayload = Partial<
     | 'qr_url'
     | 'channel_handle'
     | 'custom_message'
+    | 'message_position'
   >
 >;

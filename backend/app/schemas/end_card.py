@@ -9,6 +9,7 @@ from app.models.end_card import (
     MIN_END_CARD_SECONDS,
     EndCardAudioMode,
     EndCardLayout,
+    EndCardMessagePosition,
 )
 
 
@@ -28,6 +29,7 @@ class EndCardSettingsUpdate(BaseModel):
     qr_url: str | None = Field(default=None, max_length=500)
     channel_handle: str | None = Field(default=None, max_length=200)
     custom_message: str | None = Field(default=None, max_length=500)
+    message_position: EndCardMessagePosition | None = None
 
 
 class EndCardSettingsResponse(BaseModel):
@@ -48,6 +50,7 @@ class EndCardSettingsResponse(BaseModel):
     qr_url: str | None
     channel_handle: str | None
     custom_message: str | None
+    message_position: EndCardMessagePosition
     # False when the project inherits the global configuration.
     is_project_override: bool
     # The end card cannot be disabled; surfaced so the UI can say so.

@@ -46,4 +46,7 @@ export interface TranscriptSegmentUpdatePayload {
   text?: string;
   start_seconds?: number | null;
   end_seconds?: number | null;
+  /** Retarget word clocks into this source window (Reel fragment edits). */
+  fit_words_start_seconds?: number;
+  fit_words_end_seconds?: number;
 }

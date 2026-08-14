@@ -70,6 +70,7 @@ def _response(config: end_card_service.ResolvedEndCard) -> EndCardSettingsRespon
         qr_url=config.qr_url,
         channel_handle=config.channel_handle,
         custom_message=config.custom_message,
+        message_position=config.message_position,
         is_project_override=config.is_project_override,
     )
 
@@ -201,6 +202,7 @@ def preview_end_card(
         layout=layout or config.layout,
         width=width,
         height=height,
+        message_position=config.message_position,
     )
     if scale < 1.0:
         image = image.resize((round(width * scale), round(height * scale)))

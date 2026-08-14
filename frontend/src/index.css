@@ -49,6 +49,22 @@ a:hover {
   --workspace-nav-offset: 6.25rem;
 }
 
+.project-cover-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem;
+  margin: 0.25rem 0 0.5rem;
+}
+
+.project-cover-actions__thumb {
+  width: 4.5rem;
+  height: 4.5rem;
+  object-fit: cover;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+}
+
 .project-workspace [hidden] {
   display: none !important;
 }
@@ -1044,6 +1060,40 @@ a:hover {
   margin: 1rem 0;
 }
 
+.reel-add-fragment {
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+  margin: 0 0 1rem;
+  padding: 0.85rem 1rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel);
+}
+
+.reel-add-fragment__title {
+  margin: 0;
+  font-weight: 600;
+}
+
+.reel-add-fragment__hint {
+  margin: 0;
+  font-size: 0.9rem;
+}
+
+.reel-add-fragment__row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.65rem;
+  align-items: flex-end;
+}
+
+.reel-add-fragment__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.65rem;
+}
+
 .reel-tabs {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
@@ -1167,6 +1217,53 @@ a:hover {
   color: var(--text-secondary);
 }
 
+.reel-transcript-fix {
+  margin-top: 0.65rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+}
+
+.reel-transcript-fix__label {
+  margin: 0;
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+.reel-transcript-fix__block {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  padding: 0.55rem 0.65rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+}
+
+.reel-transcript-fix__meta {
+  font-size: 0.8rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+
+.reel-transcript-fix__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.reel-transcript-fix textarea {
+  width: 100%;
+  resize: vertical;
+  min-height: 4.5rem;
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: 4px;
+  padding: 0.45rem 0.55rem;
+  color: var(--text);
+  font: inherit;
+  line-height: 1.4;
+}
+
 .reel-segment-edit {
   margin-top: 0.75rem;
   padding-top: 0.75rem;
@@ -1217,6 +1314,28 @@ a:hover {
   text-transform: uppercase;
   font-size: 0.75rem;
   letter-spacing: 0.04em;
+}
+
+.reel-jump__transition select {
+  max-width: 12rem;
+  background: var(--bg);
+  border: 1px solid var(--border-strong);
+  border-radius: 4px;
+  color: var(--text);
+  font: inherit;
+  padding: 0.2rem 0.4rem;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
 }
 
 /* ---- Render panel ---- */
@@ -1690,6 +1809,17 @@ a:hover {
   gap: 0.7rem;
   flex: 1 1 320px;
   min-width: 280px;
+}
+
+.end-card-panel__cover {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.end-card-panel__cover > span {
+  font-weight: 600;
+  font-size: 0.9rem;
 }
 
 .warning {

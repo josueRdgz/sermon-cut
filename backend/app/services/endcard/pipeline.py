@@ -37,7 +37,13 @@ def build_end_card_spec(
         config.duration_seconds, minimum=MIN_END_CARD_SECONDS, maximum=MAX_END_CARD_SECONDS
     )
 
-    image = render_end_card(content=content, layout=config.layout, width=width, height=height)
+    image = render_end_card(
+        content=content,
+        layout=config.layout,
+        width=width,
+        height=height,
+        message_position=config.message_position,
+    )
     save_end_card(image, image_path)
 
     return EndCardSpec(

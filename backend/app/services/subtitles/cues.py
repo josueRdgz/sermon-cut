@@ -86,6 +86,42 @@ def sanitize_caption_text(text: str, *, allow_emoji: bool = False) -> str:
     return cleaned
 
 
+def _caption_tokens(text: str) -> list[str]:
+    return [token for token in sanitize_caption_text(text).split() if token]
+
+
+def _token_key(tokens: list[str]) -> str:
+    return " ".join(token.casefold() for token in tokens)
+
+
+def _is_token_subsequence(short: list[str], long: list[str]) -> bool:
+    if not short:
+        return True
+    iterator = iter(long)
+    return all(any(item.casefold() == token.casefold() for item in iterator) for token in short)
+
+
+def _synthesize_mapped_words(tokens: list[str], start: float, end: float) -> list[MappedWord]:
+    """Pack caption tokens evenly across an output window."""
+    if not tokens or end <= start:
+        return []
+    weights = [max(1, len(token)) for token in tokens]
+    total_weight = sum(weights)
+    duration = end - start
+    mapped: list[MappedWord] = []
+    elapsed = 0
+    for index, (token, weight) in enumerate(zip(tokens, weights, strict=True)):
+        word_start = start + duration * elapsed / total_weight
+        elapsed += weight
+        word_end = (
+            end if index == len(tokens) - 1 else start + duration * elapsed / total_weight
+        )
+        mapped.append(
+            MappedWord(text=token, start=word_start, end=max(word_end, word_start + 0.04))
+        )
+    return mapped
+
+
 def build_cues_for_reel(
     *,
     reel_segments: list[TimelineSegment],
@@ -95,15 +131,21 @@ def build_cues_for_reel(
 ) -> CueBuildResult:
     """Remap transcript material onto the final reel timeline and split into cues.
 
-    Words that no longer exist in ``transcript_segments`` never appear — we never
-    reconstruct text from stale copies when live words are available.
+    Live word timestamps are preferred when they still match the caption text.
+    When the user edits a fragment and the remaining word clocks no longer cover
+    that text (or the text was rewritten), the edited ``fallback_texts`` are
+    packed onto the cut so the full subtitle remains visible.
     """
     timeline = build_output_timeline(reel_segments)
     if not timeline.placements:
         return CueBuildResult(cues=[], granularity_used=options.granularity, total_duration=0.0)
 
     template = get_template(options.style)
-    mapped_words = _collect_mapped_words(timeline.placements, transcript_segments)
+    mapped_words = _collect_mapped_words(
+        timeline.placements,
+        transcript_segments,
+        fallback_texts,
+    )
     has_words = bool(mapped_words)
 
     granularity = options.granularity
@@ -183,23 +225,75 @@ def _suppress_overlapping_cues(cues: list[SubtitleCue]) -> list[SubtitleCue]:
 def _collect_mapped_words(
     placements: list[SegmentPlacement],
     transcript_segments: list[SourceSegment],
+    fallback_texts: list[str | None],
 ) -> list[MappedWord]:
     mapped: list[MappedWord] = []
-    for placement in placements:
-        for segment in transcript_segments:
-            for word in segment.words:
-                text = sanitize_caption_text(word.text)
-                if not text:
-                    continue
-                if word.start is None or word.end is None:  # type: ignore[redundant-expr]
-                    continue
-                mapped_interval = map_source_interval(placement, word.start, word.end)
-                if mapped_interval is None:
-                    continue
-                out_start, out_end = mapped_interval
-                mapped.append(MappedWord(text=text, start=out_start, end=out_end))
+    for index, placement in enumerate(placements):
+        fallback = fallback_texts[index] if index < len(fallback_texts) else None
+        mapped.extend(
+            _mapped_words_for_placement(placement, transcript_segments, fallback)
+        )
     mapped.sort(key=lambda w: (w.start, w.end))
     return _suppress_overlapping_words(mapped)
+
+
+def _mapped_words_for_placement(
+    placement: SegmentPlacement,
+    transcript_segments: list[SourceSegment],
+    fallback: str | None,
+) -> list[MappedWord]:
+    overlapping = [
+        segment
+        for segment in transcript_segments
+        if segment.end > placement.source_start and segment.start < placement.source_end
+    ]
+    mapped: list[MappedWord] = []
+    live_tokens: list[str] = []
+    for segment in overlapping:
+        live_tokens.extend(_caption_tokens(segment.text))
+        for word in segment.words:
+            text = sanitize_caption_text(word.text)
+            if not text:
+                continue
+            mapped_interval = map_source_interval(placement, word.start, word.end)
+            if mapped_interval is None:
+                continue
+            out_start, out_end = mapped_interval
+            mapped.append(MappedWord(text=text, start=out_start, end=out_end))
+
+    fallback_tokens = _caption_tokens(fallback or "")
+    output_start = placement.output_start
+    output_end = placement.output_start + placement.content_duration
+    mapped_tokens = [word.text for word in mapped]
+    fallback_key = _token_key(fallback_tokens)
+    mapped_key = _token_key(mapped_tokens)
+    live_key = _token_key(live_tokens)
+
+    if not fallback_tokens:
+        return mapped
+    if mapped_key == fallback_key:
+        return mapped
+
+    # Legacy contamination: every cut stored the full Whisper span as caption.
+    if (
+        mapped
+        and fallback_key == live_key
+        and len(fallback_tokens) > len(mapped_tokens)
+        and _is_token_subsequence(mapped_tokens, fallback_tokens)
+    ):
+        return mapped
+
+    # Stale reel caption still lists words the live transcript already deleted.
+    if (
+        mapped
+        and live_key == mapped_key
+        and _is_token_subsequence(mapped_tokens, fallback_tokens)
+        and fallback_key != live_key
+    ):
+        return mapped
+
+    # User-edited per-cut caption is authoritative — always honor it.
+    return _synthesize_mapped_words(fallback_tokens, output_start, output_end)
 
 
 def _suppress_overlapping_words(words: list[MappedWord]) -> list[MappedWord]:
@@ -291,33 +385,54 @@ def _cues_from_segments(
     max_chars: int,
 ) -> list[SubtitleCue]:
     cues: list[SubtitleCue] = []
-    for placement, fallback in zip(placements, fallback_texts, strict=False):
-        overlapping = [
-            seg
-            for seg in transcript_segments
-            if seg.end > placement.source_start and seg.start < placement.source_end
-        ]
-        if overlapping:
-            for seg in overlapping:
-                mapped = map_source_interval(placement, seg.start, seg.end)
-                if mapped is None:
-                    continue
-                # Prefer live segment text (reflects edits / deleted words when
-                # the editor rewrote the segment without word rows).
-                raw = sanitize_caption_text(seg.text)
-                if not raw:
-                    continue
+    for index, placement in enumerate(placements):
+        fallback = fallback_texts[index] if index < len(fallback_texts) else None
+        mapped = _mapped_words_for_placement(placement, transcript_segments, fallback)
+        if mapped:
+            raw = sanitize_caption_text(" ".join(word.text for word in mapped))
+            if raw:
                 text = wrap_lines(
                     _case(raw, options.uppercase),
                     max_lines=max_lines,
                     max_chars=max_chars,
                 )
-                out_start, out_end = mapped
+                if text:
+                    cues.append(
+                        SubtitleCue(
+                            start=placement.output_start,
+                            end=placement.output_start + placement.content_duration,
+                            text=text,
+                        )
+                    )
+            continue
+
+        raw_fallback = sanitize_caption_text(fallback or "")
+        if raw_fallback:
+            text = wrap_lines(
+                _case(raw_fallback, options.uppercase),
+                max_lines=max_lines,
+                max_chars=max_chars,
+            )
+            if text:
                 cues.append(
-                    SubtitleCue(start=out_start, end=max(out_end, out_start + 0.05), text=text)
+                    SubtitleCue(
+                        start=placement.output_start,
+                        end=placement.output_start + placement.content_duration,
+                        text=text,
+                    )
                 )
-        elif fallback:
-            raw = sanitize_caption_text(fallback)
+            continue
+
+        overlapping = [
+            seg
+            for seg in transcript_segments
+            if seg.end > placement.source_start and seg.start < placement.source_end
+        ]
+        for seg in overlapping:
+            mapped_interval = map_source_interval(placement, seg.start, seg.end)
+            if mapped_interval is None:
+                continue
+            raw = sanitize_caption_text(seg.text)
             if not raw:
                 continue
             text = wrap_lines(
@@ -325,12 +440,9 @@ def _cues_from_segments(
                 max_lines=max_lines,
                 max_chars=max_chars,
             )
+            out_start, out_end = mapped_interval
             cues.append(
-                SubtitleCue(
-                    start=placement.output_start,
-                    end=placement.output_start + placement.content_duration,
-                    text=text,
-                )
+                SubtitleCue(start=out_start, end=max(out_end, out_start + 0.05), text=text)
             )
     cues.sort(key=lambda c: (c.start, c.end))
     return cues

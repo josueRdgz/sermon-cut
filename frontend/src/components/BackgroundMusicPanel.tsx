@@ -20,6 +20,8 @@ interface BackgroundMusicPanelProps {
   projectId: string;
   /** When true, keep meters refreshed for the export panel. */
   showMeters?: boolean;
+  /** Notify the parent when settings change (preview mix, etc.). */
+  onSettingsChange?: (settings: BackgroundMusicSettings) => void;
 }
 
 const FALLBACK_PRESETS: BackgroundMusicPresetInfo[] = [
@@ -38,7 +40,11 @@ const FALLBACK_PRESETS: BackgroundMusicPresetInfo[] = [
 const RIGHTS_FALLBACK =
   'El usuario es responsable de contar con los derechos necesarios para utilizar este audio.';
 
-export function BackgroundMusicPanel({ projectId, showMeters = true }: BackgroundMusicPanelProps) {
+export function BackgroundMusicPanel({
+  projectId,
+  showMeters = true,
+  onSettingsChange,
+}: BackgroundMusicPanelProps) {
   const [settings, setSettings] = useState<BackgroundMusicSettings | null>(null);
   const [presets, setPresets] = useState<BackgroundMusicPresetInfo[]>(FALLBACK_PRESETS);
   const [meters, setMeters] = useState<BackgroundMusicMeters | null>(null);
@@ -69,7 +75,10 @@ export function BackgroundMusicPanel({ projectId, showMeters = true }: Backgroun
     let cancelled = false;
     getBackgroundMusic(projectId)
       .then((data) => {
-        if (!cancelled) setSettings(data);
+        if (!cancelled) {
+          setSettings(data);
+          onSettingsChange?.(data);
+        }
       })
       .catch((err: unknown) => {
         if (!cancelled) {
@@ -79,7 +88,7 @@ export function BackgroundMusicPanel({ projectId, showMeters = true }: Backgroun
     return () => {
       cancelled = true;
     };
-  }, [projectId]);
+  }, [projectId, onSettingsChange]);
 
   useEffect(() => {
     void reloadMeters();
@@ -92,6 +101,7 @@ export function BackgroundMusicPanel({ projectId, showMeters = true }: Backgroun
       try {
         const next = await saveBackgroundMusic(projectId, payload);
         setSettings(next);
+        onSettingsChange?.(next);
         setNotice(message);
         await reloadMeters();
       } catch (err) {
@@ -100,7 +110,7 @@ export function BackgroundMusicPanel({ projectId, showMeters = true }: Backgroun
         setBusy(false);
       }
     },
-    [projectId, reloadMeters],
+    [projectId, reloadMeters, onSettingsChange],
   );
 
   const handleUpload = async (file: File | null) => {
@@ -111,6 +121,7 @@ export function BackgroundMusicPanel({ projectId, showMeters = true }: Backgroun
     try {
       const next = await uploadBackgroundMusic(projectId, file, setUploadPercent);
       setSettings(next);
+      onSettingsChange?.(next);
       setAudioPreviewKey(Date.now().toString());
       setNotice('Audio guardado en el proyecto. Elige un preset distinto de «Ninguna» para usarlo.');
       await reloadMeters();
@@ -249,6 +260,9 @@ export function BackgroundMusicPanel({ projectId, showMeters = true }: Backgroun
             controls
             preload="metadata"
             src={backgroundMusicAudioUrl(projectId, audioPreviewKey)}
+            onLoadedMetadata={(event) => {
+              event.currentTarget.volume = Math.max(0, Math.min(1, settings.volume));
+            }}
           >
             Tu navegador no soporta reproducción de audio.
           </audio>
@@ -283,7 +297,13 @@ export function BackgroundMusicPanel({ projectId, showMeters = true }: Backgroun
               step={0.01}
               value={settings.volume}
               disabled={busy}
-              onChange={(e) => setSettings({ ...settings, volume: Number(e.target.value) })}
+              onChange={(e) => {
+                const volume = Number(e.target.value);
+                setSettings({ ...settings, volume });
+                if (audioPreviewRef.current) {
+                  audioPreviewRef.current.volume = Math.max(0, Math.min(1, volume));
+                }
+              }}
               onPointerUp={(e) =>
                 void patch({ volume: Number((e.target as HTMLInputElement).value) })
               }

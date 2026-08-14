@@ -13,8 +13,8 @@ export function listProjects(): Promise<ProjectListResponse> {
   return apiGet<ProjectListResponse>('/api/projects');
 }
 
-export function projectCoverUrl(id: string): string {
-  return `${API_BASE_URL}/api/projects/${id}/media/cover`;
+export function projectCoverUrl(id: string, cacheKey?: string | number | null): string {
+  return withCacheKey(`${API_BASE_URL}/api/projects/${id}/media/cover`, cacheKey);
 }
 
 function withCacheKey(url: string, cacheKey?: string | number | null): string {

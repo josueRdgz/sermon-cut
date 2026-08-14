@@ -200,12 +200,23 @@ def delete_transcript(db: Session, project_id: UUID) -> None:
 
 
 def _sync_edited_words(segment: TranscriptSegment, text: str) -> None:
-    """Keep word-level captions consistent after a user corrects segment text."""
+    """Keep word-level captions consistent after a user corrects segment text.
+
+    Prefer aligning new tokens to existing word timestamps (so deleting out-of-
+    clip words keeps the remaining speech timed correctly). Only redistribute
+    evenly across the segment window when almost nothing matches.
+    """
+    from difflib import SequenceMatcher
+
     existing = sorted(segment.words, key=lambda word: word.order)
     if not existing:
         return
 
     tokens = text.split()
+    if not tokens:
+        segment.words.clear()
+        return
+
     if len(tokens) == len(existing):
         for token, word in zip(tokens, existing, strict=True):
             if word.text != token:
@@ -214,15 +225,128 @@ def _sync_edited_words(segment: TranscriptSegment, text: str) -> None:
                 word.confidence = None
         return
 
+    old_texts = [word.text for word in existing]
+    matcher = SequenceMatcher(a=old_texts, b=tokens, autojunk=False)
+    opcodes = matcher.get_opcodes()
+    matched = sum(j2 - j1 for tag, _i1, _i2, j1, j2 in opcodes if tag == "equal")
+    # If too few tokens align, fall back to even distribution (full rewrite).
+    if matched < max(1, len(tokens) // 3):
+        _rebuild_words_evenly(segment, tokens)
+        return
+
+    rebuilt: list[TranscriptWord] = []
+    order = 0
+    for tag, i1, i2, j1, j2 in opcodes:
+        if tag == "equal":
+            for old_word, token in zip(existing[i1:i2], tokens[j1:j2], strict=True):
+                rebuilt.append(
+                    TranscriptWord(
+                        order=order,
+                        start_seconds=old_word.start_seconds,
+                        end_seconds=old_word.end_seconds,
+                        text=token,
+                        confidence=None if old_word.text != token else old_word.confidence,
+                    )
+                )
+                order += 1
+            continue
+
+        if tag == "delete":
+            continue
+
+        # replace or insert: place new tokens in the gap between neighbors.
+        left = rebuilt[-1] if rebuilt else None
+        right = existing[i2] if i2 < len(existing) else None
+        gap_start = (
+            left.end_seconds
+            if left is not None and left.end_seconds is not None
+            else (
+                existing[i1 - 1].end_seconds
+                if i1 > 0 and existing[i1 - 1].end_seconds is not None
+                else segment.start_seconds
+            )
+        )
+        gap_end = (
+            right.start_seconds
+            if right is not None and right.start_seconds is not None
+            else segment.end_seconds
+        )
+        new_tokens = tokens[j1:j2]
+        if (
+            gap_start is None
+            or gap_end is None
+            or gap_end <= gap_start
+            or not new_tokens
+        ):
+            # No usable gap — append with tiny durations after the last word.
+            anchor = (
+                left.end_seconds
+                if left is not None and left.end_seconds is not None
+                else segment.start_seconds or 0.0
+            )
+            for offset, token in enumerate(new_tokens):
+                rebuilt.append(
+                    TranscriptWord(
+                        order=order,
+                        start_seconds=anchor + offset * 0.05,
+                        end_seconds=anchor + (offset + 1) * 0.05,
+                        text=token,
+                        confidence=None,
+                    )
+                )
+                order += 1
+            continue
+
+        weights = [max(1, len(token)) for token in new_tokens]
+        total_weight = sum(weights)
+        duration = gap_end - gap_start
+        elapsed = 0
+        for index, (token, weight) in enumerate(zip(new_tokens, weights, strict=True)):
+            word_start = gap_start + duration * elapsed / total_weight
+            elapsed += weight
+            word_end = (
+                gap_end
+                if index == len(new_tokens) - 1
+                else gap_start + duration * elapsed / total_weight
+            )
+            rebuilt.append(
+                TranscriptWord(
+                    order=order,
+                    start_seconds=word_start,
+                    end_seconds=word_end,
+                    text=token,
+                    confidence=None,
+                )
+            )
+            order += 1
+
+    segment.words = rebuilt
+
+
+def _rebuild_words_evenly(segment: TranscriptSegment, tokens: list[str]) -> None:
+    """Distribute tokens evenly across the segment window (full rewrite)."""
     start = segment.start_seconds
     end = segment.end_seconds
     if start is None or end is None or end <= start:
         segment.words.clear()
         return
+    _rebuild_words_in_window(segment, tokens, start, end)
 
-    # When words were added or removed, distribute the corrected tokens across
-    # the original segment window. Character weighting gives longer words a
-    # little more screen time while preserving the segment boundaries.
+
+def _rebuild_words_in_window(
+    segment: TranscriptSegment,
+    tokens: list[str],
+    start: float,
+    end: float,
+) -> None:
+    """Distribute tokens evenly across an explicit source window."""
+    if end <= start:
+        segment.words.clear()
+        return
+    if not tokens:
+        segment.words.clear()
+        return
+
     weights = [max(1, len(token)) for token in tokens]
     total_weight = sum(weights)
     duration = end - start
@@ -408,6 +532,17 @@ def update_segment(
             new_start=new_start,
             new_end=new_end,
         )
+
+    fit_start = data.get("fit_words_start_seconds")
+    fit_end = data.get("fit_words_end_seconds")
+    if (
+        isinstance(fit_start, (int, float))
+        and isinstance(fit_end, (int, float))
+        and fit_end > fit_start
+    ):
+        tokens = cleaned_text.split() if cleaned_text else []
+        if tokens:
+            _rebuild_words_in_window(segment, tokens, float(fit_start), float(fit_end))
 
     transcript.full_text = "\n".join(s.text for s in siblings)
     transcript.has_word_timestamps = any(

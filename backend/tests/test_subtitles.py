@@ -134,6 +134,108 @@ def test_deleted_word_does_not_appear() -> None:
     assert "limpia" in joined
 
 
+def test_edited_fallback_fills_incomplete_word_mapping() -> None:
+    """When the cut has no usable word clocks, pack the edited caption text."""
+    reel = [TimelineSegment(10.0, 20.0)]
+    transcript = [
+        SourceSegment(
+            text="intro otro",
+            start=0.0,
+            end=30.0,
+            words=[
+                # Outside the reel cut — mapped words empty for this placement.
+                SourceWord("intro", 0.0, 2.0),
+                SourceWord("otro", 22.0, 28.0),
+            ],
+        )
+    ]
+    result = build_cues_for_reel(
+        reel_segments=reel,
+        transcript_segments=transcript,
+        fallback_texts=["media final"],
+        options=SubtitleOptions(
+            style="reformed_sober",
+            granularity=SubtitleGranularity.phrase,
+            max_words=12,
+        ),
+    )
+    joined = " ".join(cue.text for cue in result.cues).lower()
+    assert "media" in joined
+    assert "final" in joined
+
+
+def test_full_span_fallback_does_not_repack_onto_short_cut() -> None:
+    """A leftover full-segment caption must not repeat across a trimmed cut."""
+    reel = [TimelineSegment(0.0, 5.0), TimelineSegment(10.0, 15.0)]
+    transcript = [
+        SourceSegment(
+            text="uno dos tres cuatro",
+            start=0.0,
+            end=20.0,
+            words=[
+                SourceWord("uno", 0.5, 1.5),
+                SourceWord("dos", 1.5, 2.5),
+                SourceWord("tres", 10.5, 11.5),
+                SourceWord("cuatro", 11.5, 12.5),
+            ],
+        )
+    ]
+    result = build_cues_for_reel(
+        reel_segments=reel,
+        transcript_segments=transcript,
+        # Old bug: every fragment stored the full Whisper span as transcript_text.
+        fallback_texts=["uno dos tres cuatro", "uno dos tres cuatro"],
+        options=SubtitleOptions(
+            style="reformed_sober",
+            granularity=SubtitleGranularity.word,
+            max_words=1,
+        ),
+    )
+    first = " ".join(
+        cue.text for cue in result.cues if cue.start < 5.0
+    ).lower()
+    second = " ".join(
+        cue.text for cue in result.cues if cue.start >= 5.0
+    ).lower()
+    assert "uno" in first and "dos" in first
+    assert "tres" not in first and "cuatro" not in first
+    assert "tres" in second and "cuatro" in second
+    assert "uno" not in second and "dos" not in second
+
+
+def test_per_cut_fallback_does_not_wipe_later_fragment() -> None:
+    """Each reel cut's caption text is independent of the shared Whisper span."""
+    reel = [TimelineSegment(0.0, 5.0), TimelineSegment(10.0, 15.0)]
+    transcript = [
+        SourceSegment(
+            text="uno dos tres cuatro",
+            start=0.0,
+            end=20.0,
+            words=[
+                SourceWord("uno", 0.5, 1.5),
+                SourceWord("dos", 1.5, 2.5),
+                SourceWord("tres", 10.5, 11.5),
+                SourceWord("cuatro", 11.5, 12.5),
+            ],
+        )
+    ]
+    result = build_cues_for_reel(
+        reel_segments=reel,
+        transcript_segments=transcript,
+        fallback_texts=["uno dos", None],
+        options=SubtitleOptions(
+            style="reformed_sober",
+            granularity=SubtitleGranularity.phrase,
+            max_words=12,
+        ),
+    )
+    joined = " ".join(cue.text for cue in result.cues).lower()
+    assert "uno" in joined
+    assert "dos" in joined
+    assert "tres" in joined
+    assert "cuatro" in joined
+
+
 def test_degrades_to_segment_without_word_timestamps() -> None:
     reel = [TimelineSegment(0.0, 5.0), TimelineSegment(20.0, 25.0)]
     transcript = [

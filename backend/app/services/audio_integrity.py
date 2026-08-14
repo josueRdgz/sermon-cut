@@ -1,8 +1,8 @@
-"""Keep source speech intact and realign A/V when *our* FFmpeg steps drift.
+"""Keep source speech intact and only touch timestamps when FFmpeg left real drift.
 
-Editorial cuts (reel segments) still jump in time. This module only repairs
-damage introduced by copy-cuts, muxing, or timestamp resets — it does not
-stretch, squeeze, or rewrite healthy audio.
+AAC frame rounding after a stream-copy cut often looks like a ~20–200 ms
+duration mismatch. Re-encoding that “heal” destroys speech quality. Prefer
+bitstream copy; decode audio only as a last resort at high bitrate.
 """
 
 from __future__ import annotations
@@ -17,8 +17,10 @@ from app.core.exceptions import AppError
 from app.services.render.binary import locate_ffmpeg
 from app.services.render.runner import FFmpegError, run_ffmpeg
 
-_START_DRIFT_SECONDS = 0.02
-_DURATION_DRIFT_SECONDS = 0.04
+# Ignore normal AAC/container rounding. Only act on audible desync.
+START_DRIFT_SECONDS = 0.15
+DURATION_DRIFT_SECONDS = 0.40
+_LAST_RESORT_AUDIO_BITRATE_K = 320
 
 
 @dataclass(frozen=True)
@@ -40,8 +42,8 @@ class AvAlignment:
 
     def needs_heal(self) -> bool:
         return (
-            self.start_drift > _START_DRIFT_SECONDS
-            or self.duration_drift > _DURATION_DRIFT_SECONDS
+            self.start_drift > START_DRIFT_SECONDS
+            or self.duration_drift > DURATION_DRIFT_SECONDS
         )
 
 
@@ -116,8 +118,58 @@ def probe_av_alignment(path: Path) -> AvAlignment | None:
     )
 
 
+def _run_heal(
+    ffmpeg: str,
+    path: Path,
+    temp: Path,
+    log_path: Path,
+    *,
+    reencode_audio: bool,
+    video_duration: float,
+) -> bool:
+    args = [
+        ffmpeg,
+        "-y",
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-i",
+        str(path),
+        "-map",
+        "0:v:0",
+        "-map",
+        "0:a:0",
+        "-c:v",
+        "copy",
+    ]
+    if reencode_audio:
+        args.extend(
+            [
+                "-c:a",
+                "aac",
+                "-b:a",
+                f"{_LAST_RESORT_AUDIO_BITRATE_K}k",
+                "-af",
+                f"asetpts=PTS-STARTPTS,apad,atrim=0:{video_duration:.3f},asetpts=PTS-STARTPTS",
+            ]
+        )
+    else:
+        args.extend(["-c:a", "copy"])
+    args.extend(
+        [
+            "-movflags",
+            "+faststart",
+            "-avoid_negative_ts",
+            "make_zero",
+            str(temp),
+        ]
+    )
+    result = run_ffmpeg(args, log_path=log_path)
+    return result.returncode == 0 and temp.is_file() and temp.stat().st_size > 1024
+
+
 def heal_program_audio(path: Path) -> bool:
-    """If FFmpeg left A/V drifted, remux with padded/trimmed audio (no stretch).
+    """If FFmpeg left a large A/V drift, remux. Prefer bitstream copy.
 
     Returns True when the file was rewritten.
     """
@@ -128,41 +180,34 @@ def heal_program_audio(path: Path) -> bool:
     if ffmpeg is None:
         return False
 
-    duration = alignment.video_duration
     temp = path.with_name(f".{path.stem}.heal{path.suffix}")
     log_path = path.with_name(f"{path.stem}.heal.log")
     temp.unlink(missing_ok=True)
     try:
-        result = run_ffmpeg(
-            [
-                ffmpeg,
-                "-y",
-                "-hide_banner",
-                "-loglevel",
-                "error",
-                "-i",
-                str(path),
-                "-map",
-                "0:v:0",
-                "-map",
-                "0:a:0",
-                "-c:v",
-                "copy",
-                "-c:a",
-                "aac",
-                "-b:a",
-                "192k",
-                "-af",
-                f"asetpts=PTS-STARTPTS,apad,atrim=0:{duration:.3f},asetpts=PTS-STARTPTS",
-                "-movflags",
-                "+faststart",
-                "-avoid_negative_ts",
-                "make_zero",
-                str(temp),
-            ],
-            log_path=log_path,
-        )
-        if result.returncode != 0 or not temp.is_file() or temp.stat().st_size < 1024:
+        # 1) Reset timestamps without decoding speech.
+        if _run_heal(
+            ffmpeg,
+            path,
+            temp,
+            log_path,
+            reencode_audio=False,
+            video_duration=alignment.video_duration,
+        ):
+            healed = probe_av_alignment(temp)
+            if healed is None or not healed.needs_heal():
+                temp.replace(path)
+                return True
+            temp.unlink(missing_ok=True)
+
+        # 2) Last resort only: one high-bitrate AAC pass (never stretch speech).
+        if not _run_heal(
+            ffmpeg,
+            path,
+            temp,
+            log_path,
+            reencode_audio=True,
+            video_duration=alignment.video_duration,
+        ):
             temp.unlink(missing_ok=True)
             return False
         healed = probe_av_alignment(temp)

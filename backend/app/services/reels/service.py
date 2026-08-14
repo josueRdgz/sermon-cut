@@ -336,6 +336,17 @@ def update_segment(
     for key, value in data.items():
         setattr(segment, key, value)
 
+    # Changing the cut window invalidates a caption copied from a longer Whisper
+    # span — otherwise every fragment can keep synthesizing the same full text.
+    if (
+        "transcript_text" not in data
+        and (
+            "source_start_seconds" in data
+            or "source_end_seconds" in data
+        )
+    ):
+        segment.transcript_text = None
+
     _touch(reel)
     db.commit()
     return get_reel(db, reel_id)
@@ -425,7 +436,10 @@ def create_or_append_from_transcript(
             ReelSegmentCreate(
                 source_start_seconds=ts.start_seconds,
                 source_end_seconds=ts.end_seconds,
-                transcript_text=ts.text,
+                # Leave null so captions follow live word clocks until the user
+                # edits this cut; storing the full Whisper span here made every
+                # trimmed fragment re-pack the same long text.
+                transcript_text=None,
                 transition_type=payload.transition_type,
                 transition_duration_ms=payload.transition_duration_ms,
             )

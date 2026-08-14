@@ -1,7 +1,7 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "Sermon Cut",
-  "version": "0.3.11",
+  "version": "0.3.21",
   "identifier": "app.sermoncut.desktop",
   "build": {
     "frontendDist": "../dist",

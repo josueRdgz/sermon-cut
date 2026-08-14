@@ -23,7 +23,7 @@ export function ProjectCard({ project, onDelete }: ProjectCardProps) {
         {showCover ? (
           <img
             className={styles.cover}
-            src={projectCoverUrl(project.id)}
+            src={projectCoverUrl(project.id, project.updated_at)}
             alt=""
             loading="lazy"
             onError={() => setCoverFailed(true)}

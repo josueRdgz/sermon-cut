@@ -7,7 +7,6 @@ import threading
 from pathlib import Path
 
 from app.core.exceptions import AppError
-from app.services.audio_integrity import heal_program_audio
 from app.services.render.binary import locate_ffmpeg
 from app.services.render.runner import FFmpegError, run_ffmpeg
 
@@ -126,7 +125,8 @@ def mux_repaired_audio(
             error_code="audio_mux_failed",
             error_message="FFmpeg could not create the repaired video copy.",
         )
-        heal_program_audio(temp_output)
+        # Do not run heal_program_audio here: the repaired PCM was just encoded
+        # once; a second AAC pass would degrade speech again.
         temp_output.replace(output)
     except Exception:
         temp_output.unlink(missing_ok=True)

@@ -56,8 +56,17 @@ class TranscriptSegmentUpdate(BaseModel):
     text: str | None = Field(default=None, min_length=1)
     start_seconds: float | None = Field(default=None, ge=0)
     end_seconds: float | None = Field(default=None, ge=0)
+    # When set (e.g. from the Reel editor), retarget word clocks into this
+    # source window so captions for a cut stay visible after edits.
+    fit_words_start_seconds: float | None = Field(default=None, ge=0)
+    fit_words_end_seconds: float | None = Field(default=None, ge=0)
 
-    @field_validator("start_seconds", "end_seconds")
+    @field_validator(
+        "start_seconds",
+        "end_seconds",
+        "fit_words_start_seconds",
+        "fit_words_end_seconds",
+    )
     @classmethod
     def reject_non_finite(cls, value: float | None) -> float | None:
         if value is not None and not math.isfinite(value):

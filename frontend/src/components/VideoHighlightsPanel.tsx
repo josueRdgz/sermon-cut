@@ -24,6 +24,7 @@ import type {
   StrategicTitles,
   SubtitleDelivery,
 } from '../types/highlight';
+import type { Project } from '../types/project';
 import type { RenderJob } from '../types/render';
 import {
   CHURCH_REELS_CONTEXT,
@@ -50,6 +51,7 @@ interface Props {
   videoDuration: number | null;
   transcriptRevision: number;
   churchName?: string | null;
+  onCoverUpdated?: (project: Project) => void;
 }
 
 const HIGHLIGHT_TOOLS = [
@@ -120,6 +122,7 @@ export function VideoHighlightsPanel({
   videoDuration,
   transcriptRevision,
   churchName,
+  onCoverUpdated,
 }: Props) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const previewingRef = useRef(false);
@@ -1008,7 +1011,12 @@ export function VideoHighlightsPanel({
         {segments.length === 0 ? (
           <p className="muted">Primero seleccione fragmentos para configurar la pantalla final.</p>
         ) : (
-          <EndCardPanel projectId={projectId} aspectRatio="16:9" hasCover={hasCover} />
+          <EndCardPanel
+            projectId={projectId}
+            aspectRatio="16:9"
+            hasCover={hasCover}
+            onCoverUpdated={onCoverUpdated}
+          />
         )}
       </section>
 

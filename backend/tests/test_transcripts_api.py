@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from unittest.mock import patch
 
+import pytest
 from app.services.ffprobe import VideoMetadata
 from fastapi.testclient import TestClient
 
@@ -152,6 +153,39 @@ def test_editing_segment_text_updates_word_level_captions(client: TestClient) ->
     ]
     assert rebuilt[0]["start_seconds"] == 10.2
     assert rebuilt[-1]["end_seconds"] == 14.8
+
+    # Shortening must keep timestamps of surviving tokens (not stretch them),
+    # so word-level subtitles still cover the kept speech inside a Reel cut.
+    seeded = client.patch(
+        f"/api/transcripts/segments/{segment['id']}",
+        json={"text": "Palabra media final"},
+    )
+    assert seeded.status_code == 200
+    seeded_words = seeded.json()["segments"][0]["words"]
+    assert len(seeded_words) == 3
+    kept = client.patch(
+        f"/api/transcripts/segments/{segment['id']}",
+        json={"text": "media final"},
+    )
+    assert kept.status_code == 200
+    kept_words = kept.json()["segments"][0]["words"]
+    assert [word["text"] for word in kept_words] == ["media", "final"]
+    assert kept_words[0]["start_seconds"] == seeded_words[1]["start_seconds"]
+    assert kept_words[1]["end_seconds"] == seeded_words[2]["end_seconds"]
+
+    fitted = client.patch(
+        f"/api/transcripts/segments/{segment['id']}",
+        json={
+            "text": "solo este corte",
+            "fit_words_start_seconds": 12.0,
+            "fit_words_end_seconds": 14.0,
+        },
+    )
+    assert fitted.status_code == 200
+    fitted_words = fitted.json()["segments"][0]["words"]
+    assert [word["text"] for word in fitted_words] == ["solo", "este", "corte"]
+    assert fitted_words[0]["start_seconds"] == pytest.approx(12.0)
+    assert fitted_words[-1]["end_seconds"] == pytest.approx(14.0)
 
 
 def test_upload_corrupt_srt_returns_structured_error(client: TestClient) -> None:

@@ -47,6 +47,14 @@ class EndCardAudioMode(enum.StrEnum):
     local_music = "local_music"
 
 
+class EndCardMessagePosition(enum.StrEnum):
+    """Where the CTA line sits relative to the cover."""
+
+    top = "top"
+    center = "center"
+    bottom = "bottom"
+
+
 class EndCardSettings(Base):
     """Configuration for the mandatory end card.
 
@@ -94,6 +102,16 @@ class EndCardSettings(Base):
     # Overrides the project's own channel/church strings when set.
     channel_handle: Mapped[str | None] = mapped_column(String(200), nullable=True)
     custom_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    message_position: Mapped[EndCardMessagePosition] = mapped_column(
+        Enum(
+            EndCardMessagePosition,
+            name="end_card_message_position",
+            native_enum=False,
+            length=16,
+        ),
+        nullable=False,
+        default=EndCardMessagePosition.bottom,
+    )
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=_utc_now

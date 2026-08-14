@@ -1,7 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 
-import { deleteProject, deleteProjectVideo, getProject } from '../api/projects';
+import {
+  deleteProject,
+  deleteProjectVideo,
+  getProject,
+  projectCoverUrl,
+  uploadProjectCover,
+} from '../api/projects';
 import { AnalysisPanel } from '../components/AnalysisPanel';
 import { AudioRepairPanel } from '../components/AudioRepairPanel';
 import { ConfirmDialog } from '../components/ConfirmDialog';
@@ -74,6 +80,10 @@ export function ProjectDetailPage() {
   const [transcriptRevision, setTranscriptRevision] = useState(0);
   const [reelRevision, setReelRevision] = useState(0);
   const [reelToFocus, setReelToFocus] = useState<string | null>(null);
+  const [coverBusy, setCoverBusy] = useState(false);
+  const [coverProgress, setCoverProgress] = useState(0);
+  const [coverError, setCoverError] = useState<string | null>(null);
+  const coverInputRef = useRef<HTMLInputElement>(null);
   const requestedSection = searchParams.get('section');
   const requestedWorkspaceSection: WorkspaceSection = isWorkspaceSection(requestedSection)
     ? requestedSection
@@ -193,6 +203,28 @@ export function ProjectDetailPage() {
     }
   }
 
+  function handleCoverUpdated(updated: Project) {
+    setProject(updated);
+    setCoverError(null);
+  }
+
+  async function handleCoverFile(file: File | null) {
+    if (!project || !file) return;
+    setCoverBusy(true);
+    setCoverProgress(0);
+    setCoverError(null);
+    try {
+      const updated = await uploadProjectCover(project.id, file, setCoverProgress);
+      setProject(updated);
+    } catch (err) {
+      setCoverError(err instanceof Error ? err.message : 'No se pudo subir la portada');
+    } finally {
+      setCoverBusy(false);
+      setCoverProgress(0);
+      if (coverInputRef.current) coverInputRef.current.value = '';
+    }
+  }
+
   if (loading) {
     return (
       <main className="page">
@@ -297,6 +329,35 @@ export function ProjectDetailPage() {
             label="Portada"
             value={project.has_cover ? (project.cover_filename ?? 'Sí') : 'No'}
           />
+          <div className="project-cover-actions">
+            {project.has_cover && (
+              <img
+                className="project-cover-actions__thumb"
+                src={projectCoverUrl(project.id, project.updated_at)}
+                alt="Portada del proyecto"
+              />
+            )}
+            <input
+              ref={coverInputRef}
+              type="file"
+              accept=".jpg,.jpeg,.png,.webp,image/jpeg,image/png,image/webp"
+              hidden
+              onChange={(event) => void handleCoverFile(event.target.files?.[0] ?? null)}
+            />
+            <button
+              type="button"
+              className="button button--inline"
+              disabled={coverBusy}
+              onClick={() => coverInputRef.current?.click()}
+            >
+              {coverBusy
+                ? `Subiendo… ${coverProgress}%`
+                : project.has_cover
+                  ? 'Cambiar portada'
+                  : 'Subir portada'}
+            </button>
+            {coverError && <p className="error">{coverError}</p>}
+          </div>
           <StatusRow label="Referencia" value={project.bible_reference ?? '—'} />
           <StatusRow label="Canal YouTube" value={project.youtube_channel} />
           <StatusRow label="Creado" value={formatDate(project.created_at)} />
@@ -357,6 +418,7 @@ export function ProjectDetailPage() {
           videoDuration={project.duration_seconds}
           transcriptRevision={transcriptRevision}
           churchName={project.church_name}
+          onCoverUpdated={handleCoverUpdated}
         />
       </div>
 
@@ -402,6 +464,7 @@ export function ProjectDetailPage() {
           mediaRevision={project.updated_at}
           refreshToken={reelRevision}
           focusReelId={reelToFocus}
+          onCoverUpdated={handleCoverUpdated}
         />
       </div>
 

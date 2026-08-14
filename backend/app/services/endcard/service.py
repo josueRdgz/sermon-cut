@@ -25,6 +25,7 @@ from app.models.end_card import (
     MIN_END_CARD_SECONDS,
     EndCardAudioMode,
     EndCardLayout,
+    EndCardMessagePosition,
     EndCardSettings,
 )
 from app.models.project import Project
@@ -50,6 +51,7 @@ class ResolvedEndCard:
     qr_url: str | None
     channel_handle: str | None
     custom_message: str | None
+    message_position: EndCardMessagePosition
     # True when a project-specific row exists.
     is_project_override: bool
 
@@ -94,6 +96,7 @@ def _from_row(row: EndCardSettings | None, *, is_override: bool) -> ResolvedEndC
             qr_url=None,
             channel_handle=None,
             custom_message=None,
+            message_position=EndCardMessagePosition.bottom,
             is_project_override=is_override,
         )
 
@@ -113,6 +116,7 @@ def _from_row(row: EndCardSettings | None, *, is_override: bool) -> ResolvedEndC
         qr_url=row.qr_url,
         channel_handle=row.channel_handle,
         custom_message=row.custom_message,
+        message_position=getattr(row, "message_position", None) or EndCardMessagePosition.bottom,
         is_project_override=is_override,
     )
 
