@@ -11,6 +11,7 @@ import {
 } from '../api/youtube';
 import { ProgressBar } from '../components/ProgressBar';
 import type { YouTubeImportJob, YouTubePreview, YouTubeQuality } from '../types/youtube';
+import { DEFAULT_CHURCH_NAME, DEFAULT_YOUTUBE_CHANNEL } from '../utils/projectDefaults';
 
 const VIDEO_ACCEPT = '.mp4,.mov,.mkv,.webm,video/mp4,video/quicktime,video/webm,video/x-matroska';
 const COVER_ACCEPT = '.jpg,.jpeg,.png,.webp,image/jpeg,image/png,image/webp';
@@ -21,6 +22,7 @@ const RIGHTS_NOTICE =
 
 type VideoSource = 'local' | 'youtube';
 type ContentMode = 'shorts' | 'highlights' | 'both';
+type SourceKind = 'full_service' | 'sermon_only';
 type Step = 'idle' | 'creating' | 'video' | 'importing' | 'cover' | 'done';
 
 const ACTIVE_IMPORT_STATUSES = new Set([
@@ -92,10 +94,11 @@ export function NewProjectPage() {
   const [title, setTitle] = useState('');
   const [preacherName, setPreacherName] = useState('');
   const [bibleReference, setBibleReference] = useState('');
-  const [churchName, setChurchName] = useState('');
-  const [youtubeChannel, setYoutubeChannel] = useState('');
+  const [churchName, setChurchName] = useState(DEFAULT_CHURCH_NAME);
+  const [youtubeChannel, setYoutubeChannel] = useState(DEFAULT_YOUTUBE_CHANNEL);
   const [fullSermonUrl, setFullSermonUrl] = useState('');
   const [contentMode, setContentMode] = useState<ContentMode>('shorts');
+  const [sourceKind, setSourceKind] = useState<SourceKind>('full_service');
   const [videoFile, setVideoFile] = useState<File | null>(null);
   const [coverFile, setCoverFile] = useState<File | null>(null);
   const [step, setStep] = useState<Step>('idle');
@@ -169,14 +172,16 @@ export function NewProjectPage() {
 
     try {
       setStep('creating');
+      const mediaUrl = videoSource === 'youtube' ? youtubeUrl.trim() : fullSermonUrl.trim();
       const project = await createProject({
         title: title.trim(),
         preacher_name: preacherName.trim() || null,
         bible_reference: bibleReference.trim() || null,
         church_name: churchName.trim(),
         youtube_channel: youtubeChannel.trim(),
-        full_sermon_url: fullSermonUrl.trim() || null,
+        full_sermon_url: mediaUrl || null,
         content_mode: contentMode,
+        source_kind: sourceKind,
       });
 
       if (videoSource === 'local') {
@@ -240,10 +245,46 @@ export function NewProjectPage() {
           <Link to="/projects">← Proyectos</Link>
         </p>
         <h1>Nueva predicación</h1>
-        <p>Completa los datos y elige el origen del video.</p>
+        <p>
+          Indique si es el culto o solo el sermón, complete los datos y elija el origen del video.
+        </p>
       </header>
 
       <form className="card form" onSubmit={(event) => void handleSubmit(event)}>
+        <fieldset className="field" style={{ border: 'none', padding: 0, margin: 0 }}>
+          <span>¿Qué contiene el video? *</span>
+          <div className="source-toggle" role="radiogroup" aria-label="Tipo de grabación">
+            <label className="source-toggle__option">
+              <input
+                type="radio"
+                name="source-kind"
+                value="full_service"
+                checked={sourceKind === 'full_service'}
+                onChange={() => setSourceKind('full_service')}
+                disabled={busy}
+              />
+              <span>
+                Culto completo
+                <small>Luego marcará inicio y final de la predicación</small>
+              </span>
+            </label>
+            <label className="source-toggle__option">
+              <input
+                type="radio"
+                name="source-kind"
+                value="sermon_only"
+                checked={sourceKind === 'sermon_only'}
+                onChange={() => setSourceKind('sermon_only')}
+                disabled={busy}
+              />
+              <span>
+                Solo el sermón
+                <small>El archivo ya es la predicación</small>
+              </span>
+            </label>
+          </div>
+        </fieldset>
+
         <label className="field">
           <span>Título *</span>
           <input
@@ -317,19 +358,8 @@ export function NewProjectPage() {
             value={youtubeChannel}
             onChange={(e) => setYoutubeChannel(e.target.value)}
             disabled={busy}
-            placeholder="@micategoria o nombre del canal"
+            placeholder="@iprm.gethsemani"
             maxLength={200}
-          />
-        </label>
-
-        <label className="field">
-          <span>Enlace del sermón completo</span>
-          <input
-            type="url"
-            value={fullSermonUrl}
-            onChange={(e) => setFullSermonUrl(e.target.value)}
-            disabled={busy}
-            placeholder="https://..."
           />
         </label>
 
@@ -353,7 +383,12 @@ export function NewProjectPage() {
                 name="video-source"
                 value="youtube"
                 checked={videoSource === 'youtube'}
-                onChange={() => setVideoSource('youtube')}
+                onChange={() => {
+                  setVideoSource('youtube');
+                  if (!youtubeUrl.trim() && fullSermonUrl.trim()) {
+                    setYoutubeUrl(fullSermonUrl);
+                  }
+                }}
                 disabled={busy}
               />
               <span>URL de YouTube</span>
@@ -373,16 +408,31 @@ export function NewProjectPage() {
           </label>
         )}
 
+        {videoSource === 'local' && (
+          <label className="field">
+            <span>Enlace del sermón completo</span>
+            <input
+              type="url"
+              value={fullSermonUrl}
+              onChange={(e) => setFullSermonUrl(e.target.value)}
+              disabled={busy}
+              placeholder="https://..."
+            />
+          </label>
+        )}
+
         {videoSource === 'youtube' && (
           <div className="youtube-import">
             <label className="field">
-              <span>URL de YouTube</span>
+              <span>URL de YouTube (también queda como enlace del sermón completo)</span>
               <div className="youtube-import__row">
                 <input
                   type="url"
                   value={youtubeUrl}
                   onChange={(e) => {
-                    setYoutubeUrl(e.target.value);
+                    const value = e.target.value;
+                    setYoutubeUrl(value);
+                    setFullSermonUrl(value);
                     setPreview(null);
                   }}
                   disabled={busy}

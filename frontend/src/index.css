@@ -1969,19 +1969,69 @@ a:hover {
 /* ---- Video source selector + YouTube import ---- */
 .source-toggle {
   display: flex;
+  flex-wrap: wrap;
   gap: 1rem;
   margin-top: 0.4rem;
 }
 
 .source-toggle__option {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 0.4rem;
   cursor: pointer;
 }
 
 .source-toggle__option input {
   width: auto;
+  margin-top: 0.2rem;
+}
+
+.source-toggle__option small {
+  display: block;
+  color: var(--text-secondary);
+  font-size: 0.78rem;
+}
+
+.sermon-range__player {
+  display: block;
+  width: 100%;
+  max-height: 22rem;
+  margin: 0.75rem 0 1rem;
+  background: #000;
+  border-radius: var(--radius-md);
+}
+
+.sermon-range__timeline {
+  position: relative;
+  height: 0.85rem;
+  margin-bottom: 1rem;
+  overflow: hidden;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+}
+
+.sermon-range__window {
+  position: absolute;
+  top: 0;
+  height: 100%;
+  background: #38bdf8;
+  opacity: 0.55;
+}
+
+.sermon-range__playhead {
+  position: absolute;
+  top: -2px;
+  width: 2px;
+  height: calc(100% + 4px);
+  background: #fff;
+}
+
+.sermon-range__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin: 0.75rem 0 1rem;
 }
 
 .youtube-import {

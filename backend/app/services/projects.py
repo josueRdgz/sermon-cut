@@ -11,10 +11,11 @@ from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
 from app.core.exceptions import ConflictError, NotFoundError, ValidationAppError
-from app.models.project import Project, ProjectStatus
+from app.models.project import Project, ProjectSourceKind, ProjectStatus
 from app.schemas.project import ProjectCreate, ProjectResponse, ProjectUpdate
 from app.services import storage
 from app.services.ffprobe import probe_video
+from app.services.sermon_range import extract_window, should_trim
 
 
 def _touch(project: Project) -> None:
@@ -36,6 +37,10 @@ def to_response(project: Project) -> ProjectResponse:
         youtube_channel=project.youtube_channel,
         full_sermon_url=project.full_sermon_url,
         content_mode=project.content_mode,
+        source_kind=project.source_kind,
+        sermon_start_seconds=project.sermon_start_seconds,
+        sermon_end_seconds=project.sermon_end_seconds,
+        sermon_range_confirmed=bool(project.sermon_range_confirmed),
         video_filename=project.video_filename,
         cover_filename=project.cover_filename,
         has_video=bool(project.video_filename),
@@ -78,6 +83,8 @@ def create_project(db: Session, payload: ProjectCreate) -> Project:
         youtube_channel=payload.youtube_channel.strip(),
         full_sermon_url=str(payload.full_sermon_url) if payload.full_sermon_url else None,
         content_mode=payload.content_mode,
+        source_kind=payload.source_kind,
+        sermon_range_confirmed=payload.source_kind == ProjectSourceKind.sermon_only,
         status=ProjectStatus.created,
     )
     db.add(project)
@@ -138,6 +145,9 @@ def delete_video(db: Session, project_id: UUID) -> Project:
     project.fps = None
     project.video_codec = None
     project.audio_codec = None
+    project.sermon_start_seconds = None
+    project.sermon_end_seconds = None
+    project.sermon_range_confirmed = project.source_kind == ProjectSourceKind.sermon_only
     project.status = ProjectStatus.created
     project.error_message = None
     _touch(project)
@@ -229,8 +239,77 @@ def finalize_project_video(
     project.fps = metadata.fps
     project.video_codec = metadata.video_codec
     project.audio_codec = metadata.audio_codec
+    _sync_default_sermon_window(project)
     project.status = ProjectStatus.ready
     project.error_message = None
+    _touch(project)
+    db.commit()
+    db.refresh(project)
+    return project
+
+
+def _sync_default_sermon_window(project: Project) -> None:
+    duration = float(project.duration_seconds or 0)
+    if project.source_kind == ProjectSourceKind.sermon_only and duration > 0:
+        project.sermon_start_seconds = 0.0
+        project.sermon_end_seconds = duration
+        project.sermon_range_confirmed = True
+        return
+    if project.sermon_start_seconds is None:
+        project.sermon_start_seconds = 0.0
+    if project.sermon_end_seconds is None and duration > 0:
+        project.sermon_end_seconds = duration
+
+
+def apply_sermon_range(db: Session, project_id: UUID, *, start: float, end: float) -> Project:
+    """Save the preaching window and replace the working video with that clip."""
+    project = get_project(db, project_id)
+    if project.status in {
+        ProjectStatus.importing,
+        ProjectStatus.transcribing,
+        ProjectStatus.analyzing,
+        ProjectStatus.rendering,
+    }:
+        raise ConflictError(
+            "No se puede recortar la predicación mientras hay un proceso activo.",
+            code="project_busy",
+        )
+    if not project.video_filename:
+        raise NotFoundError("Project has no video.", code="video_not_found")
+
+    duration = float(project.duration_seconds or 0)
+    start = max(0.0, float(start))
+    end = min(duration, float(end)) if duration > 0 else float(end)
+    if end - start < 1.0:
+        raise ValidationAppError(
+            "El intervalo de la predicación debe durar al menos 1 segundo.",
+            code="sermon_range_too_short",
+        )
+    if duration > 0 and end > duration + 0.5:
+        raise ValidationAppError(
+            "El final supera la duración del video.",
+            code="sermon_range_out_of_bounds",
+        )
+
+    if should_trim(start=start, end=end, duration=duration):
+        source = storage.resolve_inside_project(project.id, project.video_filename)
+        if not source.is_file():
+            raise NotFoundError("Video file is missing on disk.", code="video_not_found")
+        suffix = source.suffix.lower() or ".mp4"
+        destination = storage.resolve_inside_project(project.id, f"sermon{suffix}")
+        extract_window(source, destination, start=start, end=end)
+        project = finalize_project_video(db, project, destination.name)
+        project.sermon_start_seconds = 0.0
+        project.sermon_end_seconds = project.duration_seconds
+        project.sermon_range_confirmed = True
+        _touch(project)
+        db.commit()
+        db.refresh(project)
+        return project
+
+    project.sermon_start_seconds = round(start, 3)
+    project.sermon_end_seconds = round(end, 3)
+    project.sermon_range_confirmed = True
     _touch(project)
     db.commit()
     db.refresh(project)

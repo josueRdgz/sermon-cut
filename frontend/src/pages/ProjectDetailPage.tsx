@@ -6,6 +6,7 @@ import { AnalysisPanel } from '../components/AnalysisPanel';
 import { AudioRepairPanel } from '../components/AudioRepairPanel';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { ReelEditor } from '../components/ReelEditor';
+import { SermonRangePanel } from '../components/SermonRangePanel';
 import { StatusRow } from '../components/StatusRow';
 import { TranscriptEditor } from '../components/TranscriptEditor';
 import { VideoHighlightsPanel } from '../components/VideoHighlightsPanel';
@@ -23,6 +24,11 @@ const WORKSPACE_SECTIONS = [
     id: 'audio',
     label: 'Reparar audio',
     description: 'Detectar microcortes',
+  },
+  {
+    id: 'sermon',
+    label: 'Predicación',
+    description: 'Inicio y final',
   },
   {
     id: 'transcript',
@@ -258,6 +264,20 @@ export function ProjectDetailPage() {
                   : 'Shorts'
             }
           />
+          <StatusRow
+            label="Grabación"
+            value={project.source_kind === 'full_service' ? 'Culto completo' : 'Solo el sermón'}
+          />
+          <StatusRow
+            label="Predicación"
+            value={
+              project.sermon_range_confirmed
+                ? 'Intervalo confirmado'
+                : project.source_kind === 'full_service'
+                  ? 'Pendiente de marcar'
+                  : 'Todo el archivo'
+            }
+          />
           <StatusRow label="Duración" value={formatDuration(project.duration_seconds)} />
           <StatusRow label="Resolución" value={project.resolution ?? '—'} />
           <StatusRow label="FPS" value={project.fps != null ? String(project.fps) : '—'} />
@@ -307,6 +327,15 @@ export function ProjectDetailPage() {
         hidden={activeSection !== 'audio'}
       >
         <AudioRepairPanel projectId={project.id} hasVideo={project.has_video} />
+      </div>
+
+      <div
+        id="workspace-panel-sermon"
+        role="tabpanel"
+        aria-labelledby="workspace-tab-sermon"
+        hidden={activeSection !== 'sermon'}
+      >
+        <SermonRangePanel project={project} onUpdated={setProject} />
       </div>
 
       <div

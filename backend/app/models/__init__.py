@@ -38,7 +38,7 @@ from app.models.highlight import (
     HighlightPlan,
     SubtitleDelivery,
 )
-from app.models.project import Project, ProjectContentMode, ProjectStatus
+from app.models.project import Project, ProjectContentMode, ProjectSourceKind, ProjectStatus
 from app.models.reel import (
     AspectRatio,
     ContentKind,
@@ -90,6 +90,7 @@ __all__ = [
     "FpsMode",
     "Project",
     "ProjectContentMode",
+    "ProjectSourceKind",
     "ProjectStatus",
     "Reel",
     "ReelSegment",

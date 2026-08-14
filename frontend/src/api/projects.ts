@@ -1,6 +1,7 @@
 import type { Project, ProjectCreatePayload, ProjectListResponse } from '../types/project';
 import {
   API_BASE_URL,
+  LONG_FETCH_TIMEOUT_MS,
   apiDelete,
   apiDeleteJson,
   apiGet,
@@ -54,4 +55,17 @@ export function uploadProjectCover(
   onProgress: (percent: number) => void,
 ): Promise<Project> {
   return uploadWithProgress<Project>(`/api/projects/${id}/cover`, file, onProgress);
+}
+
+export function applySermonRange(
+  id: string,
+  startSeconds: number,
+  endSeconds: number,
+): Promise<Project> {
+  return apiJson<Project>(
+    `/api/projects/${id}/sermon-range`,
+    'POST',
+    { start_seconds: startSeconds, end_seconds: endSeconds },
+    { timeoutMs: LONG_FETCH_TIMEOUT_MS },
+  );
 }

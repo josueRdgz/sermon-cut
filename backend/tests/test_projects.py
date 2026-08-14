@@ -105,6 +105,10 @@ def test_upload_video_and_cover(client: TestClient, storage_root: Path) -> None:
     assert video_body["video_codec"] == "h264"
     assert video_body["audio_codec"] == "aac"
     assert (storage_root / project_id / "original.mp4").is_file()
+    assert video_body["source_kind"] == "sermon_only"
+    assert video_body["sermon_range_confirmed"] is True
+    assert video_body["sermon_start_seconds"] == 0.0
+    assert video_body["sermon_end_seconds"] == 125.5
 
     cover_response = client.post(
         f"/api/projects/{project_id}/cover",
@@ -214,3 +218,80 @@ def test_create_requires_title(client: TestClient) -> None:
     payload = {**SAMPLE_PROJECT, "title": ""}
     response = client.post("/api/projects", json=payload)
     assert response.status_code == 422
+
+
+def test_create_full_service_waits_for_sermon_range(client: TestClient) -> None:
+    created = _create_project(client, source_kind="full_service")
+    assert created["source_kind"] == "full_service"
+    assert created["sermon_range_confirmed"] is False
+
+    with patch("app.services.projects.probe_video", return_value=FAKE_METADATA):
+        uploaded = client.post(
+            f"/api/projects/{created['id']}/video",
+            files={"file": ("culto.mp4", FAKE_MP4, "video/mp4")},
+        )
+    body = uploaded.json()
+    assert body["sermon_range_confirmed"] is False
+    assert body["sermon_end_seconds"] == 125.5
+
+
+def test_apply_sermon_range_keeps_full_file_when_window_is_the_whole_video(
+    client: TestClient, storage_root: Path
+) -> None:
+    created = _create_project(client, source_kind="full_service")
+    project_id = created["id"]
+    with patch("app.services.projects.probe_video", return_value=FAKE_METADATA):
+        client.post(
+            f"/api/projects/{project_id}/video",
+            files={"file": ("culto.mp4", FAKE_MP4, "video/mp4")},
+        )
+        confirmed = client.post(
+            f"/api/projects/{project_id}/sermon-range",
+            json={"start_seconds": 0, "end_seconds": 125.5},
+        )
+    assert confirmed.status_code == 200, confirmed.text
+    body = confirmed.json()
+    assert body["sermon_range_confirmed"] is True
+    assert body["video_filename"] == "original.mp4"
+    assert (storage_root / project_id / "original.mp4").is_file()
+
+
+def test_apply_sermon_range_trims_working_video(client: TestClient, storage_root: Path) -> None:
+    created = _create_project(client, source_kind="full_service")
+    project_id = created["id"]
+    with patch("app.services.projects.probe_video", return_value=FAKE_METADATA):
+        client.post(
+            f"/api/projects/{project_id}/video",
+            files={"file": ("culto.mp4", FAKE_MP4, "video/mp4")},
+        )
+
+    trimmed = VideoMetadata(
+        duration_seconds=40.0,
+        width=1920,
+        height=1080,
+        fps=29.97,
+        video_codec="h264",
+        audio_codec="aac",
+    )
+
+    def fake_extract(source, destination, *, start, end) -> None:  # noqa: ANN001
+        destination.write_bytes(FAKE_MP4)
+        assert start == 20.0
+        assert end == 60.0
+
+    with (
+        patch("app.services.projects.extract_window", side_effect=fake_extract),
+        patch("app.services.projects.probe_video", return_value=trimmed),
+    ):
+        response = client.post(
+            f"/api/projects/{project_id}/sermon-range",
+            json={"start_seconds": 20, "end_seconds": 60},
+        )
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["video_filename"] == "sermon.mp4"
+    assert body["duration_seconds"] == 40.0
+    assert body["sermon_range_confirmed"] is True
+    assert body["sermon_start_seconds"] == 0.0
+    assert (storage_root / project_id / "sermon.mp4").is_file()
+    assert not (storage_root / project_id / "original.mp4").exists()

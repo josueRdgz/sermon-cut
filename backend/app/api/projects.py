@@ -17,6 +17,7 @@ from app.schemas.project import (
     ProjectListResponse,
     ProjectResponse,
     ProjectUpdate,
+    SermonRangeRequest,
 )
 from app.services import projects as projects_service
 from app.services import storage
@@ -83,6 +84,22 @@ def update_project(
 ) -> ProjectResponse:
     """Update project metadata."""
     project = projects_service.update_project(db, project_id, payload)
+    return projects_service.to_response(project)
+
+
+@router.post("/{project_id}/sermon-range", response_model=ProjectResponse)
+def apply_sermon_range(
+    project_id: UUID,
+    payload: SermonRangeRequest,
+    db: Session = Depends(get_db),
+) -> ProjectResponse:
+    """Keep only the preaching window as the working video for later editing."""
+    project = projects_service.apply_sermon_range(
+        db,
+        project_id,
+        start=payload.start_seconds,
+        end=payload.end_seconds,
+    )
     return projects_service.to_response(project)
 
 

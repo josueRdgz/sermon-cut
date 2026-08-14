@@ -6,7 +6,7 @@ import enum
 import uuid
 from datetime import UTC, datetime
 
-from sqlalchemy import DateTime, Enum, Float, Integer, String, Text
+from sqlalchemy import Boolean, DateTime, Enum, Float, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.types import Uuid
 
@@ -39,6 +39,13 @@ class ProjectContentMode(enum.StrEnum):
     both = "both"
 
 
+class ProjectSourceKind(enum.StrEnum):
+    """Whether the imported file is the whole service or only the sermon."""
+
+    full_service = "full_service"
+    sermon_only = "sermon_only"
+
+
 class Project(Base):
     """A local project: metadata, media paths, and probed video properties.
 
@@ -66,6 +73,19 @@ class Project(Base):
         nullable=False,
         default=ProjectContentMode.shorts,
     )
+    source_kind: Mapped[ProjectSourceKind] = mapped_column(
+        Enum(
+            ProjectSourceKind,
+            name="project_source_kind",
+            native_enum=False,
+            length=24,
+        ),
+        nullable=False,
+        default=ProjectSourceKind.sermon_only,
+    )
+    sermon_start_seconds: Mapped[float | None] = mapped_column(Float, nullable=True)
+    sermon_end_seconds: Mapped[float | None] = mapped_column(Float, nullable=True)
+    sermon_range_confirmed: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
 
     # Relative file names inside the project directory (never absolute paths).
     video_filename: Mapped[str | None] = mapped_column(String(255), nullable=True)

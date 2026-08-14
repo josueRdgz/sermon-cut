@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.3.9] — 2026-08-14
+
+### Added
+
+- En un proyecto nuevo, iglesia y canal salen rellenados (Gethsemaní /
+  @iprm.gethsemani) y la URL de YouTube es también el enlace del sermón.
+- Se elige si el video es el culto completo o solo el sermón.
+- Pestaña Predicación: reproductor y recorte de inicio/final; ese tramo queda
+  como video de trabajo para transcribir y editar.
+
 ## [0.3.8] — 2026-08-13
 
 ### Added

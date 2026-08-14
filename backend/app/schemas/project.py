@@ -7,7 +7,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, HttpUrl
 
-from app.models.project import ProjectContentMode, ProjectStatus
+from app.models.project import ProjectContentMode, ProjectSourceKind, ProjectStatus
 
 
 class ProjectCreate(BaseModel):
@@ -20,6 +20,7 @@ class ProjectCreate(BaseModel):
     youtube_channel: str = Field(min_length=1, max_length=200)
     full_sermon_url: HttpUrl | None = None
     content_mode: ProjectContentMode = ProjectContentMode.shorts
+    source_kind: ProjectSourceKind = ProjectSourceKind.sermon_only
 
 
 class ProjectUpdate(BaseModel):
@@ -32,6 +33,7 @@ class ProjectUpdate(BaseModel):
     youtube_channel: str | None = Field(default=None, min_length=1, max_length=200)
     full_sermon_url: HttpUrl | None = None
     content_mode: ProjectContentMode | None = None
+    source_kind: ProjectSourceKind | None = None
     status: ProjectStatus | None = None
 
 
@@ -48,6 +50,10 @@ class ProjectResponse(BaseModel):
     youtube_channel: str
     full_sermon_url: str | None
     content_mode: ProjectContentMode
+    source_kind: ProjectSourceKind
+    sermon_start_seconds: float | None
+    sermon_end_seconds: float | None
+    sermon_range_confirmed: bool
 
     video_filename: str | None
     cover_filename: str | None
@@ -74,6 +80,13 @@ class ProjectListResponse(BaseModel):
 
     items: list[ProjectResponse]
     total: int
+
+
+class SermonRangeRequest(BaseModel):
+    """Start and end of the preaching inside the current working video."""
+
+    start_seconds: float = Field(ge=0)
+    end_seconds: float = Field(gt=0)
 
 
 class ErrorBody(BaseModel):

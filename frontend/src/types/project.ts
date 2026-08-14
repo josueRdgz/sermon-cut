@@ -18,6 +18,10 @@ export interface Project {
   youtube_channel: string;
   full_sermon_url: string | null;
   content_mode: 'shorts' | 'highlights' | 'both';
+  source_kind: 'full_service' | 'sermon_only';
+  sermon_start_seconds: number | null;
+  sermon_end_seconds: number | null;
+  sermon_range_confirmed: boolean;
   video_filename: string | null;
   cover_filename: string | null;
   has_video: boolean;
@@ -48,6 +52,7 @@ export interface ProjectCreatePayload {
   youtube_channel: string;
   full_sermon_url?: string | null;
   content_mode?: 'shorts' | 'highlights' | 'both';
+  source_kind?: 'full_service' | 'sermon_only';
 }
 
 export interface ApiErrorBody {

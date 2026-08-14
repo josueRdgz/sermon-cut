@@ -31,7 +31,7 @@ class Settings(BaseSettings):
     )
 
     app_name: str = "Sermon Cut"
-    app_version: str = "0.3.8"
+    app_version: str = "0.3.9"
     api_prefix: str = "/api"
 
     # Optional override for local media + SQLite (absolute or relative path).

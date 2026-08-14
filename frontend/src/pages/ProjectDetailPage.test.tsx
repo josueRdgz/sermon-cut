@@ -43,6 +43,10 @@ vi.mock('../components/VideoHighlightsPanel', () => ({
   VideoHighlightsPanel: () => <div>Panel de Video Highlights</div>,
 }));
 
+vi.mock('../components/SermonRangePanel', () => ({
+  SermonRangePanel: () => <div>Panel de predicación</div>,
+}));
+
 vi.mock('../components/ConfirmDialog', () => ({
   ConfirmDialog: () => null,
 }));
@@ -56,6 +60,10 @@ const PROJECT = {
   youtube_channel: '@iglesiacentral',
   full_sermon_url: null,
   content_mode: 'both',
+  source_kind: 'full_service',
+  sermon_start_seconds: null,
+  sermon_end_seconds: null,
+  sermon_range_confirmed: false,
   video_filename: 'original.mp4',
   cover_filename: null,
   has_video: true,
@@ -103,6 +111,7 @@ describe('ProjectDetailPage workspace', () => {
 
     expect(screen.getByText('Panel de transcripción')).toBeVisible();
     expect(screen.getByText('Panel del editor')).not.toBeVisible();
+    expect(screen.getByRole('tab', { name: /Predicación/ })).toBeInTheDocument();
   });
 
   it('opens the editor automatically after accepting an AI proposal', async () => {
