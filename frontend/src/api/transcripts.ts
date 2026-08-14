@@ -29,9 +29,7 @@ export function deleteTranscript(projectId: string): Promise<void> {
   return apiDelete(`/api/projects/${projectId}/transcript`);
 }
 
-export function projectVideoUrl(projectId: string): string {
-  return `${API_BASE_URL}/api/projects/${projectId}/media/video`;
-}
+export { projectVideoUrl } from './projects';
 
 export function transcriptExportUrl(projectId: string, format: 'srt' | 'vtt' | 'json'): string {
   return `${API_BASE_URL}/api/projects/${projectId}/transcript/export?format=${format}`;

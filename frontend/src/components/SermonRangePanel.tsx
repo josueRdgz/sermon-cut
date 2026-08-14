@@ -94,7 +94,7 @@ export function SermonRangePanel({ project, onUpdated }: Props) {
         ref={videoRef}
         className="sermon-range__player"
         controls
-        src={`${projectVideoUrl(project.id)}?t=${encodeURIComponent(project.updated_at)}`}
+        src={projectVideoUrl(project.id, project.updated_at)}
         onTimeUpdate={(event) => setPlayhead(event.currentTarget.currentTime)}
         onLoadedMetadata={(event) => {
           if (!project.sermon_end_seconds && event.currentTarget.duration) {

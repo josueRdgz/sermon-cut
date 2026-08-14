@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.3.11] — 2026-08-14
+
+### Fixed
+
+- El análisis y la edición ya no estiran ni reusan audio reparado viejo: el
+  preview y el export copian el habla del video de trabajo. Si un recorte o
+  mux del programa deja imagen y sonido desfasados, se realinean solos.
+
+## [0.3.10] — 2026-08-14
+
+### Fixed
+
+- Tras recortar la predicación, transcripción, Reels, Highlights y el audio de
+  vista previa usan solo el video recortado (se descartan tiempos y caches del
+  culto completo).
+
 ## [0.3.9] — 2026-08-14
 
 ### Added

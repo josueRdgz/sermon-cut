@@ -44,12 +44,17 @@ def ensure_highlights_preview(
     destination = project_dir / _PREVIEW_NAME
     meta_path = project_dir / _PREVIEW_META
     identity = clip_identity(cleaned)
+    source_mtime = int(source.stat().st_mtime)
     if destination.is_file() and destination.stat().st_size > 2048 and meta_path.is_file():
         try:
             saved = json.loads(meta_path.read_text(encoding="utf-8"))
         except json.JSONDecodeError:
             saved = {}
-        if saved.get("identity") == identity and saved.get("source") == video_filename:
+        if (
+            saved.get("identity") == identity
+            and saved.get("source") == video_filename
+            and saved.get("source_mtime") == source_mtime
+        ):
             return destination
 
     ffmpeg = locate_ffmpeg() or shutil.which("ffmpeg")
@@ -74,7 +79,7 @@ def ensure_highlights_preview(
     video_audio = "".join(
         f"[{index}:v]scale=1280:720:force_original_aspect_ratio=decrease,"
         f"pad=1280:720:(ow-iw)/2:(oh-ih)/2,fps=30,format=yuv420p,setsar=1[v{index}];"
-        f"[{index}:a]aresample=48000:async=1,aformat=sample_fmts=fltp:channel_layouts=stereo[a{index}];"
+        f"[{index}:a]aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo[a{index}];"
         for index in range(count)
     )
     concat_inputs = "".join(f"[v{index}][a{index}]" for index in range(count))
@@ -117,7 +122,14 @@ def ensure_highlights_preview(
             )
         temp.replace(destination)
         meta_path.write_text(
-            json.dumps({"identity": identity, "source": video_filename}, separators=(",", ":")),
+            json.dumps(
+                {
+                    "identity": identity,
+                    "source": video_filename,
+                    "source_mtime": source_mtime,
+                },
+                separators=(",", ":"),
+            ),
             encoding="utf-8",
         )
     except FFmpegError as exc:

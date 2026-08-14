@@ -11,11 +11,27 @@ from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
 from app.core.exceptions import ConflictError, NotFoundError, ValidationAppError
+from app.models.analysis import AnalysisJob
+from app.models.highlight import HighlightAnalysisJob, HighlightPlan
 from app.models.project import Project, ProjectSourceKind, ProjectStatus
+from app.models.reel import Reel
+from app.models.transcript import Transcript
 from app.schemas.project import ProjectCreate, ProjectResponse, ProjectUpdate
 from app.services import storage
 from app.services.ffprobe import probe_video
 from app.services.sermon_range import extract_window, should_trim
+
+_DERIVED_MEDIA_AFTER_TRIM = (
+    "original-audio.wav",
+    "repaired-audio.wav",
+    "preview-audio.m4a",
+    "highlights-preview.mp4",
+    "highlights-preview.json",
+    "repaired-video.mp4",
+    "repaired-video.mov",
+    "repaired-video.webm",
+    "repaired-video.mkv",
+)
 
 
 def _touch(project: Project) -> None:
@@ -302,6 +318,7 @@ def apply_sermon_range(db: Session, project_id: UUID, *, start: float, end: floa
         project.sermon_start_seconds = 0.0
         project.sermon_end_seconds = project.duration_seconds
         project.sermon_range_confirmed = True
+        _invalidate_pipeline_after_trim(db, project)
         _touch(project)
         db.commit()
         db.refresh(project)
@@ -314,6 +331,42 @@ def apply_sermon_range(db: Session, project_id: UUID, *, start: float, end: floa
     db.commit()
     db.refresh(project)
     return project
+
+
+def _invalidate_pipeline_after_trim(db: Session, project: Project) -> None:
+    """Drop culto-timed artifacts so later steps use only the clipped working video."""
+    project_dir = storage.ensure_project_dir(project.id)
+    for name in _DERIVED_MEDIA_AFTER_TRIM:
+        (project_dir / name).unlink(missing_ok=True)
+
+    transcript = db.scalars(select(Transcript).where(Transcript.project_id == project.id)).first()
+    if transcript is not None:
+        db.delete(transcript)
+
+    for job in db.scalars(select(AnalysisJob).where(AnalysisJob.project_id == project.id)).all():
+        db.delete(job)
+
+    for job in db.scalars(
+        select(HighlightAnalysisJob).where(HighlightAnalysisJob.project_id == project.id)
+    ).all():
+        db.delete(job)
+
+    plan = db.scalars(select(HighlightPlan).where(HighlightPlan.project_id == project.id)).first()
+    if plan is not None:
+        plan.reel_id = None
+        plan.sermon_start_seconds = 0.0
+        plan.sermon_end_seconds = float(project.duration_seconds or 0)
+        plan.sermon_confidence = 1.0
+        plan.sermon_detection_method = "working_video"
+        plan.sermon_detection_notes = (
+            "El video de trabajo ya es la predicación recortada; "
+            "el intervalo cubre todo el archivo."
+        )
+        plan.updated_at = datetime.now(UTC)
+
+    db.flush()
+    for reel in db.scalars(select(Reel).where(Reel.project_id == project.id)).all():
+        db.delete(reel)
 
 
 async def attach_cover(

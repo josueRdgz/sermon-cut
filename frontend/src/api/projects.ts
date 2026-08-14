@@ -17,12 +17,17 @@ export function projectCoverUrl(id: string): string {
   return `${API_BASE_URL}/api/projects/${id}/media/cover`;
 }
 
-export function projectVideoUrl(id: string): string {
-  return `${API_BASE_URL}/api/projects/${id}/media/video`;
+function withCacheKey(url: string, cacheKey?: string | number | null): string {
+  if (cacheKey == null || cacheKey === '') return url;
+  return `${url}?t=${encodeURIComponent(String(cacheKey))}`;
 }
 
-export function projectAudioUrl(id: string): string {
-  return `${API_BASE_URL}/api/projects/${id}/media/audio`;
+export function projectVideoUrl(id: string, cacheKey?: string | number | null): string {
+  return withCacheKey(`${API_BASE_URL}/api/projects/${id}/media/video`, cacheKey);
+}
+
+export function projectAudioUrl(id: string, cacheKey?: string | number | null): string {
+  return withCacheKey(`${API_BASE_URL}/api/projects/${id}/media/audio`, cacheKey);
 }
 
 export function getProject(id: string): Promise<Project> {

@@ -116,7 +116,7 @@ def test_validate_accepts_literal_evidence_and_snaps_times() -> None:
     validated = report.accepted[0].segments[0]
     assert validated.snapped is True
     assert validated.start == pytest.approx(0.0)
-    assert validated.end == pytest.approx(4.0)
+    assert validated.end == pytest.approx(4.08)
     assert validated.match_ratio == pytest.approx(1.0)
 
 

@@ -18,6 +18,7 @@ interface TranscriptEditorProps {
   projectId: string;
   hasVideo: boolean;
   videoDuration?: number | null;
+  mediaRevision?: string | number | null;
   onTranscriptChanged?: () => void;
 }
 
@@ -40,6 +41,7 @@ export function TranscriptEditor({
   projectId,
   hasVideo,
   videoDuration = null,
+  mediaRevision = null,
   onTranscriptChanged,
 }: TranscriptEditorProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -77,7 +79,7 @@ export function TranscriptEditor({
       .finally(() => {
         setLoading(false);
       });
-  }, [projectId]);
+  }, [mediaRevision, projectId]);
 
   useEffect(() => {
     void loadTranscript();
@@ -222,7 +224,7 @@ export function TranscriptEditor({
           className="transcript-editor__video"
           controls
           preload="metadata"
-          src={projectVideoUrl(projectId)}
+          src={projectVideoUrl(projectId, mediaRevision)}
         >
           Tu navegador no soporta video HTML5.
         </video>

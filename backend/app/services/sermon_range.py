@@ -6,6 +6,7 @@ import shutil
 from pathlib import Path
 
 from app.core.exceptions import AppError, ValidationAppError
+from app.services.audio_integrity import heal_program_audio
 from app.services.render.binary import locate_ffmpeg
 from app.services.render.runner import FFmpegError, run_ffmpeg
 
@@ -22,7 +23,11 @@ def should_trim(*, start: float, end: float, duration: float) -> bool:
 
 
 def extract_window(source: Path, destination: Path, *, start: float, end: float) -> None:
-    """Cut ``source`` to ``[start, end]`` with stream copy, then re-encode if needed."""
+    """Cut ``source`` to ``[start, end]`` without stretching speech.
+
+    Stream-copy is attempted first (fast). If it leaves A/V drifted, audio is
+    realigned to the picture. Copy failure falls back to a matched re-encode.
+    """
     duration = end - start
     if duration < 1.0:
         raise ValidationAppError(
@@ -37,19 +42,26 @@ def extract_window(source: Path, destination: Path, *, start: float, end: float)
     temp = destination.with_name(f"{destination.stem}.building{destination.suffix}")
     temp.unlink(missing_ok=True)
     try:
-        _run_cut(ffmpeg, source, temp, start=start, duration=duration, copy=True, log_path=log_path)
-    except FFmpegError:
+        try:
+            _run_cut(
+                ffmpeg, source, temp, start=start, duration=duration, copy=True, log_path=log_path
+            )
+        except FFmpegError:
+            temp.unlink(missing_ok=True)
+            _run_cut(
+                ffmpeg,
+                source,
+                temp,
+                start=start,
+                duration=duration,
+                copy=False,
+                log_path=log_path,
+            )
+        heal_program_audio(temp)
+        temp.replace(destination)
+    except Exception:
         temp.unlink(missing_ok=True)
-        _run_cut(
-            ffmpeg,
-            source,
-            temp,
-            start=start,
-            duration=duration,
-            copy=False,
-            log_path=log_path,
-        )
-    temp.replace(destination)
+        raise
 
 
 def _run_cut(

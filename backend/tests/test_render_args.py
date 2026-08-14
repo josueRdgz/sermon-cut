@@ -129,6 +129,7 @@ def test_audio_normalized_to_stereo_48k_with_boundary_fades() -> None:
     graph = plan.filter_complex
     assert graph.count("channel_layouts=stereo") == 2  # mono sources are upmixed
     assert graph.count("aresample=48000") == 2
+    assert "async=" not in graph
     assert graph.count("afade=t=in") == 2
     assert graph.count("afade=t=out") == 2
     assert graph.count("d=0.003") == 4

@@ -17,17 +17,15 @@ from app.services.render.binary import locate_ffmpeg
 from app.services.render.runner import FFmpegError, run_ffmpeg
 
 _PREVIEW_NAME = "preview-audio.m4a"
-_READY_WAVES = ("repaired-audio.wav", "original-audio.wav")
 
 
 def preview_audio_path(project_id: UUID, video_filename: str) -> Path:
-    """Return a playable audio file, extracting it from the project video if needed."""
-    project_dir = storage.ensure_project_dir(project_id)
-    for name in _READY_WAVES:
-        existing = project_dir / name
-        if existing.is_file() and existing.stat().st_size > 1024:
-            return existing
+    """Return a playable audio file extracted from the current working video.
 
+    Repair WAVs are never used here: they can be a different clock than the
+    picture and make later analysis/edit preview sound cut or delayed.
+    """
+    project_dir = storage.ensure_project_dir(project_id)
     if not video_filename:
         raise NotFoundError("Project has no video.", code="video_not_found")
     source = storage.resolve_inside_project(project_id, video_filename)

@@ -7,6 +7,7 @@ import threading
 from pathlib import Path
 
 from app.core.exceptions import AppError
+from app.services.audio_integrity import heal_program_audio
 from app.services.render.binary import locate_ffmpeg
 from app.services.render.runner import FFmpegError, run_ffmpeg
 
@@ -115,7 +116,6 @@ def mux_repaired_audio(
                 *audio_args,
                 "-movflags",
                 "+faststart",
-                "-shortest",
                 "-progress",
                 "pipe:1",
                 "-nostats",
@@ -126,6 +126,7 @@ def mux_repaired_audio(
             error_code="audio_mux_failed",
             error_message="FFmpeg could not create the repaired video copy.",
         )
+        heal_program_audio(temp_output)
         temp_output.replace(output)
     except Exception:
         temp_output.unlink(missing_ok=True)

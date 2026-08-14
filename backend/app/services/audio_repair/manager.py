@@ -217,6 +217,8 @@ class AudioRepairManager:
             # If a backup already exists, keep it and leave the current file untouched.
 
         project.video_filename = job.repaired_video_filename
+        preview_cache = storage.resolve_inside_project(project.id, "preview-audio.m4a")
+        preview_cache.unlink(missing_ok=True)
         db.commit()
         db.refresh(job)
         return job

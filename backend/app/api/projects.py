@@ -39,6 +39,8 @@ _COVER_MEDIA_TYPES: dict[str, str] = {
     ".webp": "image/webp",
 }
 
+_NO_CACHE_HEADERS = {"Cache-Control": "private, no-cache"}
+
 
 async def _upload_chunks(upload: UploadFile) -> AsyncIterator[bytes]:
     """Yield the upload body in chunks without loading it all into memory."""
@@ -176,6 +178,7 @@ def stream_project_video(project_id: UUID, db: Session = Depends(get_db)) -> Fil
         media_type=media_type,
         filename=project.video_filename,
         content_disposition_type="inline",
+        headers=_NO_CACHE_HEADERS,
     )
 
 
@@ -195,6 +198,7 @@ def stream_project_audio(project_id: UUID, db: Session = Depends(get_db)) -> Fil
         media_type=media_types.get(path.suffix.lower(), "audio/mp4"),
         filename=path.name,
         content_disposition_type="inline",
+        headers=_NO_CACHE_HEADERS,
     )
 
 

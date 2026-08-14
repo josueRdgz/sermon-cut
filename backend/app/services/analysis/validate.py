@@ -19,6 +19,10 @@ from app.services.ai.schemas import (
 )
 
 _WORD_RE = re.compile(r"[0-9A-Za-zÁÉÍÓÚÜÑáéíóúüñ]+", re.UNICODE)
+# Keep a few milliseconds of real speech around word snaps so analysis cuts
+# do not clip consonants. Never stretch or rewrite samples.
+_AUDIO_HANDLE_IN_SECONDS = 0.04
+_AUDIO_HANDLE_OUT_SECONDS = 0.08
 
 
 @dataclass(frozen=True)
@@ -260,6 +264,7 @@ def _validate_clip(
         raise ValueError(
             f"clip longer than {max_clip_seconds}s ({total_duration:.2f}s)"
         )
+    ordered = _apply_audio_handles(ordered, video_duration)
 
     confidence = sum(ratios) / len(ratios) if ratios else 0.0
     if confidence < 0.85:
@@ -324,3 +329,34 @@ def _merge_nearby_segments(
             snapped=previous.snapped or current.snapped,
         )
     return merged
+
+
+def _apply_audio_handles(
+    segments: list[ValidatedSegment],
+    video_duration: float,
+) -> list[ValidatedSegment]:
+    """Pad word-snapped edges with unused neighbouring audio, never overlapping."""
+    if not segments:
+        return []
+    padded: list[ValidatedSegment] = []
+    for index, segment in enumerate(segments):
+        previous_end = padded[-1].end if padded else 0.0
+        next_start = segments[index + 1].start if index + 1 < len(segments) else video_duration
+        room_before = max(0.0, segment.start - previous_end)
+        room_after = max(0.0, next_start - segment.end)
+        start = max(0.0, segment.start - min(_AUDIO_HANDLE_IN_SECONDS, room_before))
+        end = min(video_duration, segment.end + min(_AUDIO_HANDLE_OUT_SECONDS, room_after))
+        if end <= start:
+            padded.append(segment)
+            continue
+        padded.append(
+            ValidatedSegment(
+                start=round(start, 3),
+                end=round(end, 3),
+                exact_text=segment.exact_text,
+                reason=segment.reason,
+                match_ratio=segment.match_ratio,
+                snapped=segment.snapped,
+            )
+        )
+    return padded

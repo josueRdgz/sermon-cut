@@ -295,3 +295,94 @@ def test_apply_sermon_range_trims_working_video(client: TestClient, storage_root
     assert body["sermon_start_seconds"] == 0.0
     assert (storage_root / project_id / "sermon.mp4").is_file()
     assert not (storage_root / project_id / "original.mp4").exists()
+
+
+def test_apply_sermon_range_discards_culto_timed_edits(client: TestClient, storage_root: Path) -> None:
+    created = _create_project(client, source_kind="full_service")
+    project_id = created["id"]
+    with patch("app.services.projects.probe_video", return_value=FAKE_METADATA):
+        uploaded = client.post(
+            f"/api/projects/{project_id}/video",
+            files={"file": ("culto.mp4", FAKE_MP4, "video/mp4")},
+        )
+    assert uploaded.status_code == 200, uploaded.text
+
+    srt = b"1\n00:00:01,000 --> 00:00:04,000\nCulto completo\n"
+    transcript = client.post(
+        f"/api/projects/{project_id}/transcript",
+        files={"file": ("sample.srt", srt, "application/x-subrip")},
+        data={"language": "es"},
+    )
+    assert transcript.status_code == 201, transcript.text
+
+    reel = client.post(
+        f"/api/projects/{project_id}/reels",
+        json={
+            "title": "Clip del culto",
+            "aspect_ratio": "9:16",
+            "segments": [
+                {
+                    "source_start_seconds": 30.0,
+                    "source_end_seconds": 50.0,
+                    "transcript_text": "fuera del recorte",
+                    "transition_type": "hard_cut",
+                    "transition_duration_ms": 0,
+                }
+            ],
+        },
+    )
+    assert reel.status_code == 201, reel.text
+
+    highlights = client.patch(
+        f"/api/projects/{project_id}/highlights/sermon-range",
+        json={"start": 20.0, "end": 80.0},
+    )
+    assert highlights.status_code == 200, highlights.text
+
+    project_dir = storage_root / project_id
+    (project_dir / "original-audio.wav").write_bytes(b"RIFF" + b"\x00" * 2048)
+    (project_dir / "preview-audio.m4a").write_bytes(b"\x00" * 2048)
+    (project_dir / "highlights-preview.mp4").write_bytes(b"\x00" * 3000)
+    (project_dir / "highlights-preview.json").write_text("{}", encoding="utf-8")
+
+    trimmed = VideoMetadata(
+        duration_seconds=40.0,
+        width=1920,
+        height=1080,
+        fps=29.97,
+        video_codec="h264",
+        audio_codec="aac",
+    )
+
+    def fake_extract(source, destination, *, start, end) -> None:  # noqa: ANN001
+        destination.write_bytes(FAKE_MP4)
+        assert start == 20.0
+        assert end == 60.0
+
+    with (
+        patch("app.services.projects.extract_window", side_effect=fake_extract),
+        patch("app.services.projects.probe_video", return_value=trimmed),
+    ):
+        response = client.post(
+            f"/api/projects/{project_id}/sermon-range",
+            json={"start_seconds": 20, "end_seconds": 60},
+        )
+    assert response.status_code == 200, response.text
+
+    assert client.get(f"/api/projects/{project_id}/transcript").status_code == 404
+    reels = client.get(f"/api/projects/{project_id}/reels")
+    assert reels.status_code == 200
+    assert reels.json()["items"] == []
+
+    plan = client.get(f"/api/projects/{project_id}/highlights")
+    assert plan.status_code == 200, plan.text
+    body = plan.json()
+    assert body["sermon_start"] == 0.0
+    assert body["sermon_end"] == 40.0
+    assert body["segments"] == []
+
+    assert not (project_dir / "original-audio.wav").exists()
+    assert not (project_dir / "preview-audio.m4a").exists()
+    assert not (project_dir / "highlights-preview.mp4").exists()
+    assert not (project_dir / "highlights-preview.json").exists()
+    assert (project_dir / "sermon.mp4").is_file()

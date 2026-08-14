@@ -12,7 +12,8 @@ import {
   updateReel,
   updateReelSegment,
 } from '../api/reels';
-import { getTranscript, projectVideoUrl } from '../api/transcripts';
+import { getTranscript } from '../api/transcripts';
+import { projectAudioUrl, projectVideoUrl } from '../api/projects';
 import type { AspectRatio, Reel, ReelSegment, TransitionType } from '../types/reel';
 import type { TranscriptSegment } from '../types/transcript';
 import { formatDuration, formatTimecode } from '../utils/format';
@@ -37,6 +38,7 @@ interface ReelEditorProps {
   hasVideo: boolean;
   hasCover: boolean;
   videoDuration: number | null;
+  mediaRevision?: string | number | null;
   refreshToken?: number;
   focusReelId?: string | null;
 }
@@ -102,6 +104,7 @@ export function ReelEditor({
   hasVideo,
   hasCover,
   videoDuration,
+  mediaRevision = null,
   refreshToken = 0,
   focusReelId = null,
 }: ReelEditorProps) {
@@ -514,20 +517,10 @@ export function ReelEditor({
     const target = audioTimeForVideo(videoTime, audioOffsetRef.current);
     pendingAudioTimeRef.current = target;
     if (audio.readyState < HTMLMediaElement.HAVE_METADATA) return;
-    if (force) {
-      audio.playbackRate = 1;
+    audio.playbackRate = 1;
+    const drift = target - audio.currentTime;
+    if (force || Math.abs(drift) >= 0.08) {
       if (!setMediaTime(audio, target)) return;
-    } else {
-      // Seeking the audio for every small clock difference produces audible
-      // gaps in WebKit. Correct normal drift gradually and reserve hard seeks
-      // for explicit timeline/segment jumps.
-      const drift = target - audio.currentTime;
-      if (Math.abs(drift) < 0.03) {
-        audio.playbackRate = 1;
-      } else {
-        const correction = Math.max(-0.03, Math.min(0.03, drift * 0.15));
-        audio.playbackRate = 1 + correction;
-      }
     }
     pendingAudioTimeRef.current = null;
   }
@@ -1099,7 +1092,7 @@ export function ReelEditor({
                   muted
                   playsInline
                   preload="metadata"
-                  src={projectVideoUrl(projectId)}
+                  src={projectVideoUrl(projectId, mediaRevision)}
                 >
                   Tu navegador no soporta video HTML5.
                 </video>
@@ -1108,7 +1101,7 @@ export function ReelEditor({
               <audio
                 ref={audioRef}
                 preload="metadata"
-                src={projectVideoUrl(projectId)}
+                src={projectAudioUrl(projectId, mediaRevision)}
                 aria-hidden="true"
               />
               <div className="reel-preview__controls">

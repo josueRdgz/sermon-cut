@@ -112,6 +112,12 @@ export function ProjectDetailPage() {
     setTranscriptRevision((revision) => revision + 1);
   }, []);
 
+  const handleSermonUpdated = useCallback((updated: Project) => {
+    setProject(updated);
+    setTranscriptRevision((revision) => revision + 1);
+    setReelRevision((revision) => revision + 1);
+  }, []);
+
   const handleCandidateAccepted = useCallback(
     (reelId: string) => {
       setReelToFocus(reelId);
@@ -335,7 +341,7 @@ export function ProjectDetailPage() {
         aria-labelledby="workspace-tab-sermon"
         hidden={activeSection !== 'sermon'}
       >
-        <SermonRangePanel project={project} onUpdated={setProject} />
+        <SermonRangePanel project={project} onUpdated={handleSermonUpdated} />
       </div>
 
       <div
@@ -364,6 +370,7 @@ export function ProjectDetailPage() {
           projectId={project.id}
           hasVideo={project.has_video}
           videoDuration={project.duration_seconds}
+          mediaRevision={project.updated_at}
           onTranscriptChanged={handleTranscriptChanged}
         />
       </div>
@@ -392,6 +399,7 @@ export function ProjectDetailPage() {
           hasVideo={project.has_video}
           hasCover={project.has_cover}
           videoDuration={project.duration_seconds}
+          mediaRevision={project.updated_at}
           refreshToken={reelRevision}
           focusReelId={reelToFocus}
         />

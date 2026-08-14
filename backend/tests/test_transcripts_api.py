@@ -180,6 +180,7 @@ def test_stream_video_endpoint(client: TestClient, storage_root: Path) -> None:
     streamed = client.get(f"/api/projects/{project_id}/media/video")
     assert streamed.status_code == 200
     assert streamed.headers["content-type"].startswith("video/")
+    assert streamed.headers.get("cache-control") == "private, no-cache"
     assert streamed.content == fake_mp4
     assert (storage_root / project_id / "original.mp4").is_file()
 

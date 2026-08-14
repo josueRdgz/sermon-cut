@@ -227,7 +227,7 @@ def _audio_chain(
     parts = [
         f"[{stream}]aformat=sample_fmts=fltp:sample_rates={TARGET_SAMPLE_RATE}"
         f":channel_layouts=stereo",
-        f"aresample={TARGET_SAMPLE_RATE}:async=1",
+        f"aresample={TARGET_SAMPLE_RATE}",
         "asetpts=PTS-STARTPTS",
     ]
     if delay_seconds > 0:
@@ -379,7 +379,7 @@ def _end_card_chains(
     audio_parts = [
         f"[{audio_index}:a]aformat=sample_fmts=fltp:sample_rates={TARGET_SAMPLE_RATE}"
         f":channel_layouts=stereo",
-        f"aresample={TARGET_SAMPLE_RATE}:async=1",
+        f"aresample={TARGET_SAMPLE_RATE}",
     ]
     if mode == AUDIO_LOCAL_MUSIC:
         start = max(0.0, spec.music_start_seconds)
