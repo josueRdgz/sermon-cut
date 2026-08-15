@@ -15,6 +15,8 @@ from app.services.subtitles.cues import (
     SubtitleCue,
     build_cues_for_reel,
     sanitize_caption_text,
+    split_caption_blocks,
+    wrap_lines,
 )
 from app.services.subtitles.fonts import resolve_font
 from app.services.subtitles.templates import (
@@ -106,6 +108,7 @@ def test_cues_use_output_clock_not_source_times() -> None:
 
 
 def test_deleted_word_does_not_appear() -> None:
+    """Without a saved cut caption, live word clocks drive the subtitle."""
     reel = [TimelineSegment(0.0, 10.0)]
     transcript = [
         SourceSegment(
@@ -121,7 +124,7 @@ def test_deleted_word_does_not_appear() -> None:
     result = build_cues_for_reel(
         reel_segments=reel,
         transcript_segments=transcript,
-        fallback_texts=["palabra basura limpia"],
+        fallback_texts=[None],
         options=SubtitleOptions(
             style="reformed_sober",
             granularity=SubtitleGranularity.word,
@@ -132,6 +135,70 @@ def test_deleted_word_does_not_appear() -> None:
     assert "basura" not in joined
     assert "palabra" in joined
     assert "limpia" in joined
+
+
+def test_saved_cut_caption_is_authoritative() -> None:
+    """A saved fragment subtitle always wins over live Whisper words."""
+    reel = [TimelineSegment(0.0, 10.0)]
+    transcript = [
+        SourceSegment(
+            text="palabra basura limpia",
+            start=0.0,
+            end=10.0,
+            words=[
+                SourceWord("palabra", 1.0, 2.0),
+                SourceWord("basura", 2.0, 2.5),
+                SourceWord("limpia", 2.5, 3.0),
+            ],
+        )
+    ]
+    result = build_cues_for_reel(
+        reel_segments=reel,
+        transcript_segments=transcript,
+        fallback_texts=["palabra limpia"],
+        options=SubtitleOptions(
+            style="reformed_sober",
+            granularity=SubtitleGranularity.word,
+            max_words=10,
+        ),
+    )
+    joined = " ".join(cue.text for cue in result.cues).lower()
+    assert "basura" not in joined
+    assert "palabra" in joined
+    assert "limpia" in joined
+
+
+def test_saved_caption_overrides_identical_whisper_tokens() -> None:
+    """Even when tokens match Whisper, a saved caption is still the burn-in source."""
+    reel = [TimelineSegment(0.0, 4.0)]
+    transcript = [
+        SourceSegment(
+            text="hola mundo",
+            start=0.0,
+            end=4.0,
+            words=[
+                SourceWord("hola", 0.0, 1.0),
+                SourceWord("mundo", 1.0, 2.0),
+            ],
+        )
+    ]
+    result = build_cues_for_reel(
+        reel_segments=reel,
+        transcript_segments=transcript,
+        fallback_texts=["Hola Mundo"],
+        options=SubtitleOptions(
+            style="reformed_sober",
+            granularity=SubtitleGranularity.word,
+            max_words=10,
+        ),
+    )
+    assert len(result.cues) >= 1
+    # Synthesized packing spans the full cut, not the short Whisper word clocks.
+    assert result.cues[0].start == pytest.approx(0.0, abs=1e-3)
+    assert result.cues[-1].end == pytest.approx(4.0, abs=1e-3)
+    joined = " ".join(cue.text for cue in result.cues)
+    assert "Hola" in joined
+    assert "Mundo" in joined
 
 
 def test_edited_fallback_fills_incomplete_word_mapping() -> None:
@@ -164,8 +231,8 @@ def test_edited_fallback_fills_incomplete_word_mapping() -> None:
     assert "final" in joined
 
 
-def test_full_span_fallback_does_not_repack_onto_short_cut() -> None:
-    """A leftover full-segment caption must not repeat across a trimmed cut."""
+def test_null_fallback_uses_only_words_in_each_cut() -> None:
+    """Without saved captions, each cut only shows Whisper words in its window."""
     reel = [TimelineSegment(0.0, 5.0), TimelineSegment(10.0, 15.0)]
     transcript = [
         SourceSegment(
@@ -183,8 +250,7 @@ def test_full_span_fallback_does_not_repack_onto_short_cut() -> None:
     result = build_cues_for_reel(
         reel_segments=reel,
         transcript_segments=transcript,
-        # Old bug: every fragment stored the full Whisper span as transcript_text.
-        fallback_texts=["uno dos tres cuatro", "uno dos tres cuatro"],
+        fallback_texts=[None, None],
         options=SubtitleOptions(
             style="reformed_sober",
             granularity=SubtitleGranularity.word,
@@ -423,3 +489,64 @@ def test_crossfade_does_not_stack_duplicate_segment_cues() -> None:
     # Overlap window ~9.5–10.0 must not show both captions at once.
     for left, right in zip(result.cues, result.cues[1:], strict=False):
         assert left.end <= right.start + 1e-3
+
+
+def test_wrap_lines_never_cuts_words() -> None:
+    text = wrap_lines(
+        "palabra suficiente para llenar varias lineas del cartel",
+        max_lines=2,
+        max_chars=18,
+    )
+    assert "…" not in text
+    for line in text.split("\\N"):
+        for token in line.split():
+            assert token in {
+                "palabra",
+                "suficiente",
+                "para",
+                "llenar",
+                "varias",
+                "lineas",
+                "del",
+                "cartel",
+            }
+            # No mid-word ellipsis fragments.
+            assert not token.endswith("…")
+
+
+def test_long_caption_splits_into_multiple_cues() -> None:
+    """Oversized captions become sequential cues instead of truncated lines."""
+    caption = (
+        "La gracia de Dios es suficiente para todo pecador arrepentido "
+        "que busca a Cristo con un corazon humilde y sincero"
+    )
+    reel = [TimelineSegment(0.0, 20.0)]
+    result = build_cues_for_reel(
+        reel_segments=reel,
+        transcript_segments=[],
+        fallback_texts=[caption],
+        options=SubtitleOptions(
+            style="reformed_sober",
+            granularity=SubtitleGranularity.phrase,
+            max_words=40,
+        ),
+    )
+    joined = " ".join(cue.text.replace("\\N", " ") for cue in result.cues)
+    assert "…" not in joined
+    for token in caption.split():
+        assert token in joined
+    assert len(result.cues) >= 2
+    # Blocks cover the cut without gaps that would hide words mid-span.
+    assert result.cues[0].start == pytest.approx(0.0, abs=1e-3)
+    assert result.cues[-1].end == pytest.approx(20.0, abs=1e-3)
+
+
+def test_split_caption_blocks_keeps_overlong_token_intact() -> None:
+    blocks = split_caption_blocks(
+        "supercalifragilistico y corto",
+        max_lines=1,
+        max_chars=8,
+    )
+    assert blocks[0] == "supercalifragilistico"
+    assert "corto" in " ".join(blocks)
+    assert all("…" not in block for block in blocks)

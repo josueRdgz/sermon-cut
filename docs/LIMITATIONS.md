@@ -50,6 +50,10 @@ restricciones. Complementa el README.
   en varios archivos todavía.
 - FFmpeg/FFprobe deben estar en el `PATH`; builds mínimos sin `libx264`/`ass`
   no sirven para el pipeline completo.
+- El editor NLE 0.4.1 permite arrastre, baúl e overlays de imagen/texto; **aún no**
+  hay b-roll de video multi-pista ni motor WebCodecs. Las transiciones en la
+  vista lógica son aproximadas; usa «Previsualizar ensamblado» o el export para
+  fidelidad completa.
 
 ## Datos y privacidad
 

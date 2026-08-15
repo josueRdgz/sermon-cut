@@ -7,6 +7,105 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.4.1] — 2026-08-15
+
+### Added
+
+- NLE de cultos: baúl de medios del proyecto, pista de overlays (imagen/texto),
+  arrastre/reorden/trim en la línea temporal, zoom de timeline y preview DOM
+  de overlays sincronizado al reloj de salida.
+- Transiciones `fade` (difuminar) y `flash` (destello) además de fundido cruzado
+  y a negro; picker en Cortes; grafo FFmpeg con `xfade`.
+- Preview ensamblado on-demand (transiciones + overlays) junto a la vista lógica.
+- API de assets (`/projects/{id}/assets`) y overlays (`/reels/{id}/overlays`).
+
+### Changed
+
+- Reloj de salida unificado (FE/BE) con solapes xfade; la strip ya no usa solo
+  la suma de ventanas fuente.
+- Persistencia optimista con debounce al arrastrar/recortar (menos jank).
+- Workspace del editor: baúl | vista previa | inspector.
+
+### Fixed
+
+- Edición de subtítulo por fragmento unificada (`transcript_text` → burn-in).
+- Escritorio: la migración de overlays (`f6a7b8c9d0e1`) ramificaba Alembic, así
+  que la SQLite persistente no aplicaba `source_kind` y WebKit mostraba
+  «Load failed» al listar o crear proyectos.
+
+## [0.3.29] — 2026-08-14
+
+### Changed
+
+- Editor de Reel reequilibrado: panel de Cortes mucho más amplio, filmstrip de
+  fragmentos, textarea y tiempos usables; línea temporal más alta y legible
+  (pistas Video/Subs/Música, cursor ámbar).
+
+## [0.3.28] — 2026-08-14
+
+### Fixed
+
+- Subtítulos largos se dividen en varios cues/líneas por palabras completas; ya no
+  se cortan con puntos suspensivos a mitad de palabra (preview y burn-in).
+
+## [0.3.27] — 2026-08-14
+
+### Fixed
+
+- Mezcla de audio usable: sliders de voz/música a ancho completo; el de música
+  responde al arrastre, desilencia al ajustar y guarda con debounce.
+- Línea temporal tipo NLE: cursor arrastrable, clic/arrastre en cualquier pista
+  para ubicar la reproducción (ya no salta solo al inicio del clip).
+
+## [0.3.26] — 2026-08-14
+
+### Changed
+
+- Editor de Reel con chrome tipo NLE: vista previa + inspector + línea temporal
+  de 3 pistas (video, subtítulos, música) clicable, sin arrastre todavía.
+
+### Fixed
+
+- Controles de volumen estables en la barra de transporte.
+- Exportación: aviso accionable cuando la coherencia bloquea el render (“Ir a Cortes”).
+- Subtítulo editable del fragmento seleccionado (una sola caja, no una lista monstruosa).
+
+## [0.3.25] — 2026-08-14
+
+### Fixed
+
+- Los subtítulos editados del fragmento se aplican en la exportación (burn-in):
+  el texto guardado es la fuente de verdad, se fuerza el guardado de borradores
+  antes de exportar, y el render vuelve a cargar los segmentos del Reel.
+
+## [0.3.24] — 2026-08-14
+
+### Fixed
+
+- El preview del Reel muestra la vista final en 9:16 / 1:1 / 16:9 (antes el
+  video fuente llenaba el ancho y el vertical no se veía).
+- La música de fondo ya no se detiene en cada salto entre fragmentos: sigue el
+  reloj del Reel y se reanuda tras los seeks.
+
+## [0.3.23] — 2026-08-14
+
+### Fixed
+
+- Caja de subtítulos del fragmento ya no aparece contraída (el CSS apuntaba a
+  una clase mal escrita y no se aplicaba).
+- Controles de volumen de voz/música usables: fila propia, más anchos, y el
+  slider de voz ya no se queda trabado en silencio.
+
+## [0.3.22] — 2026-08-14
+
+### Fixed
+
+- El subtítulo del fragmento ya no se borra al ajustar inicio/fin (eso hacía
+  parecer que nunca se guardaba y se perdía el avance).
+- El texto guardado del corte es siempre la fuente de verdad en preview y export.
+- Guardado al salir del campo de subtítulo; los tiempos del fragmento solo se
+  envían al terminar de editarlos (no en cada tecla).
+
 ## [0.3.21] — 2026-08-14
 
 ### Fixed

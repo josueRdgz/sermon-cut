@@ -1,5 +1,10 @@
 export type AspectRatio = '9:16' | '1:1' | '16:9';
-export type TransitionType = 'hard_cut' | 'short_crossfade' | 'dip_to_black';
+export type TransitionType =
+  | 'hard_cut'
+  | 'short_crossfade'
+  | 'dip_to_black'
+  | 'fade'
+  | 'flash';
 export type SubtitleStyle =
   'reformed_sober' | 'modern_highlight' | 'clear_reading' | 'sermon_quote';
 export type SubtitleGranularity = 'auto' | 'segment' | 'phrase' | 'word';

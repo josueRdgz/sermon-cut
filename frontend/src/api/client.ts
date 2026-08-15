@@ -85,6 +85,18 @@ async function fetchWithTimeout(
         'request_timeout',
       );
     }
+    const message = err instanceof Error ? err.message : String(err);
+    if (
+      message === 'Load failed' ||
+      message === 'Failed to fetch' ||
+      message === 'NetworkError when attempting to fetch resource.'
+    ) {
+      throw new ApiError(
+        'No se pudo conectar con el backend local. Cierra Sermon Cut y vuelve a abrirlo.',
+        0,
+        'network_error',
+      );
+    }
     throw err;
   } finally {
     clear();

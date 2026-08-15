@@ -22,6 +22,8 @@ interface BackgroundMusicPanelProps {
   showMeters?: boolean;
   /** Notify the parent when settings change (preview mix, etc.). */
   onSettingsChange?: (settings: BackgroundMusicSettings) => void;
+  /** Tighter layout for the NLE inspector. */
+  compact?: boolean;
 }
 
 const FALLBACK_PRESETS: BackgroundMusicPresetInfo[] = [
@@ -44,6 +46,7 @@ export function BackgroundMusicPanel({
   projectId,
   showMeters = true,
   onSettingsChange,
+  compact = false,
 }: BackgroundMusicPanelProps) {
   const [settings, setSettings] = useState<BackgroundMusicSettings | null>(null);
   const [presets, setPresets] = useState<BackgroundMusicPresetInfo[]>(FALLBACK_PRESETS);
@@ -165,7 +168,7 @@ export function BackgroundMusicPanel({
   const musicActive = settings.preset !== 'none';
 
   return (
-    <div className="background-music-panel">
+    <div className={`background-music-panel${compact ? ' background-music-panel--compact' : ''}`}>
       <div className="reel-editor__section-header">
         <h4>Música de fondo</h4>
         <span className={`badge ${settings.enabled ? 'badge--cut' : ''}`}>
@@ -299,7 +302,9 @@ export function BackgroundMusicPanel({
               disabled={busy}
               onChange={(e) => {
                 const volume = Number(e.target.value);
-                setSettings({ ...settings, volume });
+                const next = { ...settings, volume };
+                setSettings(next);
+                onSettingsChange?.(next);
                 if (audioPreviewRef.current) {
                   audioPreviewRef.current.volume = Math.max(0, Math.min(1, volume));
                 }

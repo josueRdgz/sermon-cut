@@ -17,6 +17,8 @@ interface FramingPanelProps {
   reel: Reel;
   sourceTime: number | null;
   onReelChange: (reel: Reel) => void;
+  /** Smaller preview for the NLE inspector. */
+  compact?: boolean;
 }
 
 const MODE_OPTIONS: { value: FramingMode; label: string }[] = [
@@ -26,7 +28,13 @@ const MODE_OPTIONS: { value: FramingMode; label: string }[] = [
   { value: 'manual', label: 'Posición manual' },
 ];
 
-export function FramingPanel({ projectId, reel, sourceTime, onReelChange }: FramingPanelProps) {
+export function FramingPanel({
+  projectId,
+  reel,
+  sourceTime,
+  onReelChange,
+  compact = false,
+}: FramingPanelProps) {
   const [status, setStatus] = useState<FramingStatus | null>(null);
   const [report, setReport] = useState<TrackingReport | null>(null);
   const [preview, setPreview] = useState<FramingPreview | null>(null);
@@ -227,7 +235,7 @@ export function FramingPanel({ projectId, reel, sourceTime, onReelChange }: Fram
       )}
 
       {preview && (
-        <div className="framing-preview">
+        <div className={`framing-preview${compact ? ' framing-preview--compact' : ''}`}>
           <div className="framing-preview__meta muted">
             Vista previa · {preview.mode}
             {preview.unstable ? ' · inestable → blur' : ''} · t={preview.source_time.toFixed(2)}s

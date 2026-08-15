@@ -9,6 +9,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from sqlalchemy.exc import SQLAlchemyError
 
 from app.api import api_router
 from app.core.config import get_settings
@@ -94,6 +95,25 @@ def create_app() -> FastAPI:
         return JSONResponse(
             status_code=exc.status_code,
             content={"detail": exc.detail, "code": exc.code},
+        )
+
+    @app.exception_handler(SQLAlchemyError)
+    async def handle_db_error(_request: Request, exc: SQLAlchemyError) -> JSONResponse:
+        # Unhandled OperationalError (stale schema) otherwise bubbles past CORS
+        # and WKWebView surfaces it as a useless "Load failed".
+        logger.exception("Database error")
+        raw = str(exc.orig) if getattr(exc, "orig", None) else str(exc)
+        lowered = raw.lower()
+        if "no such column" in lowered or "has no column" in lowered:
+            detail = (
+                "La base de datos está desactualizada. Cierra Sermon Cut y "
+                "vuelve a abrirlo para aplicar migraciones."
+            )
+        else:
+            detail = "Error de base de datos. Revisa el registro de la aplicación."
+        return JSONResponse(
+            status_code=500,
+            content={"detail": detail, "code": "database_error"},
         )
 
     app.include_router(api_router, prefix=settings.api_prefix)

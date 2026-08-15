@@ -15,6 +15,8 @@ interface SubtitlePanelProps {
   /** Index of the reel segment currently playing in the logical preview. */
   previewSegmentIndex: number | null;
   onReelUpdated: (reel: Reel) => void;
+  /** Hide the duplicate gradient stage when the main player already shows cues. */
+  hideStagePreview?: boolean;
 }
 
 const GRANULARITY_OPTIONS: { value: SubtitleGranularity; label: string }[] = [
@@ -96,6 +98,7 @@ export function SubtitlePanel({
   sourceTime,
   previewSegmentIndex,
   onReelUpdated,
+  hideStagePreview = false,
 }: SubtitlePanelProps) {
   const [templates, setTemplates] = useState<SubtitleTemplateInfo[]>([]);
   const [preview, setPreview] = useState<SubtitlePreview | null>(null);
@@ -348,24 +351,34 @@ export function SubtitlePanel({
         </label>
       )}
 
-      <div className="subtitle-preview-stage">
-        <div
-          className={styleClass}
-          style={{
-            fontSize: `${Math.round(reel.subtitle_font_size * 0.45)}px`,
-            opacity: reel.subtitle_opacity,
-            paddingBottom: `${Math.round(reel.subtitle_margin_bottom * 0.25)}px`,
-            textTransform: reel.subtitle_uppercase ? 'uppercase' : 'none',
-          }}
-        >
-          <span className="subtitle-overlay__text">{stageText}</span>
+      {!hideStagePreview && (
+        <div className="subtitle-preview-stage">
+          <div
+            className={styleClass}
+            style={{
+              fontSize: `${Math.round(reel.subtitle_font_size * 0.45)}px`,
+              opacity: reel.subtitle_opacity,
+              paddingBottom: `${Math.round(reel.subtitle_margin_bottom * 0.25)}px`,
+              textTransform: reel.subtitle_uppercase ? 'uppercase' : 'none',
+            }}
+          >
+            <span className="subtitle-overlay__text">{stageText}</span>
+          </div>
+          <p className="muted">
+            Vista previa sobre el reproductor
+            {preview ? ` · ${preview.cues.length} cue(s) · ${preview.granularity_used}` : ''}
+            {outputTime != null ? ` · t=${outputTime.toFixed(2)}s (salida)` : ''}
+          </p>
         </div>
+      )}
+
+      {hideStagePreview && (
         <p className="muted">
-          Vista previa sobre el reproductor
-          {preview ? ` · ${preview.cues.length} cue(s) · ${preview.granularity_used}` : ''}
-          {outputTime != null ? ` · t=${outputTime.toFixed(2)}s (salida)` : ''}
+          Los subtítulos se muestran sobre la vista previa
+          {preview ? ` · ${preview.cues.length} cue(s)` : ''}
+          {outputTime != null ? ` · t=${outputTime.toFixed(2)}s` : ''}
         </p>
-      </div>
+      )}
 
       {error && <p className="error">{error}</p>}
     </div>

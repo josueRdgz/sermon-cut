@@ -32,6 +32,10 @@ interface RenderPanelProps {
   segments: ReelSegment[];
   audioOffsetMs: number;
   onReelChange: (reel: Reel) => void;
+  /** Flush unsaved fragment captions (and similar) before starting FFmpeg. */
+  onBeforeStart?: () => Promise<void>;
+  /** Jump to Cuts tool when coherence blocks export. */
+  onGoToCuts?: () => void;
 }
 
 const POLL_INTERVAL_MS = 1500;
@@ -94,6 +98,8 @@ export function RenderPanel({
   segments,
   audioOffsetMs,
   onReelChange,
+  onBeforeStart,
+  onGoToCuts,
 }: RenderPanelProps) {
   const [job, setJob] = useState<RenderJob | null>(null);
   const [history, setHistory] = useState<RenderJob[]>([]);
@@ -240,6 +246,9 @@ export function RenderPanel({
     setBusy(true);
     setError(null);
     try {
+      if (onBeforeStart) {
+        await onBeforeStart();
+      }
       const started = await startRender(projectId, reelId, {
         profile_id: profileId,
         quality,
@@ -271,6 +280,7 @@ export function RenderPanel({
     burnSubtitles,
     audioOffsetMs,
     coherence,
+    onBeforeStart,
   ]);
 
   const handleCancel = useCallback(async () => {
@@ -406,9 +416,28 @@ export function RenderPanel({
       )}
 
       {segmentCount > 0 && coherence && !coherence.can_render && (
-        <p className="error">
-          Resuelve o ignora las advertencias de la validación de unión antes del render final.
-        </p>
+        <div className="render-panel__block-notice" role="alert">
+          <p className="error">
+            {coherence.severity === 'blocked'
+              ? 'Hay problemas bloqueantes en la unión de fragmentos.'
+              : 'Hay advertencias de unión que debes revisar o ignorar antes de exportar.'}
+          </p>
+          <div className="button-stack">
+            {onGoToCuts && (
+              <button
+                type="button"
+                className="button button--secondary"
+                onClick={onGoToCuts}
+              >
+                Ir a Cortes
+              </button>
+            )}
+            <p className="muted">
+              Usa la validación de coherencia más abajo para ignorar avisos conscientes o corregir
+              los cortes.
+            </p>
+          </div>
+        </div>
       )}
 
       {segmentCount > 0 && (

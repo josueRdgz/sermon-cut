@@ -90,17 +90,6 @@ def _caption_tokens(text: str) -> list[str]:
     return [token for token in sanitize_caption_text(text).split() if token]
 
 
-def _token_key(tokens: list[str]) -> str:
-    return " ".join(token.casefold() for token in tokens)
-
-
-def _is_token_subsequence(short: list[str], long: list[str]) -> bool:
-    if not short:
-        return True
-    iterator = iter(long)
-    return all(any(item.casefold() == token.casefold() for item in iterator) for token in short)
-
-
 def _synthesize_mapped_words(tokens: list[str], start: float, end: float) -> list[MappedWord]:
     """Pack caption tokens evenly across an output window."""
     if not tokens or end <= start:
@@ -131,10 +120,9 @@ def build_cues_for_reel(
 ) -> CueBuildResult:
     """Remap transcript material onto the final reel timeline and split into cues.
 
-    Live word timestamps are preferred when they still match the caption text.
-    When the user edits a fragment and the remaining word clocks no longer cover
-    that text (or the text was rewritten), the edited ``fallback_texts`` are
-    packed onto the cut so the full subtitle remains visible.
+    When a cut has a saved ``fallback_texts`` caption, that text is always packed
+    onto the cut (preview and export burn-in). Otherwise live Whisper word
+    clocks in the source window drive the subtitle.
     """
     timeline = build_output_timeline(reel_segments)
     if not timeline.placements:
@@ -248,9 +236,7 @@ def _mapped_words_for_placement(
         if segment.end > placement.source_start and segment.start < placement.source_end
     ]
     mapped: list[MappedWord] = []
-    live_tokens: list[str] = []
     for segment in overlapping:
-        live_tokens.extend(_caption_tokens(segment.text))
         for word in segment.words:
             text = sanitize_caption_text(word.text)
             if not text:
@@ -264,35 +250,13 @@ def _mapped_words_for_placement(
     fallback_tokens = _caption_tokens(fallback or "")
     output_start = placement.output_start
     output_end = placement.output_start + placement.content_duration
-    mapped_tokens = [word.text for word in mapped]
-    fallback_key = _token_key(fallback_tokens)
-    mapped_key = _token_key(mapped_tokens)
-    live_key = _token_key(live_tokens)
 
+    # No per-cut caption → live word clocks in this window.
     if not fallback_tokens:
         return mapped
-    if mapped_key == fallback_key:
-        return mapped
-
-    # Legacy contamination: every cut stored the full Whisper span as caption.
-    if (
-        mapped
-        and fallback_key == live_key
-        and len(fallback_tokens) > len(mapped_tokens)
-        and _is_token_subsequence(mapped_tokens, fallback_tokens)
-    ):
-        return mapped
-
-    # Stale reel caption still lists words the live transcript already deleted.
-    if (
-        mapped
-        and live_key == mapped_key
-        and _is_token_subsequence(mapped_tokens, fallback_tokens)
-        and fallback_key != live_key
-    ):
-        return mapped
-
-    # User-edited per-cut caption is authoritative — always honor it.
+    # Saved fragment subtitle is authoritative for preview AND export burn-in.
+    # Always pack the saved text onto this cut so edits cannot be overridden by
+    # leftover Whisper word clocks.
     return _synthesize_mapped_words(fallback_tokens, output_start, output_end)
 
 

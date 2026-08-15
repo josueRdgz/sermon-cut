@@ -27,7 +27,14 @@ def render_srt_for_reel(reel: Reel, transcript: Transcript | None) -> str:
     result = build_cues_for_reel(
         reel_segments=timeline,
         transcript_segments=transcript_to_source_segments(transcript),
-        fallback_texts=[item.transcript_text for item in ordered],
+        fallback_texts=[
+            (
+                item.transcript_text.strip()
+                if item.transcript_text and item.transcript_text.strip()
+                else None
+            )
+            for item in ordered
+        ],
         options=options_for_reel(reel),
     )
     blocks = []

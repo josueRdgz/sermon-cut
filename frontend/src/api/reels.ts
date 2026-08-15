@@ -78,3 +78,19 @@ export function reorderReelSegments(
     items,
   });
 }
+
+export function prepareAssembledPreview(
+  projectId: string,
+  reelId: string,
+): Promise<{ ready: boolean; filename: string }> {
+  return apiJson<{ ready: boolean; filename: string }>(
+    `/api/projects/${projectId}/reels/${reelId}/assembled-preview`,
+    'POST',
+    {},
+    { timeoutMs: 180_000 },
+  );
+}
+
+export function assembledPreviewUrl(projectId: string, reelId: string): string {
+  return `/api/projects/${projectId}/reels/${reelId}/assembled-preview`;
+}

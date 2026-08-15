@@ -384,7 +384,11 @@ class RenderManager:
             session.commit()
 
             project = session.get(Project, job.project_id)
-            reel = session.get(Reel, job.reel_id)
+            from sqlalchemy.orm import selectinload
+
+            reel = session.scalars(
+                select(Reel).where(Reel.id == job.reel_id).options(selectinload(Reel.segments))
+            ).first()
             if project is None or not project.video_filename:
                 raise ValidationAppError(
                     "The project video is no longer available.", code="video_missing"

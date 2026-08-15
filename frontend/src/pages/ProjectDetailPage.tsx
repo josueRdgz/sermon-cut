@@ -455,6 +455,7 @@ export function ProjectDetailPage() {
         role="tabpanel"
         aria-labelledby="workspace-tab-editor"
         hidden={activeSection !== 'editor'}
+        className={activeSection === 'editor' ? 'workspace-panel-editor' : undefined}
       >
         <ReelEditor
           projectId={project.id}
