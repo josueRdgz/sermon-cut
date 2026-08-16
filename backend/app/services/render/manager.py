@@ -26,6 +26,7 @@ from app.models.export_profile import ExportQuality
 from app.models.project import Project, ProjectStatus
 from app.models.reel import Reel
 from app.models.render_job import ACTIVE_RENDER_STATUSES, RenderJob, RenderJobStatus
+from app.services import overlays as overlays_service
 from app.services import storage
 from app.services.endcard import resolve as resolve_end_card
 from app.services.endcard.pipeline import build_end_card_spec
@@ -624,6 +625,12 @@ class RenderManager:
                     background_music=full_reel_music,
                     loudness=loudness,
                     audio_offset_ms=getattr(reel, "audio_offset_ms", 0) or 0,
+                    overlays=overlays_service.specs_for_render(
+                        session,
+                        job.project_id,
+                        job.reel_id,
+                        temp_dir=temp_dir,
+                    ),
                 )
             except ValueError as exc:
                 raise ValidationAppError(str(exc), code="invalid_render_options") from exc

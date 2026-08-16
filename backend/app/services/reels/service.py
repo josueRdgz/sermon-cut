@@ -67,6 +67,8 @@ def _segment_response(segment: ReelSegment) -> ReelSegmentResponse:
         selection_reason=getattr(segment, "selection_reason", None),
         selection_score=getattr(segment, "selection_score", None),
         narrative_category=getattr(segment, "narrative_category", None),
+        caption_in_ms=getattr(segment, "caption_in_ms", None),
+        caption_out_ms=getattr(segment, "caption_out_ms", None),
     )
 
 

@@ -50,6 +50,8 @@ LAYOUTS: tuple[str, ...] = (
 _XFADE_TRANSITIONS: dict[str, str] = {
     "short_crossfade": "fade",
     "dip_to_black": "fadeblack",
+    "fade": "fade",
+    "flash": "fadewhite",
 }
 
 TARGET_SAMPLE_RATE = 48000
@@ -81,6 +83,25 @@ class RenderSegmentSpec:
     @property
     def duration(self) -> float:
         return max(0.0, self.end - self.start)
+
+
+@dataclass(frozen=True)
+class OverlaySpec:
+    """A still, title PNG or B-roll clip composited on the main timeline.
+
+    ``x``/``y`` are the centre of the overlay as fractions of the canvas.
+    ``scale`` is the overlay width as a fraction of the canvas width.
+    Video B-roll is silent — the sermon remains the A-roll.
+    """
+
+    path: Path
+    start_seconds: float
+    duration_seconds: float
+    x: float = 0.5
+    y: float = 0.35
+    scale: float = 0.4
+    opacity: float = 1.0
+    kind: str = "image"
 
 
 @dataclass(frozen=True)
@@ -436,6 +457,63 @@ def escape_filter_path(path: Path) -> str:
     return f"'{escaped}'"
 
 
+def _overlay_inputs(overlays: list[OverlaySpec], *, fps: float) -> list[str]:
+    """FFmpeg ``-i`` arguments for overlay stills and B-roll clips."""
+    args: list[str] = []
+    for spec in overlays:
+        if spec.kind == "video":
+            args += ["-i", str(spec.path)]
+            continue
+        hold = max(spec.start_seconds + spec.duration_seconds + 0.25, 0.5)
+        args += [
+            "-loop",
+            "1",
+            "-framerate",
+            _fmt(fps),
+            "-t",
+            _fmt(hold),
+            "-i",
+            str(spec.path),
+        ]
+    return args
+
+
+def _overlay_filters(
+    overlays: list[OverlaySpec],
+    *,
+    input_start: int,
+    base_label: str,
+    canvas_width: int,
+) -> tuple[list[str], str]:
+    """Composite overlays onto ``base_label`` in z-order. Video audio is ignored."""
+    lines: list[str] = []
+    current = base_label
+    for index, spec in enumerate(overlays):
+        src = input_start + index
+        start = max(0.0, spec.start_seconds)
+        duration = max(0.05, spec.duration_seconds)
+        width_px = max(8, int(round(canvas_width * min(max(spec.scale, 0.05), 3.0))))
+        opacity = min(1.0, max(0.05, spec.opacity))
+        chain: list[str] = []
+        if spec.kind == "video":
+            chain.append(f"trim=duration={_fmt(duration)}")
+            chain.append("setpts=PTS-STARTPTS")
+        chain.append(f"scale={width_px}:-1:force_original_aspect_ratio=decrease")
+        chain.append("format=yuva420p")
+        if opacity < 0.999:
+            chain.append(f"colorchannelmixer=aa={_fmt(opacity)}")
+        lines.append(f"[{src}:v]{','.join(chain)}[ov{index}]")
+        x_expr = f"main_w*{_fmt(spec.x)}-overlay_w/2"
+        y_expr = f"main_h*{_fmt(spec.y)}-overlay_h/2"
+        enable = f"between(t,{_fmt(start)},{_fmt(start + duration)})"
+        lines.append(
+            f"[{current}][ov{index}]overlay=x='{x_expr}':y='{y_expr}'"
+            f":enable='{enable}':repeatlast=0[ol{index}]"
+        )
+        current = f"ol{index}"
+    return lines, current
+
+
 def build_render_command(
     *,
     ffmpeg: str,
@@ -458,6 +536,7 @@ def build_render_command(
     background_music: BackgroundMusicSpec | None = None,
     loudness: LoudnessSpec | None = None,
     audio_offset_ms: int = 0,
+    overlays: list[OverlaySpec] | None = None,
 ) -> RenderPlan:
     """Build the full FFmpeg argument list for one reel render.
 
@@ -568,6 +647,12 @@ def build_render_command(
         music_input_index = next_input
         next_input += 1
 
+    overlay_list = [item for item in (overlays or []) if item.duration_seconds > 0]
+    overlay_input_start = next_input
+    if overlay_list:
+        args += _overlay_inputs(overlay_list, fps=output_fps)
+        next_input += len(overlay_list)
+
     end_card_mode: str | None = None
     if end_card is not None:
         end_card_mode = resolve_end_card_audio_mode(end_card, has_audio=has_audio)
@@ -609,6 +694,15 @@ def build_render_command(
             ass_filter += f":fontsdir={escape_filter_path(fonts_dir)}"
         filters.append(f"[{video_label}]{ass_filter}[vout]")
         video_label = "vout"
+
+    if overlay_list:
+        overlay_lines, video_label = _overlay_filters(
+            overlay_list,
+            input_start=overlay_input_start,
+            base_label=video_label,
+            canvas_width=width,
+        )
+        filters += overlay_lines
 
     if full_reel_music is not None and music_input_index is not None:
         mix_lines, audio_label = build_background_music_graph(

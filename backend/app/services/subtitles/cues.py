@@ -117,6 +117,7 @@ def build_cues_for_reel(
     transcript_segments: list[SourceSegment],
     fallback_texts: list[str | None],
     options: SubtitleOptions,
+    caption_windows: list[tuple[float, float] | None] | None = None,
 ) -> CueBuildResult:
     """Remap transcript material onto the final reel timeline and split into cues.
 
@@ -167,12 +168,54 @@ def build_cues_for_reel(
         cues = _append_reference(cues, options.bible_reference, options)
 
     cues = _suppress_overlapping_cues(cues)
+    if caption_windows:
+        cues = remap_cues_to_caption_windows(cues, timeline.placements, caption_windows)
 
     return CueBuildResult(
         cues=cues,
         granularity_used=granularity,
         total_duration=timeline.total_duration,
     )
+
+
+def remap_cues_to_caption_windows(
+    cues: list[SubtitleCue],
+    placements: list[SegmentPlacement],
+    windows: list[tuple[float, float] | None],
+) -> list[SubtitleCue]:
+    """Move/scale cues from the video clip onto an independent caption window."""
+    if not cues or not any(window is not None for window in windows):
+        return cues
+    remapped: list[SubtitleCue] = []
+    for cue in cues:
+        placed = False
+        for placement, window in zip(placements, windows, strict=False):
+            if window is None:
+                continue
+            src0 = placement.output_start
+            src1 = src0 + placement.content_duration
+            mid = (cue.start + cue.end) / 2
+            if mid < src0 - 0.02 or mid > src1 + 0.02:
+                continue
+            dst0, dst1 = window
+            span = max(src1 - src0, 0.01)
+            scale = max(0.0, dst1 - dst0) / span
+            start = dst0 + (cue.start - src0) * scale
+            end = dst0 + (cue.end - src0) * scale
+            remapped.append(
+                SubtitleCue(
+                    start=max(dst0, start),
+                    end=min(dst1, max(end, start + 0.05)),
+                    text=cue.text,
+                    words=cue.words,
+                    highlight=cue.highlight,
+                )
+            )
+            placed = True
+            break
+        if not placed:
+            remapped.append(cue)
+    return remapped
 
 
 def _suppress_overlapping_cues(cues: list[SubtitleCue]) -> list[SubtitleCue]:
@@ -326,17 +369,20 @@ def _cues_from_phrases(
 
     cues: list[SubtitleCue] = []
     for group in groups:
-        start = group[0].start
-        end = max(w.end for w in group)
-        raw = " ".join(w.text for w in group)
-        text = wrap_lines(
-            _case(sanitize_caption_text(raw), options.uppercase),
-            max_lines=max_lines,
-            max_chars=max_chars,
-        )
-        if not text:
-            continue
-        cues.append(SubtitleCue(start=start, end=max(end, start + 0.05), text=text))
+        for block in _split_mapped_word_blocks(
+            group, max_lines=max_lines, max_chars=max_chars
+        ):
+            raw = " ".join(word.text for word in block)
+            text = wrap_lines(
+                _case(sanitize_caption_text(raw), options.uppercase),
+                max_lines=max_lines,
+                max_chars=max_chars,
+            )
+            if not text:
+                continue
+            start = block[0].start
+            end = max(word.end for word in block)
+            cues.append(SubtitleCue(start=start, end=max(end, start + 0.05), text=text))
     return cues
 
 
@@ -353,38 +399,18 @@ def _cues_from_segments(
         fallback = fallback_texts[index] if index < len(fallback_texts) else None
         mapped = _mapped_words_for_placement(placement, transcript_segments, fallback)
         if mapped:
-            raw = sanitize_caption_text(" ".join(word.text for word in mapped))
-            if raw:
-                text = wrap_lines(
-                    _case(raw, options.uppercase),
-                    max_lines=max_lines,
-                    max_chars=max_chars,
-                )
-                if text:
-                    cues.append(
-                        SubtitleCue(
-                            start=placement.output_start,
-                            end=placement.output_start + placement.content_duration,
-                            text=text,
-                        )
-                    )
+            cues.extend(_cues_from_phrases(mapped, options, max_lines, max_chars))
             continue
 
         raw_fallback = sanitize_caption_text(fallback or "")
         if raw_fallback:
-            text = wrap_lines(
-                _case(raw_fallback, options.uppercase),
-                max_lines=max_lines,
-                max_chars=max_chars,
+            span_start = placement.output_start
+            span_end = placement.output_start + placement.content_duration
+            packed = _synthesize_mapped_words(
+                _caption_tokens(raw_fallback), span_start, span_end
             )
-            if text:
-                cues.append(
-                    SubtitleCue(
-                        start=placement.output_start,
-                        end=placement.output_start + placement.content_duration,
-                        text=text,
-                    )
-                )
+            if packed:
+                cues.extend(_cues_from_phrases(packed, options, max_lines, max_chars))
             continue
 
         overlapping = [
@@ -430,34 +456,64 @@ def _ref_size(font_size: int) -> int:
 
 
 def wrap_lines(text: str, *, max_lines: int, max_chars: int) -> str:
-    """Wrap on whitespace / punctuation without exceeding safe line counts."""
-    words = _WORD_SPLIT.split(text.strip())
-    if not words or words == [""]:
+    """Wrap on whitespace without cutting words or inserting ellipsis."""
+    words = [token for token in _WORD_SPLIT.split(text.strip()) if token]
+    if not words:
         return ""
     lines: list[str] = []
     current = ""
     for word in words:
-        candidate = word if not current else f"{current} {word}"
-        if len(candidate) <= max_chars:
-            current = candidate
-            continue
-        if current:
-            lines.append(current)
-        current = word
         if len(lines) >= max_lines:
             break
+        candidate = word if not current else f"{current} {word}"
+        if current and len(candidate) > max_chars:
+            lines.append(current)
+            current = word
+            continue
+        current = candidate
     if current and len(lines) < max_lines:
         lines.append(current)
-    elif current and lines:
-        # Overflow: append truncated remainder to last line with ellipsis.
-        remaining = current
-        last = lines[-1]
-        room = max_chars - len(last) - 1
-        if room > 3:
-            lines[-1] = f"{last} {remaining[: room - 1]}…"
-        else:
-            lines[-1] = last[: max(1, max_chars - 1)] + "…"
     return "\\N".join(lines[:max_lines])
+
+
+def split_caption_blocks(text: str, *, max_lines: int, max_chars: int) -> list[str]:
+    """Split a caption into blocks without breaking an overlong token."""
+    words = [token for token in _WORD_SPLIT.split(text.strip()) if token]
+    if not words:
+        return []
+    return [
+        " ".join(word.text for word in block)
+        for block in _split_mapped_word_blocks(
+            [
+                MappedWord(text=token, start=float(index), end=float(index) + 1)
+                for index, token in enumerate(words)
+            ],
+            max_lines=max_lines,
+            max_chars=max_chars,
+        )
+    ]
+
+
+def _split_mapped_word_blocks(
+    words: list[MappedWord], *, max_lines: int, max_chars: int
+) -> list[list[MappedWord]]:
+    """Pack words into visual blocks; an overlong token stays on its own block."""
+    limit = max(1, max_lines) * max(1, max_chars)
+    blocks: list[list[MappedWord]] = []
+    current: list[MappedWord] = []
+    current_len = 0
+    for word in words:
+        extra = len(word.text) if not current else len(word.text) + 1
+        if current and current_len + extra > limit:
+            blocks.append(current)
+            current = [word]
+            current_len = len(word.text)
+        else:
+            current.append(word)
+            current_len += extra
+    if current:
+        blocks.append(current)
+    return blocks
 
 
 def _case(text: str, uppercase: bool) -> str:

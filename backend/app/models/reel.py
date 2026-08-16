@@ -31,6 +31,8 @@ class TransitionType(enum.StrEnum):
     hard_cut = "hard_cut"
     short_crossfade = "short_crossfade"
     dip_to_black = "dip_to_black"
+    fade = "fade"
+    flash = "flash"
 
 
 class SubtitleStyle(enum.StrEnum):
@@ -197,5 +199,8 @@ class ReelSegment(Base):
     selection_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
     selection_score: Mapped[float | None] = mapped_column(Float, nullable=True)
     narrative_category: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    # Independent subtitle window on the output clock (ms). None = follow the video clip.
+    caption_in_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    caption_out_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
     reel: Mapped[Reel] = relationship(back_populates="segments")

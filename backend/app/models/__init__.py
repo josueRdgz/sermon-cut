@@ -9,6 +9,12 @@ from app.models.analysis import (
     AnalysisJob,
     AnalysisJobStatus,
 )
+from app.models.asset import (
+    ProjectAsset,
+    ProjectAssetKind,
+    ReelOverlay,
+    ReelOverlayKind,
+)
 from app.models.audio_repair import (
     ACTIVE_AUDIO_REPAIR_STATUSES,
     AudioRepairJob,
@@ -91,10 +97,14 @@ __all__ = [
     "ExportQuality",
     "FpsMode",
     "Project",
+    "ProjectAsset",
+    "ProjectAssetKind",
     "ProjectContentMode",
     "ProjectSourceKind",
     "ProjectStatus",
     "Reel",
+    "ReelOverlay",
+    "ReelOverlayKind",
     "ReelSegment",
     "ReelStatus",
     "RenderJob",

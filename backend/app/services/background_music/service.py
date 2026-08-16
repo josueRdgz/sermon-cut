@@ -9,7 +9,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
-from app.core.exceptions import NotFoundError, ValidationAppError
+from app.core.exceptions import AppError, NotFoundError, ValidationAppError
 from app.models.background_music import (
     RIGHTS_WARNING,
     BackgroundMusicPreset,
@@ -29,6 +29,7 @@ from app.services.background_music.ffmpeg_filters import (
     BackgroundMusicSpec,
     volume_to_db,
 )
+from app.services.ffprobe import probe_video
 
 MUSIC_EXTENSIONS = frozenset({".mp3", ".wav", ".m4a", ".ogg"})
 MUSIC_MIME_TYPES = frozenset(
@@ -238,6 +239,11 @@ def resolve_spec(db: Session, project_id: UUID) -> BackgroundMusicSpec | None:
     path = storage.resolve_inside_project(project_id, row.music_filename)
     if not path.is_file():
         return None
+    source_duration: float | None = None
+    try:
+        source_duration = probe_video(path).duration_seconds
+    except AppError:
+        source_duration = None
     return BackgroundMusicSpec(
         path=path,
         volume=max(0.0, min(1.0, row.volume)),
@@ -249,6 +255,7 @@ def resolve_spec(db: Session, project_id: UUID) -> BackgroundMusicSpec | None:
         ducking=bool(row.ducking_enabled and row.scope == BackgroundMusicScope.full_reel),
         target_lufs=row.target_lufs,
         true_peak_db=row.true_peak_db,
+        source_duration_seconds=source_duration,
     )
 
 

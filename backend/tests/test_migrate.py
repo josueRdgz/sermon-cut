@@ -33,5 +33,5 @@ def test_run_migrations_adds_source_kind(tmp_path, monkeypatch) -> None:
     version = conn.execute("SELECT version_num FROM alembic_version").fetchone()[0]
     conn.close()
     assert "source_kind" in columns
-    assert version == "f6a7b8c9d0e1"
+    assert version == "b8c9d0e1f2a3"
     clear_settings_cache()

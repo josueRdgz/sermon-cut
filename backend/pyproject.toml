@@ -1,6 +1,6 @@
 [project]
 name = "sermon-cut-backend"
-version = "0.4.1"
+version = "0.4.9"
 description = "Backend for Sermon Cut: turn sermon videos into vertical shorts/reels."
 requires-python = ">=3.12"
 license = { text = "MIT" }
