@@ -1,6 +1,6 @@
 [package]
 name = "sermon-cut"
-version = "0.4.1"
+version = "0.4.9"
 description = "Sermon Cut desktop shell (Tauri 2 + local FastAPI)"
 authors = ["Sermon Cut contributors"]
 license = "MIT"

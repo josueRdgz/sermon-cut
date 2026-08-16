@@ -175,9 +175,9 @@ export function SubtitlePanel({
       <div
         className={`${styleClass} subtitle-overlay--on-player`}
         style={{
-          fontSize: `${Math.round(reel.subtitle_font_size * 0.35)}px`,
+          fontSize: 'clamp(10px, 2.6cqh, 15px)',
           opacity: reel.subtitle_opacity,
-          paddingBottom: `${Math.round(reel.subtitle_margin_bottom * 0.2)}px`,
+          paddingBottom: 0,
           textTransform: reel.subtitle_uppercase ? 'uppercase' : 'none',
         }}
       >

@@ -1,4 +1,4 @@
-export type ProjectAssetKind = 'image' | 'audio' | 'other';
+export type ProjectAssetKind = 'image' | 'audio' | 'video' | 'other';
 
 export interface ProjectAsset {
   id: string;
@@ -9,6 +9,7 @@ export interface ProjectAsset {
   original_name: string | null;
   width: number | null;
   height: number | null;
+  duration_ms: number | null;
   created_at: string;
   media_url: string;
 }

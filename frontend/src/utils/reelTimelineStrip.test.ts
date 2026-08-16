@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import type { ReelSegment } from '../types/reel';
 import {
   buildClipSpans,
+  buildSourceGaps,
   outputTimeFromTrackRatio,
   playheadPercent,
 } from './reelTimelineStrip';
@@ -37,6 +38,24 @@ describe('reelTimelineStrip', () => {
     expect(outputTimeFromTrackRatio(0.25, 40)).toBeCloseTo(10);
     expect(outputTimeFromTrackRatio(-1, 40)).toBe(0);
     expect(outputTimeFromTrackRatio(2, 40)).toBe(40);
+  });
+
+  it('marks source-sermon holes between concatenated clips', () => {
+    const gaps = buildSourceGaps([
+      {
+        ...seg('a', 2, 0),
+        source_start_seconds: 10,
+        source_end_seconds: 12,
+      },
+      {
+        ...seg('b', 6, 1),
+        source_start_seconds: 30,
+        source_end_seconds: 36,
+      },
+    ]);
+    expect(gaps).toHaveLength(1);
+    expect(gaps[0].sourceSeconds).toBeCloseTo(18);
+    expect(gaps[0].afterIndex).toBe(1);
   });
 
   it('computes playhead percent', () => {

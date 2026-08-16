@@ -53,3 +53,35 @@ export function pxToTime(px: number, pxPerSecond: number): number {
   if (!(pxPerSecond > 0)) return 0;
   return Math.max(0, px / pxPerSecond);
 }
+
+export interface SourceGapSpan {
+  /** Output-clock join where the source sermon skips ahead. */
+  leftRatio: number;
+  afterIndex: number;
+  beforeSegmentId: string;
+  afterSegmentId: string;
+  sourceSeconds: number;
+}
+
+/** Source-sermon holes between kept clips (not present on the output clock). */
+export function buildSourceGaps(segments: ReelSegment[]): SourceGapSpan[] {
+  if (segments.length < 2) return [];
+  const clock = buildOutputClock(segments);
+  const gaps: SourceGapSpan[] = [];
+  for (let index = 1; index < segments.length; index += 1) {
+    const previous = segments[index - 1];
+    const current = segments[index];
+    const hole = current.source_start_seconds - previous.source_end_seconds;
+    if (hole <= 0.35) continue;
+    const placement = clock.placements[index];
+    if (!placement) continue;
+    gaps.push({
+      leftRatio: placement.outputStart / Math.max(clock.totalDuration, 0.01),
+      afterIndex: index,
+      beforeSegmentId: previous.id,
+      afterSegmentId: current.id,
+      sourceSeconds: hole,
+    });
+  }
+  return gaps;
+}

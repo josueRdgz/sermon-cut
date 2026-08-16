@@ -89,6 +89,43 @@ export function buildOutputClock(segments: ReelSegment[]): OutputClock {
   return { placements, totalDuration: total };
 }
 
+export function outputTimeForSource(
+  clock: OutputClock,
+  index: number,
+  sourceTime: number,
+): number {
+  const placement = clock.placements[index];
+  if (!placement) return 0;
+  const local = Math.max(
+    0,
+    Math.min(sourceTime - placement.sourceStart, placement.contentDuration),
+  );
+  return placement.outputStart + local;
+}
+
+/** True when the next clip starts where the current one ends (no source gap). */
+export function sourceWindowsContiguous(
+  current: { source_end_seconds: number },
+  next: { source_start_seconds: number },
+  slack = 0.08,
+): boolean {
+  return Math.abs(next.source_start_seconds - current.source_end_seconds) <= slack;
+}
+
+/** Map a sermon timestamp onto the output clock, or null if that time was cut. */
+export function outputTimeAtSource(clock: OutputClock, sourceTime: number): number | null {
+  for (const placement of clock.placements) {
+    if (sourceTime >= placement.sourceStart && sourceTime <= placement.sourceEnd) {
+      const local = Math.min(
+        Math.max(0, sourceTime - placement.sourceStart),
+        placement.contentDuration,
+      );
+      return placement.outputStart + local;
+    }
+  }
+  return null;
+}
+
 export function transitionMarkerAt(
   placements: OutputPlacement[],
   segments: ReelSegment[],

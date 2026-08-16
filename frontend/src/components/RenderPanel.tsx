@@ -15,13 +15,11 @@ import {
   startRender,
 } from '../api/renders';
 import type { BackgroundMusicMeters } from '../types/backgroundMusic';
-import type { CoherenceReport } from '../types/coherence';
 import type { ExportProfile, ExportQuality, SizeEstimate } from '../types/exportProfile';
-import type { AspectRatio, Reel, ReelSegment } from '../types/reel';
+import type { AspectRatio, ReelSegment } from '../types/reel';
 import type { RenderJob, RenderLayout } from '../types/render';
 import { ACTIVE_RENDER_STATUSES } from '../types/render';
 import { formatDuration } from '../utils/format';
-import { CoherencePanel } from './CoherencePanel';
 import { ConfirmDialog } from './ConfirmDialog';
 import { ProgressBar } from './ProgressBar';
 
@@ -31,10 +29,9 @@ interface RenderPanelProps {
   reelAspectRatio: AspectRatio;
   segments: ReelSegment[];
   audioOffsetMs: number;
-  onReelChange: (reel: Reel) => void;
   /** Flush unsaved fragment captions (and similar) before starting FFmpeg. */
   onBeforeStart?: () => Promise<void>;
-  /** Jump to Cuts tool when coherence blocks export. */
+  /** Jump to Cuts when the server refuses a blocked join. */
   onGoToCuts?: () => void;
 }
 
@@ -97,7 +94,6 @@ export function RenderPanel({
   reelAspectRatio,
   segments,
   audioOffsetMs,
-  onReelChange,
   onBeforeStart,
   onGoToCuts,
 }: RenderPanelProps) {
@@ -115,7 +111,6 @@ export function RenderPanel({
   const [showProfileEdit, setShowProfileEdit] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [coherence, setCoherence] = useState<CoherenceReport | null>(null);
   const [meters, setMeters] = useState<BackgroundMusicMeters | null>(null);
   const [pendingDeleteRender, setPendingDeleteRender] = useState<RenderJob | null>(null);
   const previousReelRef = useRef<string>(reelId);
@@ -231,14 +226,6 @@ export function RenderPanel({
   }, [projectId, reelId, profileId, quality, crf, segmentCount, segments.length]);
 
   const handleStart = useCallback(async () => {
-    if (coherence && !coherence.can_render) {
-      setError(
-        coherence.severity === 'blocked'
-          ? 'Corrige los problemas bloqueantes de coherencia antes de renderizar.'
-          : 'Revisa o ignora las advertencias de unión antes de renderizar.',
-      );
-      return;
-    }
     if (!profileId) {
       setError('Selecciona un perfil de exportación.');
       return;
@@ -263,7 +250,11 @@ export function RenderPanel({
       const data = await listRenders(projectId, reelId);
       setHistory(data.items);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'No se pudo iniciar el render');
+      const message = err instanceof Error ? err.message : 'No se pudo iniciar el render';
+      setError(message);
+      if (err instanceof ApiError && err.code === 'coherence_blocked' && onGoToCuts) {
+        // Keep the error; Cuts has the join review.
+      }
     } finally {
       setBusy(false);
     }
@@ -279,8 +270,8 @@ export function RenderPanel({
     normalizeLoudness,
     burnSubtitles,
     audioOffsetMs,
-    coherence,
     onBeforeStart,
+    onGoToCuts,
   ]);
 
   const handleCancel = useCallback(async () => {
@@ -362,18 +353,10 @@ export function RenderPanel({
   const active = isActive(job);
   const percent = job ? Math.round(job.progress * 100) : 0;
   const stageLabel = job?.stage ? (STAGE_LABELS[job.stage] ?? job.stage) : '—';
-  const canRender = segmentCount > 0 && coherence != null && coherence.can_render && !!profileId;
+  const canRender = segmentCount > 0 && !!profileId;
 
   return (
     <div className="render-panel">
-      <CoherencePanel
-        projectId={projectId}
-        reelId={reelId}
-        segments={segments}
-        onReelChange={onReelChange}
-        onReportChange={setCoherence}
-      />
-
       <div className="reel-editor__section-header">
         <h4>Exportar Reel</h4>
         <div className="button-stack">
@@ -390,7 +373,7 @@ export function RenderPanel({
               title={
                 canRender
                   ? 'Generar el archivo MP4 del Reel'
-                  : 'Completa la validación de unión para habilitar la exportación'
+                  : 'Añade fragmentos y elige un perfil'
               }
             >
               {busy ? 'Preparando exportación…' : 'Exportar Reel a MP4'}
@@ -401,43 +384,25 @@ export function RenderPanel({
 
       <p className="muted">
         Exportación local únicamente — sin publicación automática. MP4 H.264 + AAC, verificada con
-        FFprobe al terminar.
+        FFprobe al terminar. La revisión de unión está en Cortes y no apaga este botón.
       </p>
 
       <p className="error" role="note">
         Responsabilidad editorial: un Short/Reel con cortes no consecutivos puede alterar el sentido
         del sermón. Revisa la unión, los subtítulos tras varios segmentos y el contenido completo
-        antes de publicar. La validación de coherencia bloquea solo problemas graves; las
-        advertencias se pueden ignorar conscientemente.
+        antes de publicar.
       </p>
+
+      {error && onGoToCuts && (
+        <p className="muted">
+          <button type="button" className="button button--secondary" onClick={onGoToCuts}>
+            Ir a Cortes
+          </button>
+        </p>
+      )}
 
       {!canRender && segmentCount === 0 && (
         <p className="muted">Añade al menos un fragmento al Reel para poder exportarlo.</p>
-      )}
-
-      {segmentCount > 0 && coherence && !coherence.can_render && (
-        <div className="render-panel__block-notice" role="alert">
-          <p className="error">
-            {coherence.severity === 'blocked'
-              ? 'Hay problemas bloqueantes en la unión de fragmentos.'
-              : 'Hay advertencias de unión que debes revisar o ignorar antes de exportar.'}
-          </p>
-          <div className="button-stack">
-            {onGoToCuts && (
-              <button
-                type="button"
-                className="button button--secondary"
-                onClick={onGoToCuts}
-              >
-                Ir a Cortes
-              </button>
-            )}
-            <p className="muted">
-              Usa la validación de coherencia más abajo para ignorar avisos conscientes o corregir
-              los cortes.
-            </p>
-          </div>
-        </div>
       )}
 
       {segmentCount > 0 && (

@@ -155,7 +155,7 @@ FFmpeg/FFprobe. No se suben releases a GitHub desde estos scripts.
 
 En macOS se genera:
 
-- `bundle/dmg/Sermon Cut_0.4.1_aarch64.dmg` en Apple Silicon
+- `bundle/dmg/Sermon Cut_0.4.9_aarch64.dmg` en Apple Silicon
 
 No se deja un `.app` suelto junto al DMG (evita duplicados en Launchpad /
 Open With cuando iCloud crea copias «Sermon Cut 2»). Instala desde el DMG

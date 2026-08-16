@@ -33,6 +33,7 @@ export function CoherencePanel({
 }: CoherencePanelProps) {
   const [report, setReport] = useState<CoherenceReport | null>(null);
   const [includeAi, setIncludeAi] = useState(false);
+  const [includeMedia, setIncludeMedia] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [fixResult, setFixResult] = useState<string | null>(null);
@@ -63,7 +64,7 @@ export function CoherencePanel({
     try {
       const next = await validateReelCoherence(projectId, reelId, {
         include_ai_review: includeAi,
-        include_media_probes: true,
+        include_media_probes: includeMedia,
       });
       publish(next);
     } catch (err) {
@@ -72,7 +73,7 @@ export function CoherencePanel({
     } finally {
       setBusy(false);
     }
-  }, [projectId, reelId, segmentCount, includeAi, publish]);
+  }, [projectId, reelId, segmentCount, includeAi, includeMedia, publish]);
 
   useEffect(() => {
     void runValidate();
@@ -221,6 +222,15 @@ export function CoherencePanel({
         <label className="field field--inline field--checkbox">
           <input
             type="checkbox"
+            checked={includeMedia}
+            onChange={(e) => setIncludeMedia(e.target.checked)}
+            disabled={busy}
+          />
+          <span>Sondas de audio/plano (lentas; no bloquean el export)</span>
+        </label>
+        <label className="field field--inline field--checkbox">
+          <input
+            type="checkbox"
             checked={includeAi}
             onChange={(e) => setIncludeAi(e.target.checked)}
             disabled={busy}
@@ -239,7 +249,9 @@ export function CoherencePanel({
         )}
       </div>
 
-      {report && <p className={report.can_render ? 'muted' : 'error'}>{report.summary}</p>}
+      {report && (
+        <p className={report.severity === 'blocked' ? 'error' : 'muted'}>{report.summary}</p>
+      )}
       {fixResult && <p className="success">{fixResult}</p>}
 
       {activeIssues.length > 0 && (

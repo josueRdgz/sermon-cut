@@ -53,7 +53,7 @@ export function MediaBinPanel({
       }
       await refresh();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'No se pudo subir la imagen');
+      setError(err instanceof Error ? err.message : 'No se pudo subir el archivo');
     } finally {
       setBusy(false);
       if (fileInputRef.current) fileInputRef.current.value = '';
@@ -95,7 +95,7 @@ export function MediaBinPanel({
               disabled={busy}
               onClick={() => fileInputRef.current?.click()}
             >
-              Subir imagen
+              Subir imagen o video
             </button>
             {onAddTextAtPlayhead && (
               <button
@@ -110,7 +110,7 @@ export function MediaBinPanel({
             <input
               ref={fileInputRef}
               type="file"
-              accept="image/*"
+              accept="image/*,video/mp4,video/quicktime,video/webm,.mp4,.mov,.mkv,.webm"
               multiple
               hidden
               onChange={(event) => void handleUpload(event.target.files)}
@@ -122,7 +122,7 @@ export function MediaBinPanel({
           <div className="reel-nle__bin-grid" aria-label="Recursos del proyecto">
             {assets.length === 0 ? (
               <p className="muted reel-nle__bin-empty">
-                Sube imágenes para arrastrarlas a la línea temporal.
+                Sube imágenes o clips de B-roll para arrastrarlos a la línea temporal.
               </p>
             ) : (
               assets.map((asset) => (
@@ -137,13 +137,24 @@ export function MediaBinPanel({
                       event.dataTransfer.effectAllowed = 'copy';
                     }}
                   >
-                    <img
-                      src={assetMediaSrc(asset.media_url)}
-                      alt={asset.original_name ?? asset.filename}
-                      draggable={false}
-                    />
+                    {asset.kind === 'video' ? (
+                      <video
+                        src={assetMediaSrc(asset.media_url)}
+                        muted
+                        playsInline
+                        preload="metadata"
+                        draggable={false}
+                      />
+                    ) : (
+                      <img
+                        src={assetMediaSrc(asset.media_url)}
+                        alt={asset.original_name ?? asset.filename}
+                        draggable={false}
+                      />
+                    )}
                   </button>
                   <span className="reel-nle__bin-name" title={asset.original_name ?? asset.filename}>
+                    {asset.kind === 'video' ? 'B-roll · ' : ''}
                     {asset.original_name ?? asset.filename}
                   </span>
                   <button

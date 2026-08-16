@@ -1,4 +1,4 @@
-export type ReelOverlayKind = 'image' | 'text';
+export type ReelOverlayKind = 'image' | 'text' | 'video';
 
 export interface ReelOverlay {
   id: string;
@@ -49,4 +49,10 @@ export interface ReelOverlayUpdatePayload {
   opacity?: number;
   z_index?: number;
   order?: number;
+}
+
+export function overlayKindLabel(kind: ReelOverlayKind): string {
+  if (kind === 'text') return 'Texto';
+  if (kind === 'video') return 'B-roll';
+  return 'Imagen';
 }

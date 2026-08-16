@@ -26,11 +26,16 @@
   background: var(--bg-elevated);
 }
 
+.wideSidebar {
+  --sidebar-w: 96px;
+}
+
 .sidebar {
   grid-area: sidebar;
   border-right: 1px solid var(--border);
   background: var(--bg-elevated);
-  overflow: hidden;
+  overflow-x: hidden;
+  overflow-y: auto;
 }
 
 .main {
@@ -43,6 +48,25 @@
   max-width: 1200px;
   margin: 0 auto;
   padding: var(--space-10) var(--space-8) var(--space-12);
+}
+
+.flush .main {
+  overflow: hidden;
+}
+
+.contentFlush {
+  max-width: none;
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.contentFlush > * {
+  flex: 1;
+  min-height: 0;
 }
 
 .footer {

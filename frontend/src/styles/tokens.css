@@ -14,14 +14,17 @@
 
   /* Text */
   --text: #ffffff;
-  --text-secondary: #b5b5b5;
+  --text-secondary: #c4c4c4;
   --text-disabled: #6f6f6f;
 
   /* Accent (use sparingly, primary actions only) */
   --accent: #d4a017;
   --accent-hover: #e0ae23;
-  --accent-soft: rgba(212, 160, 23, 0.14);
+  --accent-soft: rgba(212, 160, 23, 0.18);
   --on-accent: #171717;
+  --select: var(--accent);
+  --select-soft: var(--accent-soft);
+  --select-on: var(--on-accent);
 
   /* Status */
   --ok: #3fb950;

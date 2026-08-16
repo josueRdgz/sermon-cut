@@ -10,6 +10,22 @@ vi.mock('../api/projects', () => ({
   getProject: vi.fn(),
   deleteProject: vi.fn(),
   deleteProjectVideo: vi.fn(),
+  listProjects: vi.fn().mockResolvedValue({ items: [] }),
+  projectCoverUrl: vi.fn(() => ''),
+  uploadProjectCover: vi.fn(),
+}));
+
+vi.mock('../api/health', () => ({
+  fetchHealth: vi.fn().mockResolvedValue({
+    status: 'ok',
+    app_name: 'Sermon Cut',
+    version: '0.4.6',
+    ffmpeg: { available: true, version: '7' },
+    ffprobe: { available: true, version: '7' },
+    whisper: { available: true, version: '1' },
+    gemini: { available: false, version: null },
+    storage: { bytes_used: 0, project_count: 0 },
+  }),
 }));
 
 vi.mock('../components/StatusRow', () => ({
@@ -100,7 +116,7 @@ describe('ProjectDetailPage workspace', () => {
     Object.defineProperty(window, 'scrollTo', { configurable: true, value: vi.fn() });
   });
 
-  it('shows one horizontal category at a time', async () => {
+  it('shows one workspace category at a time', async () => {
     renderPage();
     await screen.findByRole('heading', { name: PROJECT.title });
 
@@ -127,8 +143,6 @@ describe('ProjectDetailPage workspace', () => {
       );
     });
     expect(screen.getByText('Panel del editor')).toBeVisible();
-    expect(screen.getByRole('navigation', { name: 'Flujo del proyecto' })).not.toHaveClass(
-      'workspace-nav--editor-active',
-    );
+    expect(screen.getByRole('tablist', { name: 'Flujo del proyecto' })).toBeInTheDocument();
   });
 });

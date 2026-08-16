@@ -1,16 +1,18 @@
-import { useMemo, useRef, useState, type DragEvent, type PointerEvent } from 'react';
+import { useEffect, useMemo, useRef, useState, type DragEvent, type PointerEvent } from 'react';
 
 import type { ReelOverlay } from '../types/overlay';
-import type { ReelSegment } from '../types/reel';
+import type { ReelSegment, TransitionType } from '../types/reel';
 import { formatDuration, formatTimecode } from '../utils/format';
 import { transitionMarkerAt } from '../utils/reelOutputClock';
 import {
   buildClipSpans,
+  buildSourceGaps,
   outputTimeFromTrackRatio,
   playheadPercent,
   pxToTime,
   timeToPx,
 } from '../utils/reelTimelineStrip';
+import { TRANSITION_MIME, TRANSITION_OPTIONS } from './nle/clipConstants';
 
 export type TimelineTrackKind = 'video' | 'overlays' | 'captions' | 'music';
 
@@ -27,6 +29,7 @@ interface ReelTimelineStripProps {
   outputTime: number;
   selectedSegmentId: string | null;
   selectedOverlayId?: string | null;
+  selectedGapKey?: string | null;
   captionLabels: Record<string, string>;
   musicActive: boolean;
   musicLabel?: string;
@@ -36,6 +39,7 @@ interface ReelTimelineStripProps {
   onScrubStart?: () => void;
   onScrubEnd?: () => void;
   onSelectSegment: (segmentId: string, track: TimelineTrackKind) => void;
+  onSelectGap?: (gapKey: string | null) => void;
   onSelectOverlay?: (overlayId: string) => void;
   onSelectMusic?: () => void;
   onReorderSegments?: (orderedIds: string[]) => void;
@@ -43,6 +47,8 @@ interface ReelTimelineStripProps {
     id: string,
     patch: { source_start_seconds?: number; source_end_seconds?: number },
   ) => void;
+  onMoveCaption?: (id: string, inMs: number, outMs: number) => void;
+  onApplyTransition?: (segmentId: string, type: TransitionType) => void;
   onMoveOverlay?: (id: string, startMs: number) => void;
   onDropAsset?: (assetId: string, outputSeconds: number) => void;
   onAddTextOverlay?: (outputSeconds: number) => void;
@@ -95,6 +101,7 @@ export function ReelTimelineStrip({
   outputTime,
   selectedSegmentId,
   selectedOverlayId = null,
+  selectedGapKey = null,
   captionLabels,
   musicActive,
   musicLabel = 'Música de fondo',
@@ -104,10 +111,13 @@ export function ReelTimelineStrip({
   onScrubStart,
   onScrubEnd,
   onSelectSegment,
+  onSelectGap,
   onSelectOverlay,
   onSelectMusic,
   onReorderSegments,
   onTrimSegment,
+  onMoveCaption,
+  onApplyTransition,
   onMoveOverlay,
   onDropAsset,
   onAddTextOverlay,
@@ -130,6 +140,7 @@ export function ReelTimelineStrip({
   }
 
   const spans = useMemo(() => buildClipSpans(segments), [segments]);
+  const sourceGaps = useMemo(() => buildSourceGaps(segments), [segments]);
   const markers = useMemo(
     () => transitionMarkerAt(
       spans.map((span) => ({
@@ -146,6 +157,18 @@ export function ReelTimelineStrip({
   );
   const timelineWidthPx = Math.max(timeToPx(totalDuration, pxPerSecond), 1);
   const playhead = playheadPercent(outputTime, totalDuration);
+
+  useEffect(() => {
+    const scroller = scrollRef.current;
+    if (!scroller || totalDuration <= 0) return;
+    const x = timeToPx(outputTime, pxPerSecond);
+    const left = scroller.scrollLeft;
+    const right = left + scroller.clientWidth;
+    const margin = 72;
+    if (x < left + margin || x > right - margin) {
+      scroller.scrollLeft = Math.max(0, x - scroller.clientWidth * 0.33);
+    }
+  }, [outputTime, pxPerSecond, totalDuration]);
 
   function seekToClientX(clientX: number) {
     const surface = surfaceRef.current;
@@ -270,6 +293,65 @@ export function ReelTimelineStrip({
     window.addEventListener('pointercancel', onUp);
   }
 
+  function beginCaptionDrag(
+    event: PointerEvent<HTMLElement>,
+    segment: ReelSegment,
+    spanStart: number,
+    spanDuration: number,
+    edge: 'move' | 'start' | 'end',
+  ) {
+    if (event.button !== 0 || !onMoveCaption) return;
+    event.preventDefault();
+    event.stopPropagation();
+    onSelectSegment(segment.id, 'captions');
+    const pointerId = event.pointerId;
+    const startX = event.clientX;
+    const inMs = segment.caption_in_ms ?? Math.round(spanStart * 1000);
+    const outMs = segment.caption_out_ms ?? Math.round((spanStart + spanDuration) * 1000);
+    const target = event.currentTarget;
+    target.setPointerCapture(pointerId);
+
+    const onMove = (moveEvent: globalThis.PointerEvent) => {
+      if (moveEvent.pointerId !== pointerId) return;
+      const deltaMs = Math.round(pxToTime(moveEvent.clientX - startX, pxPerSecond) * 1000);
+      let nextIn = inMs;
+      let nextOut = outMs;
+      if (edge === 'move') {
+        nextIn = Math.max(0, inMs + deltaMs);
+        nextOut = Math.max(nextIn + 200, outMs + deltaMs);
+      } else if (edge === 'start') {
+        nextIn = Math.max(0, Math.min(outMs - 200, inMs + deltaMs));
+      } else {
+        nextOut = Math.max(inMs + 200, outMs + deltaMs);
+      }
+      onMoveCaption(segment.id, nextIn, nextOut);
+    };
+
+    const onUp = (upEvent: globalThis.PointerEvent) => {
+      if (upEvent.pointerId !== pointerId) return;
+      try {
+        target.releasePointerCapture(pointerId);
+      } catch {
+        // already released
+      }
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+      window.removeEventListener('pointercancel', onUp);
+    };
+
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+    window.addEventListener('pointercancel', onUp);
+  }
+
+  function acceptTransitionDrop(event: DragEvent, segmentId: string) {
+    const type = event.dataTransfer.getData(TRANSITION_MIME) as TransitionType;
+    if (!type || !onApplyTransition) return;
+    event.preventDefault();
+    event.stopPropagation();
+    onApplyTransition(segmentId, type);
+  }
+
   function handleSurfaceDrop(event: DragEvent<HTMLDivElement>) {
     event.preventDefault();
     setDragOver(false);
@@ -375,8 +457,29 @@ export function ReelTimelineStrip({
           <span className="muted reel-nle__zoom-label">{pxPerSecond} px/s</span>
         </div>
         <span className="muted reel-nle__strip-hint">
-          Arrastra clips, bordes o el cursor · suelta imágenes del bin
+          Arrastra clips, bordes o transiciones
         </span>
+        {onApplyTransition && (
+          <div className="reel-nle__fx-tray" aria-label="Transiciones">
+            <span className="muted">Transiciones</span>
+            {TRANSITION_OPTIONS.map((option) => (
+              <button
+                key={option.value}
+                type="button"
+                className="reel-nle__fx-chip"
+                draggable
+                title={`Arrastra «${option.label}» entre dos clips`}
+                onDragStart={(event) => {
+                  event.dataTransfer.effectAllowed = 'copy';
+                  event.dataTransfer.setData(TRANSITION_MIME, option.value);
+                  event.dataTransfer.setData('text/plain', option.value);
+                }}
+              >
+                {option.label}
+              </button>
+            ))}
+          </div>
+        )}
       </div>
 
       <div className="reel-nle__strip-body">
@@ -441,20 +544,40 @@ export function ReelTimelineStrip({
             </button>
 
             <div className="reel-nle__track reel-nle__track--video" aria-label="Pista de video">
+              {sourceGaps.map((gap) => {
+                const gapKey = `${gap.beforeSegmentId}|${gap.afterSegmentId}`;
+                const selected = selectedGapKey === gapKey;
+                return (
+                  <button
+                    key={gapKey}
+                    type="button"
+                    className={`reel-nle__omitted${selected ? ' reel-nle__omitted--selected' : ''}`}
+                    style={{ left: `${gap.leftRatio * 100}%` }}
+                    title={`Omitido en el sermón: ${formatDuration(gap.sourceSeconds)}`}
+                    onPointerDown={(event) => {
+                      event.stopPropagation();
+                      onSelectGap?.(gapKey);
+                    }}
+                  >
+                    <span className="visually-hidden">
+                      Material omitido {formatDuration(gap.sourceSeconds)}
+                    </span>
+                  </button>
+                );
+              })}
               {spans.map((span) => {
                 const segment = segments[span.index];
                 const selected = segment.id === selectedSegmentId;
                 return (
-                  <div
+                    <div
                     key={span.id}
-                    role="presentation"
                     draggable={Boolean(onReorderSegments)}
-                    className={`reel-nle__clip${selected ? ' reel-nle__clip--selected' : ''}${
-                      reorderOverId === segment.id ? ' reel-nle__clip--drop-target' : ''
-                    }`}
+                    className={`reel-nle__clip${span.index % 2 === 1 ? ' reel-nle__clip--alt' : ''}${
+                      selected ? ' reel-nle__clip--selected' : ''
+                    }${reorderOverId === segment.id ? ' reel-nle__clip--drop-target' : ''}`}
                     style={{
-                      left: `${span.leftRatio * 100}%`,
-                      width: `${Math.max(span.widthRatio * 100, 0.8)}%`,
+                      left: `calc(${span.leftRatio * 100}% + 3px)`,
+                      width: `calc(${Math.max(span.widthRatio * 100, 0.8)}% - 6px)`,
                     }}
                     title={`Fragmento ${span.index + 1} · ${formatTimecode(segment.source_start_seconds)}–${formatTimecode(segment.source_end_seconds)}`}
                     onDragStart={(event) => handleClipDragStart(event, segment.id)}
@@ -465,16 +588,16 @@ export function ReelTimelineStrip({
                       setReorderOverId(null);
                     }}
                     onPointerDown={(event) => {
-                      // Body click selects; scrub only if not starting a HTML5 drag.
                       if ((event.target as HTMLElement).closest('.reel-nle__trim')) return;
                       event.stopPropagation();
+                      onSelectGap?.(null);
                       onSelectSegment(segment.id, 'video');
                     }}
                   >
                     <span className="reel-nle__clip-label">
                       {span.index + 1} · {formatDuration(span.duration)}
                     </span>
-                    {selected && onTrimSegment && (
+                    {onTrimSegment && (
                       <>
                         <button
                           type="button"
@@ -491,6 +614,28 @@ export function ReelTimelineStrip({
                       </>
                     )}
                   </div>
+                );
+              })}
+
+              {spans.slice(0, -1).map((span) => {
+                const segment = segments[span.index];
+                if (!segment || !onApplyTransition) return null;
+                const joinLeft = (span.leftRatio + span.widthRatio) * 100;
+                return (
+                  <button
+                    key={`join-${segment.id}`}
+                    type="button"
+                    className="reel-nle__join"
+                    style={{ left: `${joinLeft}%` }}
+                    title="Suelta aquí una transición"
+                    aria-label={`Transición después del clip ${span.index + 1}`}
+                    onDragOver={(event) => {
+                      if (![...event.dataTransfer.types].includes(TRANSITION_MIME)) return;
+                      event.preventDefault();
+                      event.stopPropagation();
+                    }}
+                    onDrop={(event) => acceptTransitionDrop(event, segment.id)}
+                  />
                 );
               })}
 
@@ -525,7 +670,7 @@ export function ReelTimelineStrip({
               }}
             >
               {overlays.length === 0 ? (
-                <span className="reel-nle__track-empty muted">Sin overlays · doble clic = texto</span>
+                <span className="reel-nle__track-empty muted">Sin overlays · doble clic = texto · suelta B-roll</span>
               ) : (
                 overlays.map((overlay) => {
                   const startSec = overlay.start_ms / 1000;
@@ -545,14 +690,18 @@ export function ReelTimelineStrip({
                       title={
                         overlay.kind === 'text'
                           ? overlay.text || 'Texto'
-                          : `Imagen · ${formatDuration(durSec)}`
+                          : overlay.kind === 'video'
+                            ? `B-roll · ${formatDuration(durSec)}`
+                            : `Imagen · ${formatDuration(durSec)}`
                       }
                       onPointerDown={(event) => beginOverlayDrag(event, overlay)}
                     >
                       <span className="reel-nle__clip-label">
                         {overlay.kind === 'text'
                           ? (overlay.text || 'Texto').slice(0, 24)
-                          : 'Imagen'}
+                          : overlay.kind === 'video'
+                            ? 'B-roll'
+                            : 'Imagen'}
                       </span>
                     </div>
                   );
@@ -565,25 +714,53 @@ export function ReelTimelineStrip({
                 const segment = segments[span.index];
                 const selected = segment.id === selectedSegmentId;
                 const label = (captionLabels[segment.id] ?? '').trim();
+                const startSec =
+                  segment.caption_in_ms != null ? segment.caption_in_ms / 1000 : span.start;
+                const endSec =
+                  segment.caption_out_ms != null
+                    ? segment.caption_out_ms / 1000
+                    : span.start + span.duration;
+                const durSec = Math.max(0.2, endSec - startSec);
+                const left = totalDuration > 0 ? (startSec / totalDuration) * 100 : 0;
+                const width =
+                  totalDuration > 0 ? Math.max((durSec / totalDuration) * 100, 0.8) : 0.8;
                 return (
                   <div
                     key={`cc-${span.id}`}
                     role="presentation"
                     className={`reel-nle__clip reel-nle__clip--caption${selected ? ' reel-nle__clip--selected' : ''}`}
-                    style={{
-                      left: `${span.leftRatio * 100}%`,
-                      width: `${Math.max(span.widthRatio * 100, 0.8)}%`,
-                    }}
+                    style={{ left: `${left}%`, width: `${width}%` }}
                     title={label || `Subtítulos · fragmento ${span.index + 1}`}
                     onPointerDown={(event) => {
+                      if ((event.target as HTMLElement).closest('.reel-nle__trim')) return;
                       event.stopPropagation();
                       onSelectSegment(segment.id, 'captions');
-                      beginScrub(event);
+                      beginCaptionDrag(event, segment, span.start, span.duration, 'move');
                     }}
                   >
                     <span className="reel-nle__clip-label">
                       {label ? label.slice(0, 28) : '—'}
                     </span>
+                    {onMoveCaption && (
+                      <>
+                        <button
+                          type="button"
+                          className="reel-nle__trim reel-nle__trim--start"
+                          aria-label="Recortar inicio del subtítulo"
+                          onPointerDown={(event) =>
+                            beginCaptionDrag(event, segment, span.start, span.duration, 'start')
+                          }
+                        />
+                        <button
+                          type="button"
+                          className="reel-nle__trim reel-nle__trim--end"
+                          aria-label="Recortar fin del subtítulo"
+                          onPointerDown={(event) =>
+                            beginCaptionDrag(event, segment, span.start, span.duration, 'end')
+                          }
+                        />
+                      </>
+                    )}
                   </div>
                 );
               })}

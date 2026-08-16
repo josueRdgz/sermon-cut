@@ -7,6 +7,118 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.4.9] — 2026-08-15
+
+### Changed
+
+- Pestañas del proyecto (Proyecto, Audio, Predicación, Transcripción, IA,
+  Editor) viven en la barra lateral. El visor e inspector ganan altura; la
+  línea temporal ocupa ~40% del editor. Subtítulos del preview abajo y
+  pequeños (`cqh`). Transiciones se arrastran a las uniones de clips.
+  Subtítulos en pista propia (mover/recortar independiente del video).
+
+### Fixed
+
+- El export no guardaba recortes/overlays pendientes (debounce 300 ms).
+  Ahora vacía cortes, overlays y textos de fragmento antes de renderizar.
+
+## [0.4.8] — 2026-08-15
+
+### Changed
+
+- Editor NLE tipo CapCut/Pinnacle: el visor **Programa** (9:16) es el héroe;
+  el transporte y la mezcla viven en un dock a todo el ancho debajo, no
+  dentro de la columna del preview. Por defecto un solo visor; Fuente es
+  opcional y queda en una columna estrecha. Cromo de pestañas compacto.
+
+### Fixed
+
+- El 9:16 salía como miniatura porque play/mezcla le quitaban la altura.
+- El audio se trababa en cada corte: la vista lógica ya no pausa ni espera
+  el `seeked`. Los clips contiguos siguen; los saltos usan un visor A/B
+  precargado y un temporizador de corte (no `timeupdate` tardío).
+
+## [0.4.7] — 2026-08-15
+
+### Fixed
+
+- Visor Programa 9:16 se contenía mal (`height: 52vh`) y se superponía al
+  inspector. El grid ahora encaja Fuente/Programa/baúl/inspector sin
+  desbordar. El preview usa el encuadre elegido (`cover` en recorte,
+  `contain` con letterbox en fondo desenfocado).
+
+### Changed
+
+- Inspector de Cortes más ancho por defecto; botones en fila. Layout NLE
+  se reinicia (clave `layout.v2`) para salir de tamaños rotos.
+
+## [0.4.6] — 2026-08-15
+
+### Changed
+
+- Proyecto, alta de predicación y editor NLE usan el mismo cromo (barra,
+  lateral, acento oro). Pestañas de Cortes con iconos; visor con play/pausa
+  claro. El editor a pantalla completa deja de pelear con el encabezado.
+
+### Fixed
+
+- Brace extra en el CSS del baúl que invalidaba estilos siguientes.
+- Barra de progreso con `role="progressbar"` y valores ARIA.
+- Contraste de textos secundarios.
+
+## [0.4.5] — 2026-08-15
+
+### Changed
+
+- Inspector de Cortes extraído (`ClipInspector`, filmstrip, huecos omitidos,
+  formulario de fragmento). El panel muestra tiempos de fuente y de programa.
+
+## [0.4.4] — 2026-08-15
+
+### Added
+
+- Workspace NLE flexible: baúl, inspector y línea temporal se redimensionan
+  (se guarda el tamaño). Visores **Fuente** (sermón 16:9 + regla de clips) y
+  **Programa** (aspecto de salida). Overlays se arrastran sobre el visor.
+
+### Changed
+
+- Inspector de overlay extraído (`OverlayInspector`) con posición X/Y.
+
+## [0.4.3] — 2026-08-15
+
+### Added
+
+- Pista B-roll de video: el baúl acepta clips (MP4/MOV/MKV/WebM), se sueltan
+  sobre la línea temporal y se componen en el export (FFmpeg `overlay`, sin
+  audio del B-roll). Preview lógico con `<video>` sincronizado al reloj.
+
+### Fixed
+
+- API de assets y overlays que el editor 0.4.1 ya llamaba pero el backend no
+  exponía; las transiciones `fade` / `flash` ahora existen también en el enum
+  del servidor y en el grafo `xfade`.
+
+## [0.4.2] — 2026-08-15
+
+### Added
+
+- NLE a pantalla completa en el editor: monitor extraído (`PreviewMonitor`),
+  atajos Espacio/J/K/L e I/O, recorte ripple que no solapa vecinos, y huecos
+  del sermón como clips omitidos seleccionables.
+
+### Changed
+
+- La revisión de unión vive en Cortes; Exportar es solo el job MP4 y no espera
+  a validar. Sondas de audio/plano opt-in.
+- Workspace del editor sin cabecera de proyecto; inspector más estrecho.
+
+### Fixed
+
+- Visor 9:16 con `object-fit: contain` (deja de estirar el 16:9).
+- Clips de la línea temporal separados; la cama de música no busca en cada corte.
+- `app_version` del API alineado a la versión del paquete.
+
 ## [0.4.1] — 2026-08-15
 
 ### Added

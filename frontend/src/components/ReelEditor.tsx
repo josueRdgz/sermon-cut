@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Captions, Download, Image, Music, Scissors, Square } from 'lucide-react';
+import type { LucideIcon } from 'lucide-react';
 
 import { ApiError, API_BASE_URL } from '../api/client';
 import { listAssets } from '../api/assets';
@@ -22,29 +24,38 @@ import {
   updateReelSegment,
 } from '../api/reels';
 import { getTranscript } from '../api/transcripts';
-import { projectVideoUrl } from '../api/projects';
 import type { ProjectAsset } from '../types/asset';
 import type { ReelOverlay } from '../types/overlay';
 import type { Project } from '../types/project';
 import type { AspectRatio, Reel, ReelSegment, TransitionType } from '../types/reel';
 import type { TranscriptSegment } from '../types/transcript';
 import { formatDuration, formatTimecode } from '../utils/format';
-import { buildOutputClock } from '../utils/reelOutputClock';
-import { pinWorkspaceNav } from '../utils/workspaceScroll';
+import { buildOutputClock, outputTimeAtSource, outputTimeForSource, sourceWindowsContiguous } from '../utils/reelOutputClock';
+import { clampRippleTrim } from '../utils/reelTrim';
+import { buildSourceGaps } from '../utils/reelTimelineStrip';
+import { useNleLayout } from '../utils/useNleLayout';
 import { ConfirmDialog } from './ConfirmDialog';
-import { CutSuggestionMarkers, CutSuggestionsPanel } from './CutSuggestionsPanel';
+import { CutSuggestionsPanel } from './CutSuggestionsPanel';
 import { BackgroundMusicPanel } from './BackgroundMusicPanel';
 import { EndCardPanel } from './EndCardPanel';
 import { FramingPanel } from './FramingPanel';
 import { MediaBinPanel } from './MediaBinPanel';
-import { OverlayPreviewLayer } from './OverlayPreviewLayer';
+import { AddFragmentForm } from './nle/AddFragmentForm';
+import { ClipInspector } from './nle/ClipInspector';
+import { CutsFilmstrip } from './nle/CutsFilmstrip';
+import { NleSplitter } from './nle/NleSplitter';
+import { OmittedGapInspector } from './nle/OmittedGapInspector';
+import { OverlayInspector } from './nle/OverlayInspector';
+import { PreviewMonitor } from './nle/PreviewMonitor';
+import { PreviewTransport } from './nle/PreviewTransport';
+import { SourceMonitor } from './nle/SourceMonitor';
 import { RenderPanel } from './RenderPanel';
+import { CoherencePanel } from './CoherencePanel';
 import { ReelTimelineStrip, type TimelineTrackKind } from './ReelTimelineStrip';
 import { SubtitlePanel } from './SubtitlePanel';
 import type { CutSuggestion, CutSuggestionsReport } from '../types/cutSuggestions';
 import { acceptCutSuggestion, rejectCutSuggestion } from '../api/cutSuggestions';
 import {
-  backgroundMusicAudioUrl,
   getBackgroundMusic,
   saveBackgroundMusic,
 } from '../api/backgroundMusic';
@@ -145,32 +156,24 @@ interface ReelEditorProps {
 }
 
 const ASPECT_OPTIONS: AspectRatio[] = ['9:16', '1:1', '16:9'];
-const TRANSITION_OPTIONS: { value: TransitionType; label: string }[] = [
-  { value: 'hard_cut', label: 'Corte duro' },
-  { value: 'short_crossfade', label: 'Fundido cruzado' },
-  { value: 'dip_to_black', label: 'Fundido a negro' },
-  { value: 'fade', label: 'Difuminar' },
-  { value: 'flash', label: 'Destello' },
+const REEL_TOOLS: {
+  id: 'cuts' | 'framing' | 'subtitles' | 'audio' | 'end-card' | 'export';
+  label: string;
+  description: string;
+  icon: LucideIcon;
+}[] = [
+  { id: 'cuts', label: 'Cortes', description: 'Fragmentos y transiciones', icon: Scissors },
+  { id: 'framing', label: 'Encuadre', description: 'Formato vertical', icon: Square },
+  { id: 'subtitles', label: 'Subtítulos', description: 'Texto sobre imagen', icon: Captions },
+  { id: 'audio', label: 'Audio', description: 'Sincronía y música', icon: Music },
+  { id: 'end-card', label: 'Pantalla final', description: 'Imagen y llamado', icon: Image },
+  { id: 'export', label: 'Exportar', description: 'Generar MP4', icon: Download },
 ];
-
-const ADJUST_STEPS = [-1, -0.1, 0.1, 1] as const;
-const REEL_TOOLS = [
-  { id: 'cuts', label: 'Cortes', description: 'Fragmentos y transiciones' },
-  { id: 'framing', label: 'Encuadre', description: 'Formato vertical' },
-  { id: 'subtitles', label: 'Subtítulos', description: 'Texto sobre imagen' },
-  { id: 'audio', label: 'Audio', description: 'Sincronía y música' },
-  { id: 'end-card', label: 'Pantalla final', description: 'Imagen y llamado' },
-  { id: 'export', label: 'Exportar', description: 'Validar y generar MP4' },
-] as const;
 
 type ReelTool = (typeof REEL_TOOLS)[number]['id'];
 
 function round3(value: number): number {
   return Math.round(value * 1000) / 1000;
-}
-
-function gapSeconds(prev: ReelSegment, next: ReelSegment): number {
-  return next.source_start_seconds - prev.source_end_seconds;
 }
 
 function audioTimeForVideo(videoTime: number, offsetMs: number): number {
@@ -215,7 +218,7 @@ function waitForSeek(media: HTMLMediaElement, seconds: number): Promise<void> {
       window.clearTimeout(timer);
       resolve();
     };
-    const timer = window.setTimeout(finish, 900);
+    const timer = window.setTimeout(finish, 420);
     media.addEventListener('seeked', finish, { once: true });
     if (!setMediaTime(media, target)) finish();
   });
@@ -231,7 +234,10 @@ export function ReelEditor({
   focusReelId = null,
   onCoverUpdated,
 }: ReelEditorProps) {
-  const videoRef = useRef<HTMLVideoElement>(null);
+  const videoARef = useRef<HTMLVideoElement>(null);
+  const videoBRef = useRef<HTMLVideoElement>(null);
+  const programLaneRef = useRef<0 | 1>(0);
+  const [programLane, setProgramLane] = useState<0 | 1>(0);
   const audioRef = useRef<HTMLAudioElement>(null);
   const musicRef = useRef<HTMLAudioElement>(null);
   const [reels, setReels] = useState<Reel[]>([]);
@@ -267,13 +273,19 @@ export function ReelEditor({
   const [assets, setAssets] = useState<ProjectAsset[]>([]);
   const [overlays, setOverlays] = useState<ReelOverlay[]>([]);
   const [selectedOverlayId, setSelectedOverlayId] = useState<string | null>(null);
+  const [selectedGapKey, setSelectedGapKey] = useState<string | null>(null);
   const [timelineZoom, setTimelineZoom] = useState(80);
   const [assembledPreviewSrc, setAssembledPreviewSrc] = useState<string | null>(null);
   const [assembledBusy, setAssembledBusy] = useState(false);
   const [previewMode, setPreviewMode] = useState<'logical' | 'assembled'>('logical');
+  const [binCollapsed, setBinCollapsed] = useState(false);
+  const [inspectorCollapsed, setInspectorCollapsed] = useState(false);
+  const { layout, patchLayout } = useNleLayout();
   const musicVolumeSaveTimerRef = useRef<number | null>(null);
   const segmentPersistTimerRef = useRef<number | null>(null);
   const overlayPersistTimerRef = useRef<number | null>(null);
+  const pendingSegmentWorkRef = useRef<(() => Promise<void>) | null>(null);
+  const pendingOverlayWorkRef = useRef<(() => Promise<void>) | null>(null);
   const assembledVideoRef = useRef<HTMLVideoElement>(null);
   const reloadEpochRef = useRef(0);
   const previewIndexRef = useRef(0);
@@ -289,8 +301,25 @@ export function ReelEditor({
   const resumeAfterScrubRef = useRef(false);
   const jumpingRef = useRef(false);
   const jumpTokenRef = useRef(0);
+  const cutTimerRef = useRef<number | null>(null);
+  const orderedSegmentsRef = useRef<ReelSegment[]>([]);
   const previewMutedRef = useRef(false);
   const previewVolumeRef = useRef(1);
+
+  function programVideo(): HTMLVideoElement | null {
+    return (programLaneRef.current === 0 ? videoARef : videoBRef).current;
+  }
+
+  function standbyVideo(): HTMLVideoElement | null {
+    return (programLaneRef.current === 0 ? videoBRef : videoARef).current;
+  }
+
+  function clearCutTimer() {
+    if (cutTimerRef.current != null) {
+      window.clearTimeout(cutTimerRef.current);
+      cutTimerRef.current = null;
+    }
+  }
 
   const activeReel = useMemo(
     () => reels.find((reel) => reel.id === activeReelId) ?? null,
@@ -702,6 +731,24 @@ export function ReelEditor({
     }
   }
 
+  async function flushPendingEditsForExport(): Promise<void> {
+    await flushCaptionDraftsForExport();
+    if (segmentPersistTimerRef.current != null) {
+      window.clearTimeout(segmentPersistTimerRef.current);
+      segmentPersistTimerRef.current = null;
+    }
+    const segmentWork = pendingSegmentWorkRef.current;
+    pendingSegmentWorkRef.current = null;
+    if (segmentWork) await segmentWork();
+    if (overlayPersistTimerRef.current != null) {
+      window.clearTimeout(overlayPersistTimerRef.current);
+      overlayPersistTimerRef.current = null;
+    }
+    const overlayWork = pendingOverlayWorkRef.current;
+    pendingOverlayWorkRef.current = null;
+    if (overlayWork) await overlayWork();
+  }
+
   async function clearFragmentCaption(segment: ReelSegment) {
     if (!activeReel) return;
     setTranscriptSavingId(segment.id);
@@ -746,23 +793,29 @@ export function ReelEditor({
     }
   }
 
-  function debounceSegmentPersist(run: () => void) {
+  function debounceSegmentPersist(run: () => Promise<void>) {
+    pendingSegmentWorkRef.current = run;
     if (segmentPersistTimerRef.current != null) {
       window.clearTimeout(segmentPersistTimerRef.current);
     }
     segmentPersistTimerRef.current = window.setTimeout(() => {
       segmentPersistTimerRef.current = null;
-      run();
+      const work = pendingSegmentWorkRef.current;
+      pendingSegmentWorkRef.current = null;
+      if (work) void work();
     }, 300);
   }
 
-  function debounceOverlayPersist(run: () => void) {
+  function debounceOverlayPersist(run: () => Promise<void>) {
+    pendingOverlayWorkRef.current = run;
     if (overlayPersistTimerRef.current != null) {
       window.clearTimeout(overlayPersistTimerRef.current);
     }
     overlayPersistTimerRef.current = window.setTimeout(() => {
       overlayPersistTimerRef.current = null;
-      run();
+      const work = pendingOverlayWorkRef.current;
+      pendingOverlayWorkRef.current = null;
+      if (work) void work();
     }, 300);
   }
 
@@ -780,19 +833,17 @@ export function ReelEditor({
 
   function handleReorderSegments(orderedIds: string[]) {
     if (!activeReel) return;
-    debounceSegmentPersist(() => {
-      void (async () => {
-        try {
-          const updated = await reorderReelSegments(
-            projectId,
-            activeReel.id,
-            orderedIds.map((id, order) => ({ id, order })),
-          );
-          replaceReel(updated);
-        } catch (err) {
-          setError(err instanceof Error ? err.message : 'No se pudo reordenar');
-        }
-      })();
+    debounceSegmentPersist(async () => {
+      try {
+        const updated = await reorderReelSegments(
+          projectId,
+          activeReel.id,
+          orderedIds.map((id, order) => ({ id, order })),
+        );
+        replaceReel(updated);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'No se pudo reordenar');
+      }
     });
   }
 
@@ -801,7 +852,12 @@ export function ReelEditor({
     patch: { source_start_seconds?: number; source_end_seconds?: number },
   ) {
     if (!activeReel) return;
-    // Optimistic local update for snappy trim handles.
+    const clamped = clampRippleTrim(activeReel.segments, id, patch);
+    if (!clamped) return;
+    const nextPatch = {
+      source_start_seconds: clamped.source_start_seconds,
+      source_end_seconds: clamped.source_end_seconds,
+    };
     setReels((prev) =>
       prev.map((reel) => {
         if (reel.id !== activeReel.id) return reel;
@@ -811,11 +867,10 @@ export function ReelEditor({
             segment.id === id
               ? {
                   ...segment,
-                  ...patch,
+                  ...nextPatch,
                   duration_seconds: Math.max(
                     0,
-                    (patch.source_end_seconds ?? segment.source_end_seconds) -
-                      (patch.source_start_seconds ?? segment.source_start_seconds),
+                    nextPatch.source_end_seconds - nextPatch.source_start_seconds,
                   ),
                 }
               : segment,
@@ -823,17 +878,52 @@ export function ReelEditor({
         };
       }),
     );
-    debounceSegmentPersist(() => {
-      void (async () => {
-        try {
-          const updated = await updateReelSegment(projectId, activeReel.id, id, patch);
-          replaceReel(updated);
-        } catch (err) {
-          setError(err instanceof Error ? err.message : 'Ajuste inválido');
-          void reload();
-        }
-      })();
+    debounceSegmentPersist(async () => {
+      try {
+        const updated = await updateReelSegment(projectId, activeReel.id, id, nextPatch);
+        replaceReel(updated);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'Ajuste inválido');
+        void reload();
+      }
     });
+  }
+
+  function handleMoveCaption(id: string, inMs: number, outMs: number) {
+    if (!activeReel) return;
+    const nextIn = Math.max(0, inMs);
+    const nextOut = Math.max(nextIn + 200, outMs);
+    setReels((prev) =>
+      prev.map((reel) => {
+        if (reel.id !== activeReel.id) return reel;
+        return {
+          ...reel,
+          segments: reel.segments.map((segment) =>
+            segment.id === id
+              ? { ...segment, caption_in_ms: nextIn, caption_out_ms: nextOut }
+              : segment,
+          ),
+        };
+      }),
+    );
+    debounceSegmentPersist(async () => {
+      try {
+        const updated = await updateReelSegment(projectId, activeReel.id, id, {
+          caption_in_ms: nextIn,
+          caption_out_ms: nextOut,
+        });
+        replaceReel(updated);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'No se pudo mover el subtítulo');
+        void reload();
+      }
+    });
+  }
+
+  function handleApplyTransition(segmentId: string, type: TransitionType) {
+    const segment = activeReel?.segments.find((item) => item.id === segmentId);
+    if (!segment) return;
+    void handleSegmentField(segment, { transition_type: type });
   }
 
   function handleMoveOverlay(id: string, startMs: number) {
@@ -841,31 +931,33 @@ export function ReelEditor({
     setOverlays((prev) =>
       prev.map((overlay) => (overlay.id === id ? { ...overlay, start_ms: startMs } : overlay)),
     );
-    debounceOverlayPersist(() => {
-      void (async () => {
-        try {
-          const updated = await updateOverlay(projectId, activeReel.id, id, {
-            start_ms: startMs,
-          });
-          setOverlays((prev) => prev.map((item) => (item.id === updated.id ? updated : item)));
-        } catch (err) {
-          setError(err instanceof Error ? err.message : 'No se pudo mover el overlay');
-          void reloadOverlays(activeReel.id);
-        }
-      })();
+    debounceOverlayPersist(async () => {
+      try {
+        const updated = await updateOverlay(projectId, activeReel.id, id, {
+          start_ms: startMs,
+        });
+        setOverlays((prev) => prev.map((item) => (item.id === updated.id ? updated : item)));
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'No se pudo mover el overlay');
+        void reloadOverlays(activeReel.id);
+      }
     });
   }
 
   async function handleDropAsset(assetId: string, outputSeconds: number) {
     if (!activeReel) return;
+    const asset = assets.find((item) => item.id === assetId);
+    const isVideo = asset?.kind === 'video';
     setBusy(true);
     setError(null);
     try {
       const created = await createOverlay(projectId, activeReel.id, {
-        kind: 'image',
+        kind: isVideo ? 'video' : 'image',
         asset_id: assetId,
         start_ms: Math.max(0, Math.round(outputSeconds * 1000)),
-        duration_ms: 3000,
+        duration_ms: isVideo
+          ? Math.max(500, asset?.duration_ms ?? 3000)
+          : 3000,
       });
       setOverlays((prev) => [...prev, created].sort((a, b) => a.start_ms - b.start_ms));
       setSelectedOverlayId(created.id);
@@ -914,16 +1006,14 @@ export function ReelEditor({
     setOverlays((prev) =>
       prev.map((item) => (item.id === overlay.id ? { ...item, ...patch } : item)),
     );
-    debounceOverlayPersist(() => {
-      void (async () => {
-        try {
-          const updated = await updateOverlay(projectId, activeReel.id, overlay.id, patch);
-          setOverlays((prev) => prev.map((item) => (item.id === updated.id ? updated : item)));
-        } catch (err) {
-          setError(err instanceof Error ? err.message : 'No se pudo actualizar el overlay');
-          void reloadOverlays(activeReel.id);
-        }
-      })();
+    debounceOverlayPersist(async () => {
+      try {
+        const updated = await updateOverlay(projectId, activeReel.id, overlay.id, patch);
+        setOverlays((prev) => prev.map((item) => (item.id === updated.id ? updated : item)));
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'No se pudo actualizar el overlay');
+        void reloadOverlays(activeReel.id);
+      }
     });
   }
 
@@ -1006,8 +1096,11 @@ export function ReelEditor({
       return;
     }
     if (music.readyState < HTMLMediaElement.HAVE_METADATA) return;
+    if (jumpingRef.current && !options.force) return;
     const drift = target - music.currentTime;
-    if (options.force || Math.abs(drift) >= 0.2) {
+    const playing = !music.paused && !music.ended;
+    const threshold = playing ? 0.45 : 0.2;
+    if (options.force || Math.abs(drift) >= threshold) {
       await waitForSeek(music, target);
     }
     const wantPlay = options.play ?? previewingRef.current;
@@ -1034,7 +1127,8 @@ export function ReelEditor({
   }
 
   function applyPreviewGain() {
-    const video = videoRef.current;
+    const video = programVideo();
+    const standby = standbyVideo();
     const audio = audioRef.current;
     const separate = usesSeparateAudio();
     const muted = previewMutedRef.current;
@@ -1042,6 +1136,10 @@ export function ReelEditor({
     if (video) {
       video.muted = separate ? true : muted;
       video.volume = separate ? 1 : muted ? 0 : volume;
+    }
+    if (standby) {
+      standby.muted = true;
+      standby.volume = 0;
     }
     if (audio) {
       audio.muted = separate ? muted : true;
@@ -1060,6 +1158,7 @@ export function ReelEditor({
     resumeAfterScrubRef.current = false;
     jumpingRef.current = false;
     pendingPreviewSeekRef.current = null;
+    clearCutTimer();
     if (seekAnimationFrameRef.current != null) {
       window.cancelAnimationFrame(seekAnimationFrameRef.current);
       seekAnimationFrameRef.current = null;
@@ -1069,8 +1168,8 @@ export function ReelEditor({
       audioOffsetSeekTimerRef.current = null;
     }
     setPreviewing(false);
-    const video = videoRef.current;
-    if (video) video.pause();
+    videoARef.current?.pause();
+    videoBRef.current?.pause();
     assembledVideoRef.current?.pause();
     const audio = audioRef.current;
     if (audio) {
@@ -1078,6 +1177,65 @@ export function ReelEditor({
       audio.playbackRate = 1;
     }
     musicRef.current?.pause();
+  }
+
+  function prefetchStandby() {
+    const next = orderedSegmentsRef.current[previewIndexRef.current + 1];
+    const standby = standbyVideo();
+    if (!standby) return;
+    standby.muted = true;
+    if (!next) {
+      standby.pause();
+      return;
+    }
+    if (Math.abs(standby.currentTime - next.source_start_seconds) < 0.08) return;
+    setMediaTime(standby, next.source_start_seconds);
+  }
+
+  function scheduleCutAdvance() {
+    clearCutTimer();
+    if (!previewingRef.current || scrubbingRef.current) return;
+    const video = programVideo();
+    const current = orderedSegmentsRef.current[previewIndexRef.current];
+    if (!video || !current) return;
+    const remainingMs = (current.source_end_seconds - video.currentTime) * 1000;
+    if (remainingMs < 800) prefetchStandby();
+    cutTimerRef.current = window.setTimeout(() => {
+      cutTimerRef.current = null;
+      advanceToNextCut();
+    }, Math.max(0, remainingMs - 30));
+  }
+
+  function advanceToNextCut() {
+    if (jumpingRef.current || !previewingRef.current || scrubbingRef.current) return;
+    const ordered = orderedSegmentsRef.current;
+    const index = previewIndexRef.current;
+    const current = ordered[index];
+    const video = programVideo();
+    if (!current || !video) {
+      stopPreview();
+      return;
+    }
+    if (video.currentTime < current.source_end_seconds - 0.08) {
+      scheduleCutAdvance();
+      return;
+    }
+    const next = ordered[index + 1];
+    if (!next) {
+      stopPreview();
+      return;
+    }
+    previewIndexRef.current = index + 1;
+    setPreviewIndex(index + 1);
+    if (
+      sourceWindowsContiguous(current, next) &&
+      Math.abs(video.currentTime - next.source_start_seconds) < 0.2
+    ) {
+      scheduleCutAdvance();
+      prefetchStandby();
+      return;
+    }
+    void jumpPreviewToSource(next.source_start_seconds, true, { seekMusic: false });
   }
 
   function syncAudioToVideo(videoTime: number, force = false) {
@@ -1089,66 +1247,119 @@ export function ReelEditor({
     if (audio.readyState < HTMLMediaElement.HAVE_METADATA) return;
     audio.playbackRate = 1;
     const drift = target - audio.currentTime;
-    if (force || Math.abs(drift) >= 0.08) {
+    if (force || Math.abs(drift) >= 0.35) {
       if (!setMediaTime(audio, target)) return;
     }
     pendingAudioTimeRef.current = null;
   }
 
-  async function jumpPreviewToSource(sourceTimeSeconds: number, resume: boolean) {
-    const video = videoRef.current;
+  async function jumpPreviewToSource(
+    sourceTimeSeconds: number,
+    resume: boolean,
+    options: { seekMusic?: boolean } = {},
+  ) {
+    const video = programVideo();
     if (!video) return;
     const token = ++jumpTokenRef.current;
     jumpingRef.current = true;
-    video.pause();
     const audio = audioRef.current;
-    if (audio) {
-      audio.pause();
-      audio.playbackRate = 1;
-    }
-    // Keep bed music running across hard cuts — it follows the output clock,
-    // not the source seek. Pausing here made the bed die between fragments.
-    const seeks = [waitForSeek(video, sourceTimeSeconds)];
-    if (usesSeparateAudio() && audio) {
-      seeks.push(
-        waitForSeek(audio, audioTimeForVideo(sourceTimeSeconds, audioOffsetRef.current)),
-      );
-    }
-    await Promise.all(seeks);
-    if (token !== jumpTokenRef.current) return;
-    pendingVideoTimeRef.current = null;
-    pendingAudioTimeRef.current = null;
-    jumpingRef.current = false;
-    setSourceTime(sourceTimeSeconds);
-    if (!resume || !previewingRef.current || scrubbingRef.current) return;
-    applyPreviewGain();
-    try {
-      if (usesSeparateAudio() && audio) {
-        await Promise.all([video.play(), audio.play()]);
-      } else {
-        await video.play();
-      }
-      if (token !== jumpTokenRef.current) return;
-      const ordered = activeReel
-        ? [...activeReel.segments].sort((a, b) => a.order - b.order)
-        : [];
+    const keepPlaying = Boolean(resume && previewingRef.current && !scrubbingRef.current);
+    pendingVideoTimeRef.current = sourceTimeSeconds;
+    clearCutTimer();
+
+    const finishMusic = async () => {
+      if (options.seekMusic === false) return;
+      const ordered = orderedSegmentsRef.current;
       const index = previewIndexRef.current;
       const current = ordered[index];
-      if (current) {
-        const elapsedBefore = ordered
-          .slice(0, index)
-          .reduce((sum, segment) => sum + Math.max(0, segment.duration_seconds), 0);
-        const local = Math.max(
-          0,
-          Math.min(sourceTimeSeconds - current.source_start_seconds, current.duration_seconds),
+      if (!current) return;
+      await playMusicForOutput(
+        outputTimeForSource(buildOutputClock(ordered), index, sourceTimeSeconds),
+      );
+    };
+
+    if (!keepPlaying) {
+      video.pause();
+      standbyVideo()?.pause();
+      if (audio) {
+        audio.pause();
+        audio.playbackRate = 1;
+      }
+      const seeks = [waitForSeek(video, sourceTimeSeconds)];
+      if (usesSeparateAudio() && audio) {
+        seeks.push(
+          waitForSeek(audio, audioTimeForVideo(sourceTimeSeconds, audioOffsetRef.current)),
         );
-        await playMusicForOutput(elapsedBefore + local);
+      }
+      await Promise.all(seeks);
+      if (token !== jumpTokenRef.current) return;
+      pendingVideoTimeRef.current = null;
+      pendingAudioTimeRef.current = null;
+      jumpingRef.current = false;
+      setSourceTime(sourceTimeSeconds);
+      prefetchStandby();
+      return;
+    }
+
+    const standby = standbyVideo();
+    const standbyReady = Boolean(
+      standby &&
+        standby.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA &&
+        Math.abs(standby.currentTime - sourceTimeSeconds) < 0.3,
+    );
+
+    if (standbyReady && standby) {
+      const outgoing = video;
+      const nextLane: 0 | 1 = programLaneRef.current === 0 ? 1 : 0;
+      programLaneRef.current = nextLane;
+      setProgramLane(nextLane);
+      applyPreviewGain();
+      try {
+        if (standby.paused) await standby.play();
+      } catch (err: unknown) {
+        if (token !== jumpTokenRef.current) return;
+        stopPreview();
+        setError(err instanceof Error ? err.message : 'No se pudo reanudar la reproducción');
+        return;
+      }
+      outgoing.pause();
+      outgoing.muted = true;
+      if (token !== jumpTokenRef.current) return;
+      pendingVideoTimeRef.current = null;
+      jumpingRef.current = false;
+      setSourceTime(sourceTimeSeconds);
+      scheduleCutAdvance();
+      prefetchStandby();
+      await finishMusic();
+      return;
+    }
+
+    setMediaTime(video, sourceTimeSeconds, true);
+    if (usesSeparateAudio() && audio) {
+      setMediaTime(audio, audioTimeForVideo(sourceTimeSeconds, audioOffsetRef.current), true);
+    }
+    pendingVideoTimeRef.current = null;
+    jumpingRef.current = false;
+    setSourceTime(sourceTimeSeconds);
+    applyPreviewGain();
+    try {
+      if (video.paused) {
+        if (usesSeparateAudio() && audio) {
+          await Promise.all([video.play(), audio.play()]);
+        } else {
+          await video.play();
+        }
       }
     } catch (err: unknown) {
       if (token !== jumpTokenRef.current) return;
       stopPreview();
       setError(err instanceof Error ? err.message : 'No se pudo reanudar la reproducción');
+      return;
     }
+    if (token !== jumpTokenRef.current) return;
+    scheduleCutAdvance();
+    prefetchStandby();
+    await finishMusic();
   }
 
   function applyAudioOffset(offsetMs: number) {
@@ -1158,7 +1369,7 @@ export function ReelEditor({
     if (audioOffsetSeekTimerRef.current != null) return;
     audioOffsetSeekTimerRef.current = window.setTimeout(() => {
       audioOffsetSeekTimerRef.current = null;
-      const video = videoRef.current;
+      const video = programVideo();
       if (!video) return;
       if (usesSeparateAudio()) {
         syncAudioToVideo(video.currentTime, true);
@@ -1173,7 +1384,7 @@ export function ReelEditor({
       window.clearTimeout(audioOffsetSeekTimerRef.current);
       audioOffsetSeekTimerRef.current = null;
     }
-    const video = videoRef.current;
+    const video = programVideo();
     if (!video) return;
     applyPreviewGain();
     if (usesSeparateAudio()) {
@@ -1198,7 +1409,7 @@ export function ReelEditor({
   }
 
   function applyPreviewSeek(target: PreviewSeekTarget, approximate: boolean) {
-    const video = videoRef.current;
+    const video = programVideo();
     if (!video) return;
     pendingVideoTimeRef.current = target.sourceTime;
     if (approximate) {
@@ -1236,7 +1447,7 @@ export function ReelEditor({
       return;
     }
     const target = resolvePreviewSeek(orderedSegments, outputSeconds);
-    if (!target || !videoRef.current) return;
+    if (!target || !programVideo()) return;
     previewIndexRef.current = target.segmentIndex;
     setPreviewIndex(target.segmentIndex);
     setPreviewOutputTime(target.outputTime);
@@ -1255,11 +1466,13 @@ export function ReelEditor({
     if (scrubbingRef.current) return;
     scrubbingRef.current = true;
     resumeAfterScrubRef.current = previewingRef.current;
+    clearCutTimer();
     if (previewMode === 'assembled') {
       assembledVideoRef.current?.pause();
       return;
     }
-    videoRef.current?.pause();
+    videoARef.current?.pause();
+    videoBRef.current?.pause();
     if (audioRef.current) {
       audioRef.current.pause();
       audioRef.current.playbackRate = 1;
@@ -1292,10 +1505,11 @@ export function ReelEditor({
   }
 
   function startPreview() {
-    if (!activeReel || activeReel.segments.length === 0 || !videoRef.current) {
+    if (!activeReel || activeReel.segments.length === 0) {
       return;
     }
-    const video = videoRef.current;
+    const video = programVideo();
+    if (!video) return;
     const audio = audioRef.current;
     const total = orderedSegments.reduce(
       (sum, segment) => sum + Math.max(0, segment.duration_seconds),
@@ -1433,94 +1647,84 @@ export function ReelEditor({
   }, [projectId]);
 
   useEffect(() => {
-    const video = videoRef.current;
+    const videos = [videoARef.current, videoBRef.current].filter(
+      (item): item is HTMLVideoElement => Boolean(item),
+    );
     const previewAudio = audioRef.current;
-    if (!video || !activeReel) return;
-    const syncedVideo: HTMLVideoElement = video;
-    const syncedAudio = previewAudio;
+    if (videos.length === 0 || !activeReel) return;
 
-    function onTimeUpdate() {
-      if (!video || jumpingRef.current) return;
+    function onTimeUpdate(event: Event) {
+      const video = programVideo();
+      if (!video || event.target !== video || jumpingRef.current) return;
       setSourceTime(video.currentTime);
       if (scrubbingRef.current) return;
       if (!previewingRef.current || !activeReel) return;
-      const ordered = [...activeReel.segments].sort((a, b) => a.order - b.order);
+      const ordered = orderedSegmentsRef.current;
       const index = previewIndexRef.current;
       const current = ordered[index];
       if (!current) {
         stopPreview();
         return;
       }
-      const elapsedBefore = ordered
-        .slice(0, index)
-        .reduce((sum, segment) => sum + Math.max(0, segment.duration_seconds), 0);
-      setPreviewOutputTime(
-        Math.max(
-          0,
-          elapsedBefore +
-            Math.min(
-              Math.max(0, video.currentTime - current.source_start_seconds),
-              current.duration_seconds,
-            ),
-        ),
+      const outputNow = outputTimeForSource(
+        buildOutputClock(ordered),
+        index,
+        video.currentTime,
       );
-      const outputNow =
-        elapsedBefore +
-        Math.min(
-          Math.max(0, video.currentTime - current.source_start_seconds),
-          current.duration_seconds,
-        );
+      setPreviewOutputTime(Math.max(0, outputNow));
       if (usesSeparateAudio()) syncAudioToVideo(video.currentTime);
       syncMusicToOutput(outputNow);
       if (video.currentTime >= current.source_end_seconds - 0.04) {
-        const nextIndex = index + 1;
-        if (nextIndex >= ordered.length) {
-          stopPreview();
-          return;
-        }
-        previewIndexRef.current = nextIndex;
-        setPreviewIndex(nextIndex);
-        void jumpPreviewToSource(ordered[nextIndex].source_start_seconds, true);
+        advanceToNextCut();
+      } else if (current.source_end_seconds - video.currentTime < 0.8) {
+        prefetchStandby();
       }
     }
 
-    function onSeeking() {
+    function onSeeking(event: Event) {
+      const video = programVideo();
+      if (!video || event.target !== video) return;
       if (!scrubbingRef.current && !jumpingRef.current && usesSeparateAudio()) {
-        syncAudioToVideo(syncedVideo.currentTime, true);
+        syncAudioToVideo(video.currentTime, true);
       }
     }
 
-    function onVideoMetadata() {
-      if (pendingVideoTimeRef.current != null) {
-        if (setMediaTime(syncedVideo, pendingVideoTimeRef.current)) {
-          pendingVideoTimeRef.current = null;
-        }
+    function onVideoMetadata(event: Event) {
+      if (pendingVideoTimeRef.current == null) return;
+      if (!(event.target instanceof HTMLVideoElement)) return;
+      if (setMediaTime(event.target, pendingVideoTimeRef.current)) {
+        pendingVideoTimeRef.current = null;
       }
     }
 
     function onAudioMetadata() {
-      if (!syncedAudio || pendingAudioTimeRef.current == null) return;
-      if (setMediaTime(syncedAudio, pendingAudioTimeRef.current)) {
+      if (!previewAudio || pendingAudioTimeRef.current == null) return;
+      if (setMediaTime(previewAudio, pendingAudioTimeRef.current)) {
         pendingAudioTimeRef.current = null;
       }
     }
 
-    syncedVideo.addEventListener('timeupdate', onTimeUpdate);
-    syncedVideo.addEventListener('seeking', onSeeking);
-    syncedVideo.addEventListener('loadedmetadata', onVideoMetadata);
-    syncedAudio?.addEventListener('loadedmetadata', onAudioMetadata);
+    for (const syncedVideo of videos) {
+      syncedVideo.addEventListener('timeupdate', onTimeUpdate);
+      syncedVideo.addEventListener('seeking', onSeeking);
+      syncedVideo.addEventListener('loadedmetadata', onVideoMetadata);
+    }
+    previewAudio?.addEventListener('loadedmetadata', onAudioMetadata);
     return () => {
-      syncedVideo.removeEventListener('timeupdate', onTimeUpdate);
-      syncedVideo.removeEventListener('seeking', onSeeking);
-      syncedVideo.removeEventListener('loadedmetadata', onVideoMetadata);
-      syncedAudio?.removeEventListener('loadedmetadata', onAudioMetadata);
+      for (const syncedVideo of videos) {
+        syncedVideo.removeEventListener('timeupdate', onTimeUpdate);
+        syncedVideo.removeEventListener('seeking', onSeeking);
+        syncedVideo.removeEventListener('loadedmetadata', onVideoMetadata);
+      }
+      previewAudio?.removeEventListener('loadedmetadata', onAudioMetadata);
     };
-  }, [activeReel]);
+  }, [activeReel, programLane]);
 
   const orderedSegments = useMemo(
     () => (activeReel ? [...activeReel.segments].sort((a, b) => a.order - b.order) : []),
     [activeReel],
   );
+  orderedSegmentsRef.current = orderedSegments;
   const outputClock = useMemo(() => buildOutputClock(orderedSegments), [orderedSegments]);
   const selectedOverlay =
     overlays.find((item) => item.id === selectedOverlayId) ?? null;
@@ -1532,10 +1736,14 @@ export function ReelEditor({
     previewIndexRef.current = 0;
     setPreviewIndex(0);
     setPreviewOutputTime(0);
+    clearCutTimer();
+    programLaneRef.current = 0;
+    setProgramLane(0);
 
-    const video = videoRef.current;
+    const video = videoARef.current;
     const audio = audioRef.current;
     const first = orderedSegments[0];
+    videoBRef.current?.pause();
     if (!video || !first) {
       setSourceTime(null);
       return;
@@ -1549,6 +1757,7 @@ export function ReelEditor({
         syncAudioToVideo(first.source_start_seconds, true);
       }
       setSourceTime(first.source_start_seconds);
+      prefetchStandby();
     };
     if (video.readyState >= HTMLMediaElement.HAVE_METADATA) {
       showFirstFrame();
@@ -1595,6 +1804,9 @@ export function ReelEditor({
       if (overlayPersistTimerRef.current != null) {
         window.clearTimeout(overlayPersistTimerRef.current);
       }
+      if (cutTimerRef.current != null) {
+        window.clearTimeout(cutTimerRef.current);
+      }
     },
     [],
   );
@@ -1615,6 +1827,17 @@ export function ReelEditor({
 
   const selectedSegment =
     orderedSegments.find((item) => item.id === editingSegmentId) ?? orderedSegments[0] ?? null;
+  const selectedClipIndex = selectedSegment
+    ? orderedSegments.findIndex((item) => item.id === selectedSegment.id)
+    : -1;
+  const selectedClipPlacement =
+    selectedClipIndex >= 0 ? outputClock.placements[selectedClipIndex] : undefined;
+  const selectedClipCaptionBaseline = selectedSegment
+    ? fragmentCaptionBaseline(selectedSegment, timedTranscript)
+    : '';
+  const selectedClipCaptionDraft = selectedSegment
+    ? (transcriptDrafts[selectedSegment.id] ?? selectedClipCaptionBaseline)
+    : '';
 
   const captionLabels = useMemo(() => {
     const labels: Record<string, string> = {};
@@ -1628,14 +1851,144 @@ export function ReelEditor({
   function selectTimelineSegment(segmentId: string, track: TimelineTrackKind) {
     setEditingSegmentId(segmentId);
     setSelectedOverlayId(null);
+    setSelectedGapKey(null);
     if (track === 'captions') setActiveTool('subtitles');
     else if (track === 'video') setActiveTool('cuts');
   }
 
   function selectTimelineOverlay(overlayId: string) {
     setSelectedOverlayId(overlayId);
+    setSelectedGapKey(null);
     setActiveTool('cuts');
   }
+
+  const selectedGap = selectedGapKey
+    ? buildSourceGaps(orderedSegments).find(
+        (gap) => `${gap.beforeSegmentId}|${gap.afterSegmentId}` === selectedGapKey,
+      ) ?? null
+    : null;
+
+  function markInPoint() {
+    if (!selectedSegment || sourceTime == null) {
+      if (showAddFragment && sourceTime != null) setAddFragmentStart(round3(sourceTime));
+      return;
+    }
+    handleTrimSegment(selectedSegment.id, { source_start_seconds: round3(sourceTime) });
+  }
+
+  function markOutPoint() {
+    if (!selectedSegment || sourceTime == null) {
+      if (showAddFragment && sourceTime != null) setAddFragmentEnd(round3(sourceTime));
+      return;
+    }
+    handleTrimSegment(selectedSegment.id, { source_end_seconds: round3(sourceTime) });
+  }
+
+  function nudgePreview(delta: number) {
+    seekPreview(Math.max(0, previewOutputTime + delta));
+  }
+
+  function seekFromSource(sourceSeconds: number) {
+    const mapped = outputTimeAtSource(outputClock, sourceSeconds);
+    if (mapped != null) {
+      setSelectedGapKey(null);
+      seekPreview(mapped);
+      return;
+    }
+    const gap = buildSourceGaps(orderedSegments).find((item) => {
+      const previous = orderedSegments.find((seg) => seg.id === item.beforeSegmentId);
+      const next = orderedSegments.find((seg) => seg.id === item.afterSegmentId);
+      if (!previous || !next) return false;
+      return (
+        sourceSeconds >= previous.source_end_seconds &&
+        sourceSeconds <= next.source_start_seconds
+      );
+    });
+    if (gap) {
+      setSelectedGapKey(`${gap.beforeSegmentId}|${gap.afterSegmentId}`);
+      setSelectedOverlayId(null);
+      setActiveTool('cuts');
+    }
+  }
+
+  function togglePlayFromTransport() {
+    if (previewMode === 'assembled') {
+      const video = assembledVideoRef.current;
+      if (!video) return;
+      if (previewing) {
+        video.pause();
+        previewingRef.current = false;
+        setPreviewing(false);
+      } else {
+        previewingRef.current = true;
+        setPreviewing(true);
+        void video.play().catch((err: unknown) => {
+          previewingRef.current = false;
+          setPreviewing(false);
+          setError(
+            err instanceof Error ? err.message : 'El navegador bloqueó la reproducción',
+          );
+        });
+      }
+      return;
+    }
+    if (previewing) stopPreview();
+    else startPreview();
+  }
+
+  async function restoreOmittedGap(side: 'before' | 'after') {
+    if (!activeReel || !selectedGap) return;
+    const targetId = side === 'before' ? selectedGap.beforeSegmentId : selectedGap.afterSegmentId;
+    const target = orderedSegments.find((item) => item.id === targetId);
+    const neighbor =
+      side === 'before'
+        ? orderedSegments.find((item) => item.id === selectedGap.afterSegmentId)
+        : orderedSegments.find((item) => item.id === selectedGap.beforeSegmentId);
+    if (!target || !neighbor) return;
+    const patch =
+      side === 'before'
+        ? { source_end_seconds: neighbor.source_start_seconds }
+        : { source_start_seconds: neighbor.source_end_seconds };
+    handleTrimSegment(target.id, patch);
+    setSelectedGapKey(null);
+  }
+
+  useEffect(() => {
+    if (!activeReel) return;
+    function onKey(event: KeyboardEvent) {
+      const target = event.target as HTMLElement | null;
+      if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) {
+        return;
+      }
+      const key = event.key.toLowerCase();
+      if (event.code === 'Space' || key === 'k') {
+        event.preventDefault();
+        togglePlayFromTransport();
+        return;
+      }
+      if (key === 'j') {
+        event.preventDefault();
+        nudgePreview(event.shiftKey ? -5 : -1);
+        return;
+      }
+      if (key === 'l') {
+        event.preventDefault();
+        nudgePreview(event.shiftKey ? 5 : 1);
+        return;
+      }
+      if (key === 'i') {
+        event.preventDefault();
+        markInPoint();
+        return;
+      }
+      if (key === 'o') {
+        event.preventDefault();
+        markOutPoint();
+      }
+    }
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  });
 
   const nleActive = Boolean(activeReel);
 
@@ -1807,12 +2160,15 @@ export function ReelEditor({
             </div>
             <nav className="reel-nle__tools" aria-label="Herramientas del editor">
               <div className="reel-nle__tools-track" role="tablist">
-                {REEL_TOOLS.map((tool) => (
+                {REEL_TOOLS.map((tool) => {
+                  const Icon = tool.icon;
+                  return (
                   <button
                     key={tool.id}
                     id={`reel-tool-tab-${tool.id}`}
                     type="button"
                     role="tab"
+                    title={tool.description}
                     aria-selected={activeTool === tool.id}
                     aria-controls={`reel-tool-panel-${tool.id}`}
                     className={`reel-nle__tool${
@@ -1820,248 +2176,92 @@ export function ReelEditor({
                     }`}
                     onClick={() => {
                       setActiveTool(tool.id);
-                      window.requestAnimationFrame(pinWorkspaceNav);
                     }}
                   >
+                    <Icon size={14} strokeWidth={2} aria-hidden />
                     {tool.label}
                   </button>
-                ))}
+                  );
+                })}
               </div>
             </nav>
             {error && <p className="error editor-sticky-notice">{error}</p>}
           </div>
 
           <div className={`reel-nle__main reel-nle__main--${activeTool}`}>
-            <div className="reel-nle__workspace">
+            <div
+              className={`reel-nle__workspace${binCollapsed ? ' reel-nle__workspace--bin-collapsed' : ''}${
+                inspectorCollapsed ? ' reel-nle__workspace--inspector-collapsed' : ''
+              }`}
+              style={{
+                ['--nle-bin' as string]: binCollapsed ? 'auto' : `${layout.binPx}px`,
+                ['--nle-inspector' as string]: inspectorCollapsed
+                  ? '2.15rem'
+                  : `${layout.inspectorPx}px`,
+              }}
+            >
               <MediaBinPanel
                 projectId={projectId}
                 assets={assets}
                 onAssetsChange={setAssets}
                 onAddTextAtPlayhead={() => void handleAddTextOverlay(previewOutputTime)}
+                collapsed={binCollapsed}
+                onCollapsedChange={setBinCollapsed}
+              />
+              <NleSplitter
+                label="Ancho del baúl"
+                onDrag={(delta) => patchLayout({ binPx: layout.binPx + delta })}
               />
             <div className="reel-nle__stage">
               {hasVideo && orderedSegments.length > 0 ? (
-                <div className="reel-nle__preview">
-                  <div
-                    className={`reel-player reel-player--${
-                      activeReel.aspect_ratio === '9:16'
-                        ? 'portrait'
-                        : activeReel.aspect_ratio === '1:1'
-                          ? 'square'
-                          : 'landscape'
-                    }`}
-                  >
-                    <div className="reel-player__stage">
-                      <video
-                        ref={videoRef}
-                        className="reel-player__video"
-                        controls={false}
-                        disablePictureInPicture
-                        playsInline
-                        preload="auto"
-                        src={projectVideoUrl(projectId, mediaRevision)}
-                        hidden={previewMode === 'assembled'}
-                      >
-                        Tu navegador no soporta video HTML5.
-                      </video>
-                      {assembledPreviewSrc && (
-                        <video
-                          ref={assembledVideoRef}
-                          className="reel-player__video"
-                          controls={false}
-                          disablePictureInPicture
-                          playsInline
-                          preload="auto"
-                          src={assembledPreviewSrc}
-                          hidden={previewMode !== 'assembled'}
-                          onTimeUpdate={(event) => {
-                            if (previewMode !== 'assembled' || scrubbingRef.current) return;
-                            setPreviewOutputTime((event.target as HTMLVideoElement).currentTime);
-                          }}
-                        >
-                          Tu navegador no soporta video HTML5.
-                        </video>
-                      )}
-                      {previewMode === 'logical' && (
-                        <OverlayPreviewLayer
-                          overlays={overlays}
-                          outputTime={previewOutputTime}
-                        />
-                      )}
-                      <div id="reel-subtitle-overlay" className="reel-player__subtitle-slot" />
-                    </div>
-                  </div>
-                  <audio
-                    ref={audioRef}
-                    preload="auto"
-                    src={projectVideoUrl(projectId, mediaRevision)}
-                    aria-hidden="true"
-                  />
-                  {musicPreviewActive() && backgroundMusic?.music_filename && (
-                    <audio
-                      ref={musicRef}
-                      preload="auto"
-                      src={backgroundMusicAudioUrl(projectId, backgroundMusic.music_filename)}
-                      aria-hidden="true"
+                <div
+                  className={`reel-nle__monitors${
+                    layout.dualMonitors ? ' reel-nle__monitors--dual' : ''
+                  }`}
+                >
+                  {layout.dualMonitors && (
+                    <SourceMonitor
+                      projectId={projectId}
+                      mediaRevision={mediaRevision}
+                      sourceTime={sourceTime}
+                      sourceDuration={videoDuration}
+                      previewing={previewing}
+                      selectedSegment={selectedSegment}
+                      segments={orderedSegments}
+                      onSeekSource={seekFromSource}
                     />
                   )}
-                  <div className="reel-nle__transport">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        if (previewMode === 'assembled') {
-                          const video = assembledVideoRef.current;
-                          if (!video) return;
-                          if (previewing) {
-                            video.pause();
-                            previewingRef.current = false;
-                            setPreviewing(false);
-                          } else {
-                            previewingRef.current = true;
-                            setPreviewing(true);
-                            void video.play().catch((err: unknown) => {
-                              previewingRef.current = false;
-                              setPreviewing(false);
-                              setError(
-                                err instanceof Error
-                                  ? err.message
-                                  : 'El navegador bloqueó la reproducción',
-                              );
-                            });
-                          }
-                          return;
-                        }
-                        if (previewing) stopPreview();
-                        else startPreview();
-                      }}
-                    >
-                      {previewing ? 'Pausar' : 'Reproducir'}
-                    </button>
-                    <input
-                      type="range"
-                      className="reel-nle__scrub"
-                      min={0}
-                      max={Math.max(
-                        previewMode === 'assembled'
-                          ? outputClock.totalDuration
-                          : activeReel.content_duration_seconds,
-                        0.01,
-                      )}
-                      step={0.01}
-                      value={Math.min(
-                        previewOutputTime,
-                        previewMode === 'assembled'
-                          ? outputClock.totalDuration
-                          : activeReel.content_duration_seconds,
-                      )}
-                      aria-label="Posición dentro del Reel"
-                      onChange={(event) => seekPreview(Number(event.target.value))}
-                      onPointerDown={beginPreviewScrub}
-                      onPointerUp={endPreviewScrub}
-                      onPointerCancel={endPreviewScrub}
-                      onBlur={endPreviewScrub}
-                    />
-                    <span className="reel-nle__time">
-                      {formatDuration(previewOutputTime)} /{' '}
-                      {formatDuration(
-                        previewMode === 'assembled'
-                          ? outputClock.totalDuration
-                          : activeReel.content_duration_seconds,
-                      )}
-                    </span>
-                    <div className="reel-nle__preview-mode" role="group" aria-label="Modo de vista previa">
-                      <button
-                        type="button"
-                        className={`button button--secondary${
-                          previewMode === 'logical' ? ' button--pressed' : ''
-                        }`}
-                        aria-pressed={previewMode === 'logical'}
-                        disabled={assembledBusy}
-                        onClick={() => void switchPreviewMode('logical')}
-                      >
-                        Vista lógica
-                      </button>
-                      <button
-                        type="button"
-                        className={`button button--secondary${
-                          previewMode === 'assembled' ? ' button--pressed' : ''
-                        }`}
-                        aria-pressed={previewMode === 'assembled'}
-                        disabled={assembledBusy}
-                        onClick={() => void switchPreviewMode('assembled')}
-                      >
-                        {assembledBusy ? 'Ensamblando…' : 'Ensamblado'}
-                      </button>
-                    </div>
-                    <button
-                      type="button"
-                      className="button button--secondary"
-                      aria-pressed={previewMuted}
-                      onClick={togglePreviewAudio}
-                    >
-                      {previewMuted ? 'Audio' : 'Silenciar'}
-                    </button>
-                  </div>
-                  <div className="reel-nle__mix">
-                    <label className="reel-nle__mix-slider">
-                      <span>Voz</span>
-                      <input
-                        type="range"
-                        min={0}
-                        max={1}
-                        step={0.01}
-                        value={previewMuted ? 0 : previewVolume}
-                        aria-label="Volumen de la voz"
-                        onChange={(event) => changePreviewVolume(Number(event.target.value))}
-                      />
-                      <em>{Math.round((previewMuted ? 0 : previewVolume) * 100)}%</em>
-                    </label>
-                    <label
-                      className={`reel-nle__mix-slider${
-                        backgroundMusic?.music_filename && backgroundMusic.preset !== 'none'
-                          ? ''
-                          : ' reel-nle__mix-slider--disabled'
-                      }`}
-                    >
-                      <span>Música</span>
-                      <input
-                        type="range"
-                        min={0}
-                        max={1}
-                        step={0.01}
-                        value={
-                          musicVolumeDraft ??
-                          backgroundMusic?.volume ??
-                          0
-                        }
-                        disabled={
-                          !backgroundMusic?.music_filename ||
-                          backgroundMusic.preset === 'none' ||
-                          !backgroundMusic.enabled
-                        }
-                        aria-label="Volumen de la música"
-                        onChange={(event) => changeMusicVolume(Number(event.target.value))}
-                        onPointerUp={(event) => {
-                          if (musicVolumeSaveTimerRef.current != null) {
-                            window.clearTimeout(musicVolumeSaveTimerRef.current);
-                            musicVolumeSaveTimerRef.current = null;
-                          }
-                          void savePreviewMusicVolume(
-                            Number((event.target as HTMLInputElement).value),
-                          );
-                        }}
-                      />
-                      <em>
-                        {backgroundMusic?.music_filename &&
-                        backgroundMusic.preset !== 'none' &&
-                        backgroundMusic.enabled
-                          ? `${Math.round((musicVolumeDraft ?? backgroundMusic.volume) * 100)}%${
-                              musicVolumeSaving ? '…' : ''
-                            }`
-                          : '—'}
-                      </em>
-                    </label>
-                  </div>
+                <PreviewMonitor
+                  projectId={projectId}
+                  mediaRevision={mediaRevision}
+                  aspectRatio={activeReel.aspect_ratio}
+                  videoRef={videoARef}
+                  standbyVideoRef={videoBRef}
+                  assembledVideoRef={assembledVideoRef}
+                  activeProgramLane={programLane}
+                  audioRef={audioRef}
+                  musicRef={musicRef}
+                  assembledSrc={assembledPreviewSrc}
+                  previewMode={previewMode}
+                  overlays={overlays}
+                  outputTime={previewOutputTime}
+                  previewing={previewing}
+                  musicFilename={backgroundMusic?.music_filename ?? null}
+                  musicActive={musicPreviewActive()}
+                  selectedOverlayId={selectedOverlayId}
+                  framingMode={activeReel.framing_mode}
+                  cropX={selectedSegment?.manual_crop_x}
+                  cropY={selectedSegment?.manual_crop_y}
+                  onSelectOverlay={selectTimelineOverlay}
+                  onMoveOverlay={(overlayId, x, y) => {
+                    const overlay = overlays.find((item) => item.id === overlayId);
+                    if (overlay) void handleOverlayField(overlay, { x, y });
+                  }}
+                  onAssembledTime={(seconds) => {
+                    if (previewMode !== 'assembled' || scrubbingRef.current) return;
+                    setPreviewOutputTime(seconds);
+                  }}
+                />
                 </div>
               ) : (
                 <div className="reel-nle__stage-empty">
@@ -2072,9 +2272,64 @@ export function ReelEditor({
                   </p>
                 </div>
               )}
+              {hasVideo && orderedSegments.length > 0 && (
+                <PreviewTransport
+                  outputTime={previewOutputTime}
+                  totalDuration={
+                    previewMode === 'assembled'
+                      ? outputClock.totalDuration
+                      : activeReel.content_duration_seconds
+                  }
+                  previewing={previewing}
+                  previewMuted={previewMuted}
+                  assembledBusy={assembledBusy}
+                  previewMode={previewMode}
+                  voiceVolume={previewVolume}
+                  musicVolume={musicVolumeDraft ?? backgroundMusic?.volume ?? 0}
+                  musicVolumeSaving={musicVolumeSaving}
+                  musicSliderDisabled={
+                    !backgroundMusic?.music_filename ||
+                    backgroundMusic.preset === 'none' ||
+                    !backgroundMusic.enabled
+                  }
+                  dualMonitors={layout.dualMonitors}
+                  onTogglePlay={togglePlayFromTransport}
+                  onSeek={seekPreview}
+                  onScrubStart={beginPreviewScrub}
+                  onScrubEnd={endPreviewScrub}
+                  onToggleMute={togglePreviewAudio}
+                  onVoiceVolume={changePreviewVolume}
+                  onMusicVolume={changeMusicVolume}
+                  onMusicVolumeCommit={(value) => {
+                    if (musicVolumeSaveTimerRef.current != null) {
+                      window.clearTimeout(musicVolumeSaveTimerRef.current);
+                      musicVolumeSaveTimerRef.current = null;
+                    }
+                    void savePreviewMusicVolume(value);
+                  }}
+                  onPreviewMode={(mode) => void switchPreviewMode(mode)}
+                  onDualMonitors={(enabled) => patchLayout({ dualMonitors: enabled })}
+                />
+              )}
             </div>
 
-            <aside className={`reel-nle__inspector reel-nle__inspector--${activeTool}`}>
+            <NleSplitter
+              label="Ancho del inspector"
+              onDrag={(delta) => patchLayout({ inspectorPx: layout.inspectorPx - delta })}
+            />
+            <aside className={`reel-nle__inspector reel-nle__inspector--${activeTool}${
+              inspectorCollapsed ? ' reel-nle__inspector--collapsed' : ''
+            }`}>
+              <button
+                type="button"
+                className="reel-nle__inspector-toggle"
+                aria-expanded={!inspectorCollapsed}
+                onClick={() => setInspectorCollapsed((current) => !current)}
+              >
+                {inspectorCollapsed ? '▸' : '▾'} Inspector
+              </button>
+              {!inspectorCollapsed && (
+              <>
               <div
                 id="reel-tool-panel-cuts"
                 role="tabpanel"
@@ -2100,427 +2355,87 @@ export function ReelEditor({
                   </div>
 
                   {showAddFragment && (
-                    <div className="reel-add-fragment">
-                      <p className="reel-add-fragment__title">Nuevo fragmento</p>
-                      <p className="muted reel-add-fragment__hint">
-                        Duración:{' '}
-                        {formatDuration(Math.max(0, addFragmentEnd - addFragmentStart))}
-                        {videoDuration != null ? ` · Video ${formatDuration(videoDuration)}` : ''}
-                      </p>
-                      <div className="reel-add-fragment__row">
-                        <label className="field field--inline">
-                          <span>Inicio (s)</span>
-                          <input
-                            type="number"
-                            min={0}
-                            step="0.01"
-                            value={addFragmentStart}
-                            disabled={busy}
-                            onChange={(event) => setAddFragmentStart(Number(event.target.value))}
-                          />
-                        </label>
-                        <button
-                          type="button"
-                          className="button button--inline"
-                          disabled={busy || sourceTime == null}
-                          onClick={() =>
-                            sourceTime != null && setAddFragmentStart(round3(sourceTime))
-                          }
-                        >
-                          Tiempo actual
-                        </button>
-                      </div>
-                      <div className="reel-add-fragment__row">
-                        <label className="field field--inline">
-                          <span>Fin (s)</span>
-                          <input
-                            type="number"
-                            min={0}
-                            step="0.01"
-                            value={addFragmentEnd}
-                            disabled={busy}
-                            onChange={(event) => setAddFragmentEnd(Number(event.target.value))}
-                          />
-                        </label>
-                        <button
-                          type="button"
-                          className="button button--inline"
-                          disabled={busy || sourceTime == null}
-                          onClick={() => sourceTime != null && setAddFragmentEnd(round3(sourceTime))}
-                        >
-                          Tiempo actual
-                        </button>
-                      </div>
-                      <div className="reel-add-fragment__actions">
-                        <button
-                          type="button"
-                          className="button"
-                          disabled={busy}
-                          onClick={() => void handleAddManualFragment()}
-                        >
-                          Añadir
-                        </button>
-                        <button
-                          type="button"
-                          className="button button--secondary"
-                          disabled={busy}
-                          onClick={() => setShowAddFragment(false)}
-                        >
-                          Cancelar
-                        </button>
-                      </div>
-                    </div>
+                    <AddFragmentForm
+                      start={addFragmentStart}
+                      end={addFragmentEnd}
+                      sourceTime={sourceTime}
+                      videoDuration={videoDuration}
+                      busy={busy}
+                      onStartChange={setAddFragmentStart}
+                      onEndChange={setAddFragmentEnd}
+                      onUseCurrentStart={() =>
+                        sourceTime != null && setAddFragmentStart(round3(sourceTime))
+                      }
+                      onUseCurrentEnd={() =>
+                        sourceTime != null && setAddFragmentEnd(round3(sourceTime))
+                      }
+                      onAdd={() => void handleAddManualFragment()}
+                      onCancel={() => setShowAddFragment(false)}
+                    />
                   )}
 
-                  <div className="reel-nle__filmstrip" aria-label="Fragmentos del Reel">
-                    {orderedSegments.map((segment, index) => {
-                      const selected = selectedSegment?.id === segment.id;
-                      return (
-                        <button
-                          key={segment.id}
-                          type="button"
-                          className={`reel-nle__filmstrip-item${
-                            selected ? ' reel-nle__filmstrip-item--selected' : ''
-                          }`}
-                          onClick={() => {
-                            setEditingSegmentId(segment.id);
-                            setSelectedOverlayId(null);
-                            const placement = outputClock.placements[index];
-                            seekPreview(placement?.outputStart ?? 0);
-                          }}
-                        >
-                          <strong>{index + 1}</strong>
-                          <span>{formatDuration(segment.duration_seconds)}</span>
-                          <small>
-                            {formatTimecode(segment.source_start_seconds)}–
-                            {formatTimecode(segment.source_end_seconds)}
-                          </small>
-                        </button>
-                      );
-                    })}
-                    {orderedSegments.length === 0 && (
-                      <p className="muted">Aún no hay fragmentos. Añade uno para editarlo.</p>
-                    )}
-                  </div>
+                  <CutsFilmstrip
+                    segments={orderedSegments}
+                    selectedId={selectedSegment?.id ?? null}
+                    onSelect={(segmentId, index) => {
+                      setEditingSegmentId(segmentId);
+                      setSelectedOverlayId(null);
+                      setSelectedGapKey(null);
+                      const placement = outputClock.placements[index];
+                      seekPreview(placement?.outputStart ?? 0);
+                    }}
+                  />
 
-                  {selectedSegment &&
-                    (() => {
-                      const segment = selectedSegment;
-                      const index = orderedSegments.findIndex((item) => item.id === segment.id);
-                      const next = orderedSegments[index + 1];
-                      const gap = next ? gapSeconds(segment, next) : null;
-                      const baseline = fragmentCaptionBaseline(segment, timedTranscript);
-                      const draft = transcriptDrafts[segment.id] ?? baseline;
-                      const dirty = draft !== baseline;
-                      const saving = transcriptSavingId === segment.id;
-                      const hasCustom = Boolean(segment.transcript_text?.trim());
-                      return (
-                        <div className="reel-nle__selected-clip reel-nle__selected-clip--roomy">
-                          <div className="reel-nle__selected-clip-header">
-                            <div>
-                              <h4>Fragmento {index + 1}</h4>
-                              <p className="muted">
-                                {formatTimecode(segment.source_start_seconds)} –{' '}
-                                {formatTimecode(segment.source_end_seconds)}
-                                {' · '}
-                                {formatDuration(segment.duration_seconds)}
-                                {gap != null && Math.abs(gap) > 0.05
-                                  ? gap > 0
-                                    ? ` · salto ${formatDuration(gap)}`
-                                    : ` · solapa ${formatDuration(Math.abs(gap))}`
-                                  : ''}
-                              </p>
-                            </div>
-                            <div className="button-stack">
-                              <button
-                                type="button"
-                                className="button button--inline"
-                                disabled={busy || index === 0}
-                                onClick={() => void moveSegment(segment.id, -1)}
-                              >
-                                ↑
-                              </button>
-                              <button
-                                type="button"
-                                className="button button--inline"
-                                disabled={busy || index === orderedSegments.length - 1}
-                                onClick={() => void moveSegment(segment.id, 1)}
-                              >
-                                ↓
-                              </button>
-                              <button
-                                type="button"
-                                className="button button--inline button--danger"
-                                onClick={() => void handleRemoveSegment(segment.id)}
-                                disabled={busy}
-                              >
-                                Quitar
-                              </button>
-                            </div>
-                          </div>
+                  {selectedGap && (
+                    <OmittedGapInspector
+                      gap={selectedGap}
+                      onRestoreBefore={() => void restoreOmittedGap('before')}
+                      onRestoreAfter={() => void restoreOmittedGap('after')}
+                    />
+                  )}
 
-                          <div className="reel-transcript-form reel-transcript-form--editor">
-                            <p className="reel-transcript-form__label">Subtítulo de este fragmento</p>
-                            <textarea
-                              className="reel-transcript-form__input"
-                              rows={8}
-                              value={draft}
-                              disabled={saving || busy}
-                              placeholder="Texto que debe verse en este fragmento…"
-                              onChange={(event) =>
-                                setTranscriptDrafts((current) => ({
-                                  ...current,
-                                  [segment.id]: event.target.value,
-                                }))
-                              }
-                              onBlur={(event) => {
-                                const value = event.target.value;
-                                if (value.trim() && value !== baseline) {
-                                  void saveFragmentCaption(segment, value);
-                                }
-                              }}
-                            />
-                            <div className="reel-transcript-form__actions">
-                              <button
-                                type="button"
-                                className="button"
-                                disabled={saving || busy || !dirty || !draft.trim()}
-                                onClick={() => void saveFragmentCaption(segment)}
-                              >
-                                {saving ? 'Guardando…' : dirty ? 'Guardar subtítulo' : 'Guardado'}
-                              </button>
-                              {hasCustom && (
-                                <button
-                                  type="button"
-                                  className="button button--secondary"
-                                  disabled={saving || busy}
-                                  onClick={() => void clearFragmentCaption(segment)}
-                                >
-                                  Texto del video
-                                </button>
-                              )}
-                              <button
-                                type="button"
-                                className="button button--secondary"
-                                onClick={() => setActiveTool('subtitles')}
-                              >
-                                Estilo de subtítulos
-                              </button>
-                            </div>
-                          </div>
-
-                          <div className="reel-segment-edit reel-segment-edit--roomy">
-                            <div className="reel-adjust">
-                              <span>Inicio</span>
-                              <input
-                                type="number"
-                                step="0.01"
-                                defaultValue={segment.source_start_seconds}
-                                key={`start-${segment.id}-${segment.source_start_seconds}`}
-                                onBlur={(e) => {
-                                  const nextVal = Number(e.target.value);
-                                  if (
-                                    Number.isFinite(nextVal) &&
-                                    nextVal !== segment.source_start_seconds
-                                  ) {
-                                    void handleSegmentField(segment, {
-                                      source_start_seconds: nextVal,
-                                    });
-                                  }
-                                }}
-                              />
-                              {ADJUST_STEPS.map((step) => (
-                                <button
-                                  key={`start-${step}`}
-                                  type="button"
-                                  className="button button--inline"
-                                  disabled={busy}
-                                  onClick={() => void adjustEdge(segment, 'start', step)}
-                                >
-                                  {step > 0 ? `+${step}` : step}s
-                                </button>
-                              ))}
-                            </div>
-                            <div className="reel-adjust">
-                              <span>Fin</span>
-                              <input
-                                type="number"
-                                step="0.01"
-                                defaultValue={segment.source_end_seconds}
-                                key={`end-${segment.id}-${segment.source_end_seconds}`}
-                                onBlur={(e) => {
-                                  const nextVal = Number(e.target.value);
-                                  if (
-                                    Number.isFinite(nextVal) &&
-                                    nextVal !== segment.source_end_seconds
-                                  ) {
-                                    void handleSegmentField(segment, {
-                                      source_end_seconds: nextVal,
-                                    });
-                                  }
-                                }}
-                              />
-                              {ADJUST_STEPS.map((step) => (
-                                <button
-                                  key={`end-${step}`}
-                                  type="button"
-                                  className="button button--inline"
-                                  disabled={busy}
-                                  onClick={() => void adjustEdge(segment, 'end', step)}
-                                >
-                                  {step > 0 ? `+${step}` : step}s
-                                </button>
-                              ))}
-                            </div>
-                            <label className="field field--inline">
-                              <span>Transición al siguiente</span>
-                              <select
-                                value={segment.transition_type}
-                                disabled={busy || !next}
-                                onChange={(e) =>
-                                  void handleSegmentField(segment, {
-                                    transition_type: e.target.value as TransitionType,
-                                  })
-                                }
-                              >
-                                {TRANSITION_OPTIONS.map((option) => (
-                                  <option key={option.value} value={option.value}>
-                                    {option.label}
-                                  </option>
-                                ))}
-                              </select>
-                            </label>
-                            {segment.transition_type !== 'hard_cut' && (
-                              <label className="field field--inline">
-                                <span>Duración (ms)</span>
-                                <input
-                                  type="number"
-                                  min={1}
-                                  max={5000}
-                                  value={segment.transition_duration_ms}
-                                  disabled={busy || !next}
-                                  onChange={(e) =>
-                                    void handleSegmentField(segment, {
-                                      transition_duration_ms: Number(e.target.value),
-                                    })
-                                  }
-                                />
-                              </label>
-                            )}
-                          </div>
-
-                          <CutSuggestionMarkers
-                            suggestions={cutReport?.suggestions ?? []}
-                            segmentUuid={segment.id}
-                            busy={cutBusy || busy}
-                            onAccept={(suggestion) => void handleAcceptCut(suggestion)}
-                            onReject={(suggestion) => void handleRejectCut(suggestion)}
-                          />
-                        </div>
-                      );
-                    })()}
+                  {selectedSegment && selectedClipIndex >= 0 && (
+                    <ClipInspector
+                      segment={selectedSegment}
+                      index={selectedClipIndex}
+                      total={orderedSegments.length}
+                      nextSegment={orderedSegments[selectedClipIndex + 1] ?? null}
+                      outputStart={selectedClipPlacement?.outputStart ?? 0}
+                      outputDuration={
+                        selectedClipPlacement?.contentDuration ?? selectedSegment.duration_seconds
+                      }
+                      captionDraft={selectedClipCaptionDraft}
+                      captionBaseline={selectedClipCaptionBaseline}
+                      captionSaving={transcriptSavingId === selectedSegment.id}
+                      busy={busy}
+                      cutSuggestions={cutReport?.suggestions ?? []}
+                      cutBusy={cutBusy}
+                      onMove={(direction) => void moveSegment(selectedSegment.id, direction)}
+                      onRemove={() => void handleRemoveSegment(selectedSegment.id)}
+                      onCaptionChange={(value) =>
+                        setTranscriptDrafts((current) => ({
+                          ...current,
+                          [selectedSegment.id]: value,
+                        }))
+                      }
+                      onCaptionCommit={(value) => void saveFragmentCaption(selectedSegment, value)}
+                      onSaveCaption={() => void saveFragmentCaption(selectedSegment)}
+                      onClearCaption={() => void clearFragmentCaption(selectedSegment)}
+                      onOpenSubtitleStyle={() => setActiveTool('subtitles')}
+                      onAdjustEdge={(edge, delta) => void adjustEdge(selectedSegment, edge, delta)}
+                      onField={(patch) => void handleSegmentField(selectedSegment, patch)}
+                      onAcceptCut={(suggestion) => void handleAcceptCut(suggestion)}
+                      onRejectCut={(suggestion) => void handleRejectCut(suggestion)}
+                    />
+                  )}
 
                   {selectedOverlay && (
-                    <div className="reel-nle__selected-clip reel-nle__overlay-inspector">
-                      <div className="reel-nle__selected-clip-header">
-                        <div>
-                          <h4>
-                            Overlay {selectedOverlay.kind === 'text' ? 'texto' : 'imagen'}
-                          </h4>
-                          <p className="muted">
-                            {formatDuration(selectedOverlay.start_ms / 1000)} ·{' '}
-                            {formatDuration(selectedOverlay.duration_ms / 1000)}
-                          </p>
-                        </div>
-                        <button
-                          type="button"
-                          className="button button--inline button--danger"
-                          disabled={busy}
-                          onClick={() => void handleDeleteOverlay(selectedOverlay.id)}
-                        >
-                          Eliminar
-                        </button>
-                      </div>
-                      <div className="reel-segment-edit reel-segment-edit--roomy">
-                        <label className="field field--inline">
-                          <span>Inicio (ms)</span>
-                          <input
-                            type="number"
-                            min={0}
-                            step={50}
-                            value={selectedOverlay.start_ms}
-                            disabled={busy}
-                            onChange={(event) =>
-                              void handleOverlayField(selectedOverlay, {
-                                start_ms: Number(event.target.value),
-                              })
-                            }
-                          />
-                        </label>
-                        <label className="field field--inline">
-                          <span>Duración (ms)</span>
-                          <input
-                            type="number"
-                            min={100}
-                            step={50}
-                            value={selectedOverlay.duration_ms}
-                            disabled={busy}
-                            onChange={(event) =>
-                              void handleOverlayField(selectedOverlay, {
-                                duration_ms: Number(event.target.value),
-                              })
-                            }
-                          />
-                        </label>
-                        {selectedOverlay.kind === 'text' && (
-                          <label className="field">
-                            <span>Texto</span>
-                            <textarea
-                              rows={3}
-                              value={selectedOverlay.text ?? ''}
-                              disabled={busy}
-                              onChange={(event) =>
-                                void handleOverlayField(selectedOverlay, {
-                                  text: event.target.value,
-                                })
-                              }
-                            />
-                          </label>
-                        )}
-                        <label className="field field--inline">
-                          <span>Escala</span>
-                          <input
-                            type="number"
-                            min={0.1}
-                            max={4}
-                            step={0.05}
-                            value={selectedOverlay.scale}
-                            disabled={busy}
-                            onChange={(event) =>
-                              void handleOverlayField(selectedOverlay, {
-                                scale: Number(event.target.value),
-                              })
-                            }
-                          />
-                        </label>
-                        <label className="field field--inline">
-                          <span>Opacidad</span>
-                          <input
-                            type="number"
-                            min={0}
-                            max={1}
-                            step={0.05}
-                            value={selectedOverlay.opacity}
-                            disabled={busy}
-                            onChange={(event) =>
-                              void handleOverlayField(selectedOverlay, {
-                                opacity: Number(event.target.value),
-                              })
-                            }
-                          />
-                        </label>
-                      </div>
-                    </div>
+                    <OverlayInspector
+                      overlay={selectedOverlay}
+                      busy={busy}
+                      onChange={(patch) => void handleOverlayField(selectedOverlay, patch)}
+                      onDelete={() => void handleDeleteOverlay(selectedOverlay.id)}
+                    />
                   )}
 
                   <details className="reel-nle__details">
@@ -2611,6 +2526,12 @@ export function ReelEditor({
                       )}
                     </div>
                   </details>
+                  <CoherencePanel
+                    projectId={projectId}
+                    reelId={activeReel.id}
+                    segments={orderedSegments}
+                    onReelChange={replaceReel}
+                  />
                 </div>
               </div>
 
@@ -2740,15 +2661,20 @@ export function ReelEditor({
                   reelAspectRatio={activeReel.aspect_ratio}
                   segments={activeReel.segments}
                   audioOffsetMs={audioOffsetMs}
-                  onReelChange={replaceReel}
-                  onBeforeStart={flushCaptionDraftsForExport}
+                  onBeforeStart={flushPendingEditsForExport}
                   onGoToCuts={() => setActiveTool('cuts')}
                 />
               </div>
+              </>
+              )}
             </aside>
             </div>
-          </div>
-
+            <NleSplitter
+              orientation="horizontal"
+              label="Alto de la línea temporal"
+              onDrag={(delta) => patchLayout({ timelinePx: layout.timelinePx - delta })}
+            />
+            <div className="reel-nle__timeline-slot" style={{ flexBasis: `${layout.timelinePx}px` }}>
           <ReelTimelineStrip
             segments={orderedSegments}
             overlays={overlays}
@@ -2756,6 +2682,7 @@ export function ReelEditor({
             outputTime={previewOutputTime}
             selectedSegmentId={selectedSegment?.id ?? null}
             selectedOverlayId={selectedOverlayId}
+            selectedGapKey={selectedGapKey}
             captionLabels={captionLabels}
             musicActive={musicPreviewActive()}
             musicLabel={
@@ -2769,14 +2696,25 @@ export function ReelEditor({
             onScrubStart={beginPreviewScrub}
             onScrubEnd={endPreviewScrub}
             onSelectSegment={selectTimelineSegment}
+            onSelectGap={(key) => {
+              setSelectedGapKey(key);
+              if (key) {
+                setSelectedOverlayId(null);
+                setActiveTool('cuts');
+              }
+            }}
             onSelectOverlay={selectTimelineOverlay}
             onSelectMusic={() => setActiveTool('audio')}
             onReorderSegments={handleReorderSegments}
             onTrimSegment={handleTrimSegment}
+            onMoveCaption={handleMoveCaption}
+            onApplyTransition={handleApplyTransition}
             onMoveOverlay={handleMoveOverlay}
             onDropAsset={(assetId, outputSeconds) => void handleDropAsset(assetId, outputSeconds)}
             onAddTextOverlay={(outputSeconds) => void handleAddTextOverlay(outputSeconds)}
           />
+            </div>
+          </div>
         </>
       )}
 

@@ -1,7 +1,7 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "Sermon Cut",
-  "version": "0.4.1",
+  "version": "0.4.9",
   "identifier": "app.sermoncut.desktop",
   "build": {
     "frontendDist": "../dist",
@@ -14,10 +14,10 @@
       {
         "label": "main",
         "title": "Sermon Cut",
-        "width": 1280,
-        "height": 840,
-        "minWidth": 960,
-        "minHeight": 640,
+        "width": 1440,
+        "height": 900,
+        "minWidth": 1100,
+        "minHeight": 720,
         "resizable": true,
         "fullscreen": false,
         "visible": false

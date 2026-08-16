@@ -150,14 +150,13 @@ export function FramingPanel({
   return (
     <div className="framing-panel">
       <div className="reel-editor__section-header">
-        <h4>Encuadre vertical</h4>
+        <h4>{compact ? 'Encuadre' : 'Encuadre vertical'}</h4>
         {status?.has_cache && <span className="badge badge--cut">Tracking en caché</span>}
       </div>
       <p className="muted">
-        Mantiene al predicador en el área vertical con movimiento suave. El video final lo
-        renderiza FFmpeg con recorte a pantalla completa; OpenCV solo analiza fotogramas dispersos.
-        Los subtítulos se dibujan directamente sobre la imagen, sin añadir franjas ni espacio
-        arriba o abajo.
+        {compact
+          ? 'El visor Programa muestra el recorte 9:16. El MP4 usa este modo.'
+          : 'Mantiene al predicador en el área vertical con movimiento suave. El video final lo renderiza FFmpeg con recorte a pantalla completa; OpenCV solo analiza fotogramas dispersos. Los subtítulos se dibujan directamente sobre la imagen, sin añadir franjas ni espacio arriba o abajo.'}
       </p>
 
       <div className="transcript-toolbar">
@@ -234,7 +233,7 @@ export function FramingPanel({
         </div>
       )}
 
-      {preview && (
+      {preview && !compact && (
         <div className={`framing-preview${compact ? ' framing-preview--compact' : ''}`}>
           <div className="framing-preview__meta muted">
             Vista previa · {preview.mode}
