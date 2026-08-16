@@ -9,7 +9,6 @@ interface SourceMonitorProps {
   mediaRevision?: string | number | null;
   sourceTime: number | null;
   sourceDuration: number | null;
-  previewing: boolean;
   selectedSegment: ReelSegment | null;
   segments: ReelSegment[];
   onSeekSource: (sourceSeconds: number) => void;
@@ -20,7 +19,6 @@ export function SourceMonitor({
   mediaRevision = null,
   sourceTime,
   sourceDuration,
-  previewing: _previewing,
   selectedSegment,
   segments,
   onSeekSource,

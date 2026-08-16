@@ -2225,7 +2225,6 @@ export function ReelEditor({
                       mediaRevision={mediaRevision}
                       sourceTime={sourceTime}
                       sourceDuration={videoDuration}
-                      previewing={previewing}
                       selectedSegment={selectedSegment}
                       segments={orderedSegments}
                       onSeekSource={seekFromSource}
