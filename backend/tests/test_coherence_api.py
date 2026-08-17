@@ -105,7 +105,8 @@ def test_validate_incoherent_reel_and_dismiss(
     assert report.status_code == 200, report.text
     body = report.json()
     assert body["severity"] in {"warning", "blocked"}
-    assert body["can_render"] is False
+    # Warnings are reviewable; only *blocked* findings disable export.
+    assert body["can_render"] is (body["severity"] != "blocked")
     assert any(i["code"] == "DANGLING_CONNECTOR" for i in body["issues"])
     assert all("code" in i and "message" in i and "segment_id" in i for i in body["issues"])
 

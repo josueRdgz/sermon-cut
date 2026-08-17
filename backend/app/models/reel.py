@@ -31,6 +31,8 @@ class TransitionType(enum.StrEnum):
     hard_cut = "hard_cut"
     short_crossfade = "short_crossfade"
     dip_to_black = "dip_to_black"
+    fade = "fade"
+    flash = "flash"
 
 
 class SubtitleStyle(enum.StrEnum):
@@ -156,6 +158,12 @@ class Reel(Base):
         back_populates="reel",
         cascade="all, delete-orphan",
         order_by="ReelSegment.order",
+    )
+    overlays: Mapped[list["ReelOverlay"]] = relationship(
+        "ReelOverlay",
+        back_populates="reel",
+        cascade="all, delete-orphan",
+        order_by="ReelOverlay.order",
     )
 
 

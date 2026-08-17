@@ -3,7 +3,14 @@ import { describe, expect, it } from 'vitest';
 import type { ReelSegment } from '../types/reel';
 import { previewTimelineIdentity, resolvePreviewSeek } from './reelPreview';
 
-function segment(id: string, order: number, sourceStart: number, sourceEnd: number): ReelSegment {
+function segment(
+  id: string,
+  order: number,
+  sourceStart: number,
+  sourceEnd: number,
+  transition: ReelSegment['transition_type'] = 'hard_cut',
+  transitionMs = 0,
+): ReelSegment {
   return {
     id,
     reel_id: 'reel-1',
@@ -11,8 +18,8 @@ function segment(id: string, order: number, sourceStart: number, sourceEnd: numb
     source_start_seconds: sourceStart,
     source_end_seconds: sourceEnd,
     transcript_text: null,
-    transition_type: 'hard_cut',
-    transition_duration_ms: 0,
+    transition_type: transition,
+    transition_duration_ms: transitionMs,
     duration_seconds: sourceEnd - sourceStart,
   };
 }
@@ -51,6 +58,26 @@ describe('resolvePreviewSeek', () => {
     });
     expect(resolvePreviewSeek([], 1)).toBeNull();
   });
+
+  it('respects crossfade overlap on the output clock', () => {
+    const xfade = [
+      segment('a', 0, 0, 5, 'short_crossfade', 500),
+      segment('b', 1, 10, 16, 'hard_cut', 0),
+    ];
+    // Total = 5 + 6 - 0.5 = 10.5; B starts at 4.5
+    expect(resolvePreviewSeek(xfade, 4.4)).toEqual({
+      outputTime: 4.4,
+      segmentIndex: 0,
+      sourceTime: 4.4,
+    });
+    expect(resolvePreviewSeek(xfade, 4.5)).toEqual({
+      outputTime: 4.5,
+      segmentIndex: 1,
+      sourceTime: 10,
+    });
+    expect(resolvePreviewSeek(xfade, 5)?.segmentIndex).toBe(1);
+    expect(resolvePreviewSeek(xfade, 5)?.sourceTime).toBeCloseTo(10.5, 5);
+  });
 });
 
 describe('previewTimelineIdentity', () => {
@@ -63,14 +90,17 @@ describe('previewTimelineIdentity', () => {
     );
   });
 
-  it('changes when the selected Reel or first fragment changes', () => {
+  it('changes when the selected Reel or timing changes', () => {
     const original = [segment('a', 0, 10, 15), segment('b', 1, 40, 47)];
-    const reordered = [original[1], original[0]];
+    const trimmed = [
+      segment('a', 0, 10, 15),
+      segment('b', 1, 40, 47, 'fade', 400),
+    ];
 
     expect(previewTimelineIdentity('reel-2', original)).not.toBe(
       previewTimelineIdentity('reel-1', original),
     );
-    expect(previewTimelineIdentity('reel-1', reordered)).not.toBe(
+    expect(previewTimelineIdentity('reel-1', trimmed)).not.toBe(
       previewTimelineIdentity('reel-1', original),
     );
   });

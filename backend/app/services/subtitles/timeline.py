@@ -11,7 +11,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 # Keep in sync with ``app.services.render.args``.
-_XFADE_TRANSITIONS: frozenset[str] = frozenset({"short_crossfade", "dip_to_black"})
+_XFADE_TRANSITIONS: frozenset[str] = frozenset(
+    {"short_crossfade", "dip_to_black", "fade", "flash"}
+)
 _MIN_XFADE_SLACK = 0.05
 
 

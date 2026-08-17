@@ -1,4 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import {
+  Clapperboard,
+  FileAudio,
+  FileText,
+  FolderOpen,
+  Mic,
+  Sparkles,
+  StretchHorizontal,
+} from 'lucide-react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 
 import {
@@ -11,50 +20,58 @@ import {
 import { AnalysisPanel } from '../components/AnalysisPanel';
 import { AudioRepairPanel } from '../components/AudioRepairPanel';
 import { ConfirmDialog } from '../components/ConfirmDialog';
+import { AppChrome } from '../components/layout/AppChrome';
 import { ReelEditor } from '../components/ReelEditor';
 import { SermonRangePanel } from '../components/SermonRangePanel';
 import { StatusRow } from '../components/StatusRow';
 import { TranscriptEditor } from '../components/TranscriptEditor';
 import { VideoHighlightsPanel } from '../components/VideoHighlightsPanel';
+import { useProjects } from '../hooks/useProjects';
 import type { Project } from '../types/project';
 import { formatDate, formatDuration, statusLabel } from '../utils/format';
-import { pinWorkspaceNav } from '../utils/workspaceScroll';
 
 const WORKSPACE_SECTIONS = [
   {
     id: 'project',
     label: 'Proyecto',
     description: 'Archivo y datos',
+    icon: FolderOpen,
   },
   {
     id: 'audio',
     label: 'Reparar audio',
     description: 'Detectar microcortes',
+    icon: FileAudio,
   },
   {
     id: 'sermon',
     label: 'Predicación',
     description: 'Inicio y final',
+    icon: Mic,
   },
   {
     id: 'transcript',
     label: 'Transcripción',
     description: 'Texto y tiempos',
+    icon: FileText,
   },
   {
     id: 'analysis',
     label: 'Análisis IA',
     description: 'Propuestas de Reels',
+    icon: Sparkles,
   },
   {
     id: 'editor',
     label: 'Editor de Reel',
     description: 'Editar y exportar',
+    icon: Clapperboard,
   },
   {
     id: 'highlights',
     label: 'Video Highlights',
     description: 'Resumen horizontal',
+    icon: StretchHorizontal,
   },
 ] as const;
 
@@ -67,9 +84,9 @@ function isWorkspaceSection(value: string | null): value is WorkspaceSection {
 export function ProjectDetailPage() {
   const { projectId } = useParams<{ projectId: string }>();
   const navigate = useNavigate();
+  const { projects } = useProjects();
   const [searchParams, setSearchParams] = useSearchParams();
-  const workspaceRef = useRef<HTMLElement>(null);
-  const workspaceNavRef = useRef<HTMLElement>(null);
+  const workspaceRef = useRef<HTMLDivElement>(null);
   const [project, setProject] = useState<Project | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -113,7 +130,6 @@ export function ProjectDetailPage() {
       const next = new URLSearchParams(searchParams);
       next.set('section', section);
       setSearchParams(next, { replace: true });
-      window.requestAnimationFrame(pinWorkspaceNav);
     },
     [searchParams, setSearchParams],
   );
@@ -136,22 +152,6 @@ export function ProjectDetailPage() {
     },
     [activateSection],
   );
-
-  useEffect(() => {
-    const workspace = workspaceRef.current;
-    const nav = workspaceNavRef.current;
-    if (!workspace || !nav) return;
-    const applyOffset = () => {
-      const styles = window.getComputedStyle(nav);
-      const margin = Number.parseFloat(styles.marginBottom) || 0;
-      workspace.style.setProperty('--workspace-nav-offset', `${nav.offsetHeight + margin}px`);
-    };
-    applyOffset();
-    if (typeof ResizeObserver === 'undefined') return;
-    const observer = new ResizeObserver(applyOffset);
-    observer.observe(nav);
-    return () => observer.disconnect();
-  }, [visibleSections.length, activeSection]);
 
   useEffect(() => {
     if (!projectId) return;
@@ -227,23 +227,50 @@ export function ProjectDetailPage() {
 
   if (loading) {
     return (
-      <main className="page">
+      <AppChrome projectCount={projects.length}>
         <p className="muted">Cargando…</p>
-      </main>
+      </AppChrome>
     );
   }
 
   if (error || !project) {
     return (
-      <main className="page">
+      <AppChrome projectCount={projects.length}>
         <p className="error">{error ?? 'Proyecto no encontrado'}</p>
         <Link to="/projects">Volver a proyectos</Link>
-      </main>
+      </AppChrome>
     );
   }
 
+  const isEditor = activeSection === 'editor';
+
   return (
-    <main ref={workspaceRef} className="page page--wide project-workspace">
+    <AppChrome
+      flush={isEditor}
+      hideFooter={isEditor}
+      projectCount={projects.length}
+      workspace={{
+        items: visibleSections.map((section) => ({
+          id: section.id,
+          label: section.label,
+          icon: section.icon,
+        })),
+        activeId: activeSection,
+        onSelect: (id: string) => {
+          if (isWorkspaceSection(id)) activateSection(id);
+        },
+      }}
+      actions={
+        <span className="workspace-top-title" title={project.title}>
+          {project.title}
+        </span>
+      }
+    >
+    <div
+      ref={workspaceRef}
+      className={`project-workspace${isEditor ? ' project-workspace--nle' : ''}`}
+    >
+      {!isEditor && (
       <header className="page__header">
         <p className="eyebrow">
           <Link to="/projects">← Proyectos</Link>
@@ -254,30 +281,7 @@ export function ProjectDetailPage() {
           {project.preacher_name ? ` · ${project.preacher_name}` : ''}
         </p>
       </header>
-
-      <nav ref={workspaceNavRef} className="workspace-nav" aria-label="Flujo del proyecto">
-        <div className="workspace-nav__track" role="tablist" aria-label="Categorías">
-          {visibleSections.map((section, index) => (
-            <button
-              key={section.id}
-              id={`workspace-tab-${section.id}`}
-              type="button"
-              role="tab"
-              aria-selected={activeSection === section.id}
-              aria-controls={`workspace-panel-${section.id}`}
-              className={`workspace-nav__tab${
-                activeSection === section.id ? ' workspace-nav__tab--active' : ''
-              }`}
-              onClick={() => activateSection(section.id)}
-            >
-              <span className="workspace-nav__number">{index + 1}</span>
-              <span>
-                <strong>{section.label}</strong>
-              </span>
-            </button>
-          ))}
-        </div>
-      </nav>
+      )}
 
       <div
         id="workspace-panel-project"
@@ -455,6 +459,7 @@ export function ProjectDetailPage() {
         role="tabpanel"
         aria-labelledby="workspace-tab-editor"
         hidden={activeSection !== 'editor'}
+        className={activeSection === 'editor' ? 'workspace-panel-editor' : undefined}
       >
         <ReelEditor
           projectId={project.id}
@@ -488,6 +493,7 @@ export function ProjectDetailPage() {
           onCancel={() => !deletingVideo && setConfirmVideoDelete(false)}
         />
       )}
-    </main>
+    </div>
+    </AppChrome>
   );
 }

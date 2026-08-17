@@ -134,6 +134,7 @@ class RenderManager:
         self._keep_temp = keep_temp
         self._cancel_events: dict[UUID, threading.Event] = {}
         self._futures: dict[UUID, Future] = {}
+        self._coherence_ack: dict[UUID, bool] = {}
         self._lock = threading.Lock()
 
     # ---- public API -------------------------------------------------------
@@ -151,6 +152,7 @@ class RenderManager:
         burn_subtitles: bool = True,
         profile_id: UUID | None = None,
         quality: str | ExportQuality = ExportQuality.standard,
+        acknowledge_coherence: bool = False,
     ) -> RenderJob:
         project = db.get(Project, project_id)
         if project is None:
@@ -187,7 +189,8 @@ class RenderManager:
 
         from app.services.coherence.service import assert_render_allowed
 
-        assert_render_allowed(db, project_id, reel_id)
+        if not acknowledge_coherence:
+            assert_render_allowed(db, project_id, reel_id)
 
         active = db.scalars(
             select(RenderJob).where(
@@ -245,6 +248,8 @@ class RenderManager:
 
         with self._lock:
             self._cancel_events[job.id] = threading.Event()
+            if acknowledge_coherence:
+                self._coherence_ack[job.id] = True
 
         future = self._executor.submit(
             self._run_job, job.id, normalize_loudness, burn_subtitles
@@ -354,6 +359,7 @@ class RenderManager:
         with self._lock:
             self._cancel_events.pop(job_id, None)
             self._futures.pop(job_id, None)
+            self._coherence_ack.pop(job_id, None)
 
     def _run_job(
         self,
@@ -384,7 +390,11 @@ class RenderManager:
             session.commit()
 
             project = session.get(Project, job.project_id)
-            reel = session.get(Reel, job.reel_id)
+            from sqlalchemy.orm import selectinload
+
+            reel = session.scalars(
+                select(Reel).where(Reel.id == job.reel_id).options(selectinload(Reel.segments))
+            ).first()
             if project is None or not project.video_filename:
                 raise ValidationAppError(
                     "The project video is no longer available.", code="video_missing"
@@ -595,6 +605,48 @@ class RenderManager:
                 else None
             )
 
+            from app.models.reel_overlay import ReelOverlayKind
+            from app.services.overlays import list_overlays_for_render
+            from app.services.overlays_render import render_title_card
+            from app.services.render.args import OverlaySpec
+
+            overlay_rows = list_overlays_for_render(session, job.reel_id)
+            overlay_specs: list[OverlaySpec] = []
+            for row_index, row in enumerate(overlay_rows):
+                path: Path | None = None
+                if row.kind == ReelOverlayKind.image and row.asset_id is not None:
+                    from app.models.project_asset import ProjectAsset
+
+                    asset = session.get(ProjectAsset, row.asset_id)
+                    if asset is not None:
+                        candidate = storage.resolve_inside_project(
+                            job.project_id, asset.storage_path
+                        )
+                        if candidate.is_file():
+                            path = candidate
+                elif row.kind == ReelOverlayKind.text:
+                    title_path = temp_dir / f"overlay-title-{job_id}-{row_index}.png"
+                    render_title_card(
+                        row.text or "",
+                        title_path,
+                        width=max(320, preview_w),
+                        height=max(180, preview_h // 4),
+                    )
+                    path = title_path
+                if path is None:
+                    continue
+                overlay_specs.append(
+                    OverlaySpec(
+                        path=path,
+                        start_seconds=max(0.0, row.start_ms / 1000.0),
+                        duration_seconds=max(0.2, row.duration_ms / 1000.0),
+                        x=row.x,
+                        y=row.y,
+                        scale=row.scale,
+                        opacity=row.opacity,
+                    )
+                )
+
             # FPS: profile may force 30; otherwise keep the source rate.
             encode_fps = encode.fps_override if encode.fps_override is not None else probed_fps
 
@@ -620,6 +672,7 @@ class RenderManager:
                     background_music=full_reel_music,
                     loudness=loudness,
                     audio_offset_ms=getattr(reel, "audio_offset_ms", 0) or 0,
+                    overlays=overlay_specs or None,
                 )
             except ValueError as exc:
                 raise ValidationAppError(str(exc), code="invalid_render_options") from exc
@@ -779,6 +832,7 @@ class RenderManager:
                         "top": profile.safe_top,
                         "bottom": profile.safe_bottom,
                     },
+                    "coherence_forced": self._coherence_ack.pop(job.id, False),
                 },
             )
             write_render_report(report_path, report)

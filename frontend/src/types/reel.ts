@@ -1,5 +1,10 @@
 export type AspectRatio = '9:16' | '1:1' | '16:9';
-export type TransitionType = 'hard_cut' | 'short_crossfade' | 'dip_to_black';
+export type TransitionType =
+  | 'hard_cut'
+  | 'short_crossfade'
+  | 'dip_to_black'
+  | 'fade'
+  | 'flash';
 export type SubtitleStyle =
   'reformed_sober' | 'modern_highlight' | 'clear_reading' | 'sermon_quote';
 export type SubtitleGranularity = 'auto' | 'segment' | 'phrase' | 'word';
@@ -20,6 +25,8 @@ export interface ReelSegment {
   manual_crop_x?: number | null;
   manual_crop_y?: number | null;
   manual_crop_zoom?: number | null;
+  caption_in_ms?: number | null;
+  caption_out_ms?: number | null;
 }
 
 export interface Reel {
@@ -104,6 +111,8 @@ export interface ReelSegmentUpdatePayload {
   transcript_text?: string | null;
   transition_type?: TransitionType;
   transition_duration_ms?: number;
+  caption_in_ms?: number | null;
+  caption_out_ms?: number | null;
 }
 
 export interface ReelFromTranscriptPayload {

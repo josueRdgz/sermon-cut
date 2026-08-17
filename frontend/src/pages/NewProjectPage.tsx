@@ -1,5 +1,5 @@
 import { useCallback, useRef, useState, type FormEvent } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 
 import { ApiError } from '../api/client';
 import { createProject, uploadProjectCover, uploadProjectVideo } from '../api/projects';
@@ -9,7 +9,10 @@ import {
   previewYouTube,
   startYouTubeImport,
 } from '../api/youtube';
+import { AppChrome } from '../components/layout/AppChrome';
 import { ProgressBar } from '../components/ProgressBar';
+import { SectionHeader } from '../components/ui/SectionHeader';
+import { useProjects } from '../hooks/useProjects';
 import type { YouTubeImportJob, YouTubePreview, YouTubeQuality } from '../types/youtube';
 import { DEFAULT_CHURCH_NAME, DEFAULT_YOUTUBE_CHANNEL } from '../utils/projectDefaults';
 
@@ -91,6 +94,7 @@ const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve,
 
 export function NewProjectPage() {
   const navigate = useNavigate();
+  const { projects } = useProjects();
   const [title, setTitle] = useState('');
   const [preacherName, setPreacherName] = useState('');
   const [bibleReference, setBibleReference] = useState('');
@@ -239,16 +243,11 @@ export function NewProjectPage() {
     : 'Importando…';
 
   return (
-    <main className="page">
-      <header className="page__header">
-        <p className="eyebrow">
-          <Link to="/projects">← Proyectos</Link>
-        </p>
-        <h1>Nueva predicación</h1>
-        <p>
-          Indique si es el culto o solo el sermón, complete los datos y elija el origen del video.
-        </p>
-      </header>
+    <AppChrome projectCount={projects.length}>
+      <SectionHeader
+        title="Nueva predicación"
+        subtitle="Indica si es el culto o solo el sermón, completa los datos y elige el origen del video."
+      />
 
       <form className="card form" onSubmit={(event) => void handleSubmit(event)}>
         <fieldset className="field" style={{ border: 'none', padding: 0, margin: 0 }}>
@@ -543,6 +542,6 @@ export function NewProjectPage() {
           {busy ? 'Procesando…' : 'Crear proyecto'}
         </button>
       </form>
-    </main>
+    </AppChrome>
   );
 }

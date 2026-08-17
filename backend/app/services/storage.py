@@ -68,9 +68,16 @@ def ensure_project_dir(project_id: UUID) -> Path:
 
 
 def resolve_inside_project(project_id: UUID, filename: str) -> Path:
-    """Resolve ``filename`` under the project dir, rejecting path traversal."""
+    """Resolve ``filename`` under the project dir, rejecting path traversal.
+
+    Nested relative paths (e.g. ``assets/foo.png``) are allowed when every
+    component stays inside the project directory.
+    """
     directory = ensure_project_dir(project_id).resolve()
-    candidate = (directory / Path(filename).name).resolve()
+    relative = Path(filename)
+    if relative.is_absolute() or ".." in relative.parts:
+        raise ValidationAppError("Invalid file path.", code="invalid_path")
+    candidate = (directory / relative).resolve()
     if not candidate.is_relative_to(directory):
         raise ValidationAppError("Invalid file path.", code="invalid_path")
     return candidate

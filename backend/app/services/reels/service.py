@@ -336,16 +336,8 @@ def update_segment(
     for key, value in data.items():
         setattr(segment, key, value)
 
-    # Changing the cut window invalidates a caption copied from a longer Whisper
-    # span — otherwise every fragment can keep synthesizing the same full text.
-    if (
-        "transcript_text" not in data
-        and (
-            "source_start_seconds" in data
-            or "source_end_seconds" in data
-        )
-    ):
-        segment.transcript_text = None
+    # Keep transcript_text even when the cut window moves — wiping it on every
+    # timing nudge made subtitle edits look like they never saved.
 
     _touch(reel)
     db.commit()

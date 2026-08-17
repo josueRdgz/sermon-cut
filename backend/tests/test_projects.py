@@ -386,3 +386,26 @@ def test_apply_sermon_range_discards_culto_timed_edits(client: TestClient, stora
     assert not (project_dir / "highlights-preview.mp4").exists()
     assert not (project_dir / "highlights-preview.json").exists()
     assert (project_dir / "sermon.mp4").is_file()
+
+
+def test_stale_schema_returns_json_database_error(client, monkeypatch) -> None:
+    """WKWebView shows 'Load failed' if a 500 escapes CORS; keep it JSON."""
+    from sqlalchemy.exc import OperationalError
+
+    def boom(_db):
+        raise OperationalError(
+            "SELECT",
+            {},
+            Exception("no such column: projects.source_kind"),
+        )
+
+    monkeypatch.setattr("app.services.projects.list_projects", boom)
+    response = client.get(
+        "/api/projects",
+        headers={"Origin": "https://tauri.localhost"},
+    )
+    assert response.status_code == 500
+    body = response.json()
+    assert body["code"] == "database_error"
+    assert "desactualizada" in body["detail"]
+    assert response.headers.get("access-control-allow-origin") == "https://tauri.localhost"

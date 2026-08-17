@@ -73,6 +73,22 @@ def test_music_prep_includes_trim_fades_volume_and_pad() -> None:
     assert "aloop" not in line
 
 
+def test_music_fade_out_uses_source_duration_not_pad() -> None:
+    line = build_music_prep_filter(
+        input_label="2:a",
+        output_label="bgm_raw",
+        volume=0.1,
+        start_seconds=0.0,
+        end_seconds=None,
+        fade_in_seconds=0.0,
+        fade_out_seconds=2.0,
+        timeline_seconds=120.0,
+        source_duration_seconds=10.0,
+    )
+    assert "afade=t=out:st=8:d=2" in line
+    assert "apad=whole_dur=120" in line
+
+
 def test_ducking_applies_slider_gain_only_once() -> None:
     ducked = build_ducked_mix_filters(
         voice_label="a0",

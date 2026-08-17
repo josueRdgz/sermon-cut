@@ -17,6 +17,8 @@ interface FramingPanelProps {
   reel: Reel;
   sourceTime: number | null;
   onReelChange: (reel: Reel) => void;
+  /** Smaller preview for the NLE inspector. */
+  compact?: boolean;
 }
 
 const MODE_OPTIONS: { value: FramingMode; label: string }[] = [
@@ -26,7 +28,13 @@ const MODE_OPTIONS: { value: FramingMode; label: string }[] = [
   { value: 'manual', label: 'Posición manual' },
 ];
 
-export function FramingPanel({ projectId, reel, sourceTime, onReelChange }: FramingPanelProps) {
+export function FramingPanel({
+  projectId,
+  reel,
+  sourceTime,
+  onReelChange,
+  compact = false,
+}: FramingPanelProps) {
   const [status, setStatus] = useState<FramingStatus | null>(null);
   const [report, setReport] = useState<TrackingReport | null>(null);
   const [preview, setPreview] = useState<FramingPreview | null>(null);
@@ -142,14 +150,13 @@ export function FramingPanel({ projectId, reel, sourceTime, onReelChange }: Fram
   return (
     <div className="framing-panel">
       <div className="reel-editor__section-header">
-        <h4>Encuadre vertical</h4>
+        <h4>{compact ? 'Encuadre' : 'Encuadre vertical'}</h4>
         {status?.has_cache && <span className="badge badge--cut">Tracking en caché</span>}
       </div>
       <p className="muted">
-        Mantiene al predicador en el área vertical con movimiento suave. El video final lo
-        renderiza FFmpeg con recorte a pantalla completa; OpenCV solo analiza fotogramas dispersos.
-        Los subtítulos se dibujan directamente sobre la imagen, sin añadir franjas ni espacio
-        arriba o abajo.
+        {compact
+          ? 'El visor Programa muestra el recorte 9:16. El MP4 usa este modo.'
+          : 'Mantiene al predicador en el área vertical con movimiento suave. El video final lo renderiza FFmpeg con recorte a pantalla completa; OpenCV solo analiza fotogramas dispersos. Los subtítulos se dibujan directamente sobre la imagen, sin añadir franjas ni espacio arriba o abajo.'}
       </p>
 
       <div className="transcript-toolbar">
@@ -226,8 +233,8 @@ export function FramingPanel({ projectId, reel, sourceTime, onReelChange }: Fram
         </div>
       )}
 
-      {preview && (
-        <div className="framing-preview">
+      {preview && !compact && (
+        <div className={`framing-preview${compact ? ' framing-preview--compact' : ''}`}>
           <div className="framing-preview__meta muted">
             Vista previa · {preview.mode}
             {preview.unstable ? ' · inestable → blur' : ''} · t={preview.source_time.toFixed(2)}s

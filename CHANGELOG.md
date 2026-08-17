@@ -7,6 +7,240 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.4.10] — 2026-08-17
+
+### Changed
+
+- Visor 9:16 más grande: timeline ~38% máx., workspace 1.8×, inspector
+  340px por defecto. Subtítulos del preview escalan con `subtitle_font_size`
+  sobre el frame (`container-type` en el stage). Overlays de texto usan `cqh`.
+- Reloj de salida unificado: `resolvePreviewSeek`, transporte y scrub usan
+  `buildOutputClock` (xfade incluido). Identidad de preview incluye cortes y
+  transiciones.
+- Audio preview: pista separada vía `/media/audio` con offset A/V; sync de
+  música con rAF y resync forzado tras cortes A/B; BGM en preview ensamblado.
+- Transiciones: uniones alineadas al `outputStart` del clip siguiente;
+  diamantes arrastrables; reorden optimista de clips en timeline.
+- Exportar: panel muestra coherencia editorial; con unión **blocked** se puede
+  exportar tras marcar «Entiendo el riesgo» (`acknowledge_coherence`). Flush
+  incluye volumen música, offset A/V y captions vacíos antes de export/ensamblado.
+
+### Fixed
+
+- Banda gris vacía bajo las pistas de la timeline (slot `fit-content`).
+- Audio trabado en crossfades por desalineación transport/seek vs reloj lógico.
+
+## [0.4.9] — 2026-08-15
+
+### Changed
+
+- Pestañas del proyecto (Proyecto, Audio, Predicación, Transcripción, IA,
+  Editor) viven en la barra lateral. El visor e inspector ganan altura; la
+  línea temporal ocupa ~40% del editor. Subtítulos del preview abajo y
+  pequeños (`cqh`). Transiciones se arrastran a las uniones de clips.
+  Subtítulos en pista propia (mover/recortar independiente del video).
+
+### Fixed
+
+- El export no guardaba recortes/overlays pendientes (debounce 300 ms).
+  Ahora vacía cortes, overlays y textos de fragmento antes de renderizar.
+
+## [0.4.8] — 2026-08-15
+
+### Changed
+
+- Editor NLE tipo CapCut/Pinnacle: el visor **Programa** (9:16) es el héroe;
+  el transporte y la mezcla viven en un dock a todo el ancho debajo, no
+  dentro de la columna del preview. Por defecto un solo visor; Fuente es
+  opcional y queda en una columna estrecha. Cromo de pestañas compacto.
+
+### Fixed
+
+- El 9:16 salía como miniatura porque play/mezcla le quitaban la altura.
+- El audio se trababa en cada corte: la vista lógica ya no pausa ni espera
+  el `seeked`. Los clips contiguos siguen; los saltos usan un visor A/B
+  precargado y un temporizador de corte (no `timeupdate` tardío).
+
+## [0.4.7] — 2026-08-15
+
+### Fixed
+
+- Visor Programa 9:16 se contenía mal (`height: 52vh`) y se superponía al
+  inspector. El grid ahora encaja Fuente/Programa/baúl/inspector sin
+  desbordar. El preview usa el encuadre elegido (`cover` en recorte,
+  `contain` con letterbox en fondo desenfocado).
+
+### Changed
+
+- Inspector de Cortes más ancho por defecto; botones en fila. Layout NLE
+  se reinicia (clave `layout.v2`) para salir de tamaños rotos.
+
+## [0.4.6] — 2026-08-15
+
+### Changed
+
+- Proyecto, alta de predicación y editor NLE usan el mismo cromo (barra,
+  lateral, acento oro). Pestañas de Cortes con iconos; visor con play/pausa
+  claro. El editor a pantalla completa deja de pelear con el encabezado.
+
+### Fixed
+
+- Brace extra en el CSS del baúl que invalidaba estilos siguientes.
+- Barra de progreso con `role="progressbar"` y valores ARIA.
+- Contraste de textos secundarios.
+
+## [0.4.5] — 2026-08-15
+
+### Changed
+
+- Inspector de Cortes extraído (`ClipInspector`, filmstrip, huecos omitidos,
+  formulario de fragmento). El panel muestra tiempos de fuente y de programa.
+
+## [0.4.4] — 2026-08-15
+
+### Added
+
+- Workspace NLE flexible: baúl, inspector y línea temporal se redimensionan
+  (se guarda el tamaño). Visores **Fuente** (sermón 16:9 + regla de clips) y
+  **Programa** (aspecto de salida). Overlays se arrastran sobre el visor.
+
+### Changed
+
+- Inspector de overlay extraído (`OverlayInspector`) con posición X/Y.
+
+## [0.4.3] — 2026-08-15
+
+### Added
+
+- Pista B-roll de video: el baúl acepta clips (MP4/MOV/MKV/WebM), se sueltan
+  sobre la línea temporal y se componen en el export (FFmpeg `overlay`, sin
+  audio del B-roll). Preview lógico con `<video>` sincronizado al reloj.
+
+### Fixed
+
+- API de assets y overlays que el editor 0.4.1 ya llamaba pero el backend no
+  exponía; las transiciones `fade` / `flash` ahora existen también en el enum
+  del servidor y en el grafo `xfade`.
+
+## [0.4.2] — 2026-08-15
+
+### Added
+
+- NLE a pantalla completa en el editor: monitor extraído (`PreviewMonitor`),
+  atajos Espacio/J/K/L e I/O, recorte ripple que no solapa vecinos, y huecos
+  del sermón como clips omitidos seleccionables.
+
+### Changed
+
+- La revisión de unión vive en Cortes; Exportar es solo el job MP4 y no espera
+  a validar. Sondas de audio/plano opt-in.
+- Workspace del editor sin cabecera de proyecto; inspector más estrecho.
+
+### Fixed
+
+- Visor 9:16 con `object-fit: contain` (deja de estirar el 16:9).
+- Clips de la línea temporal separados; la cama de música no busca en cada corte.
+- `app_version` del API alineado a la versión del paquete.
+
+## [0.4.1] — 2026-08-15
+
+### Added
+
+- NLE de cultos: baúl de medios del proyecto, pista de overlays (imagen/texto),
+  arrastre/reorden/trim en la línea temporal, zoom de timeline y preview DOM
+  de overlays sincronizado al reloj de salida.
+- Transiciones `fade` (difuminar) y `flash` (destello) además de fundido cruzado
+  y a negro; picker en Cortes; grafo FFmpeg con `xfade`.
+- Preview ensamblado on-demand (transiciones + overlays) junto a la vista lógica.
+- API de assets (`/projects/{id}/assets`) y overlays (`/reels/{id}/overlays`).
+
+### Changed
+
+- Reloj de salida unificado (FE/BE) con solapes xfade; la strip ya no usa solo
+  la suma de ventanas fuente.
+- Persistencia optimista con debounce al arrastrar/recortar (menos jank).
+- Workspace del editor: baúl | vista previa | inspector.
+
+### Fixed
+
+- Edición de subtítulo por fragmento unificada (`transcript_text` → burn-in).
+- Escritorio: la migración de overlays (`f6a7b8c9d0e1`) ramificaba Alembic, así
+  que la SQLite persistente no aplicaba `source_kind` y WebKit mostraba
+  «Load failed» al listar o crear proyectos.
+
+## [0.3.29] — 2026-08-14
+
+### Changed
+
+- Editor de Reel reequilibrado: panel de Cortes mucho más amplio, filmstrip de
+  fragmentos, textarea y tiempos usables; línea temporal más alta y legible
+  (pistas Video/Subs/Música, cursor ámbar).
+
+## [0.3.28] — 2026-08-14
+
+### Fixed
+
+- Subtítulos largos se dividen en varios cues/líneas por palabras completas; ya no
+  se cortan con puntos suspensivos a mitad de palabra (preview y burn-in).
+
+## [0.3.27] — 2026-08-14
+
+### Fixed
+
+- Mezcla de audio usable: sliders de voz/música a ancho completo; el de música
+  responde al arrastre, desilencia al ajustar y guarda con debounce.
+- Línea temporal tipo NLE: cursor arrastrable, clic/arrastre en cualquier pista
+  para ubicar la reproducción (ya no salta solo al inicio del clip).
+
+## [0.3.26] — 2026-08-14
+
+### Changed
+
+- Editor de Reel con chrome tipo NLE: vista previa + inspector + línea temporal
+  de 3 pistas (video, subtítulos, música) clicable, sin arrastre todavía.
+
+### Fixed
+
+- Controles de volumen estables en la barra de transporte.
+- Exportación: aviso accionable cuando la coherencia bloquea el render (“Ir a Cortes”).
+- Subtítulo editable del fragmento seleccionado (una sola caja, no una lista monstruosa).
+
+## [0.3.25] — 2026-08-14
+
+### Fixed
+
+- Los subtítulos editados del fragmento se aplican en la exportación (burn-in):
+  el texto guardado es la fuente de verdad, se fuerza el guardado de borradores
+  antes de exportar, y el render vuelve a cargar los segmentos del Reel.
+
+## [0.3.24] — 2026-08-14
+
+### Fixed
+
+- El preview del Reel muestra la vista final en 9:16 / 1:1 / 16:9 (antes el
+  video fuente llenaba el ancho y el vertical no se veía).
+- La música de fondo ya no se detiene en cada salto entre fragmentos: sigue el
+  reloj del Reel y se reanuda tras los seeks.
+
+## [0.3.23] — 2026-08-14
+
+### Fixed
+
+- Caja de subtítulos del fragmento ya no aparece contraída (el CSS apuntaba a
+  una clase mal escrita y no se aplicaba).
+- Controles de volumen de voz/música usables: fila propia, más anchos, y el
+  slider de voz ya no se queda trabado en silencio.
+
+## [0.3.22] — 2026-08-14
+
+### Fixed
+
+- El subtítulo del fragmento ya no se borra al ajustar inicio/fin (eso hacía
+  parecer que nunca se guardaba y se perdía el avance).
+- El texto guardado del corte es siempre la fuente de verdad en preview y export.
+- Guardado al salir del campo de subtítulo; los tiempos del fragmento solo se
+  envían al terminar de editarlos (no en cada tecla).
+
 ## [0.3.21] — 2026-08-14
 
 ### Fixed

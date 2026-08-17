@@ -50,6 +50,11 @@ restricciones. Complementa el README.
   en varios archivos todavía.
 - FFmpeg/FFprobe deben estar en el `PATH`; builds mínimos sin `libx264`/`ass`
   no sirven para el pipeline completo.
+- El editor NLE 0.4.10 unifica el reloj de salida en preview y timeline,
+  agranda el visor 9:16, alinea uniones de transición con crossfades y permite
+  exportar con incoherencia **blocked** tras confirmación explícita. El preview
+  ensamblado mezcla BGM client-side; aún no hay motor WebCodecs — las
+  transiciones en vista lógica son aproximadas (usa «Ensamblado» o el export).
 
 ## Datos y privacidad
 

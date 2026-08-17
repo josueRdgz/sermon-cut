@@ -497,6 +497,30 @@ def test_latest_render_polling_endpoint(render_env) -> None:
     assert latest.json()["status"] == "completed"
 
 
+def test_acknowledge_coherence_skips_blocked_gate(render_env, monkeypatch) -> None:
+    from app.core.exceptions import ValidationAppError
+    from app.services.coherence import service as coherence_service
+
+    def _blocked(*_args, **_kwargs) -> None:
+        raise ValidationAppError("La unión del Reel no es coherente.", code="coherence_blocked")
+
+    monkeypatch.setattr(coherence_service, "assert_render_allowed", _blocked)
+
+    client, session_factory, _ = render_env
+    project_id, reel_id = _seed_project_and_reel(session_factory)
+
+    blocked = client.post(f"/api/projects/{project_id}/reels/{reel_id}/render", json={})
+    assert blocked.status_code == 400
+    assert blocked.json()["code"] == "coherence_blocked"
+
+    forced = client.post(
+        f"/api/projects/{project_id}/reels/{reel_id}/render",
+        json={"acknowledge_coherence": True},
+    )
+    assert forced.status_code == 202
+    assert forced.json()["status"] == "completed"
+
+
 # --------------------------------------------------------------------------- #
 # Optional integration test against the real FFmpeg binary
 # --------------------------------------------------------------------------- #

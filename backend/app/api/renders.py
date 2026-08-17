@@ -61,6 +61,7 @@ def start_render(
         burn_subtitles=payload.burn_subtitles,
         profile_id=payload.profile_id,
         quality=payload.quality,
+        acknowledge_coherence=payload.acknowledge_coherence,
     )
     return RenderJobResponse.model_validate(job)
 

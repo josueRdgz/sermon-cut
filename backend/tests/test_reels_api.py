@@ -313,6 +313,14 @@ def test_patch_fragment_caption_persists_and_drives_preview(
     assert edited.status_code == 200, edited.text
     assert edited.json()["segments"][0]["transcript_text"] == "uno dos editado"
 
+    # Timing nudge must NOT wipe the saved subtitle (regression).
+    nudged = client.patch(
+        f"/api/projects/{project_id}/reels/{reel['id']}/segments/{segment_id}",
+        json={"source_end_seconds": 4.8},
+    )
+    assert nudged.status_code == 200, nudged.text
+    assert nudged.json()["segments"][0]["transcript_text"] == "uno dos editado"
+
     fetched = client.get(f"/api/projects/{project_id}/reels/{reel['id']}")
     assert fetched.status_code == 200, fetched.text
     assert fetched.json()["segments"][0]["transcript_text"] == "uno dos editado"

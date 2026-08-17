@@ -5,7 +5,7 @@ tú (o un próximo ciclo) debéis hacer**. Complementa
 [LIMITATIONS.md](LIMITATIONS.md), [PRIVACY.md](PRIVACY.md) y
 [LICENSING.md](LICENSING.md).
 
-Última actualización: 2026-07-24.
+Última actualización: 2026-08-15.
 
 ---
 
@@ -124,8 +124,8 @@ tú (o un próximo ciclo) debéis hacer**. Complementa
 #### Prioridad baja / backlog
 
 13. Inventario de licencias npm/pip en CI (`pip-licenses`, `license-checker`).
-14. ProgressBar ARIA completo (`role="progressbar"`).
-15. Contraste WCAG de textos muted en UI oscura.
+14. ~~ProgressBar ARIA completo (`role="progressbar"`).~~ Hecho en 0.4.6.
+15. ~~Contraste WCAG de textos muted en UI oscura.~~ Hecho en 0.4.6.
 16. Reducir `blurred_background` / crop expressions anidadas en FFmpeg.
 17. Quarantine de MP4 fallidos de verify (borrar o mover a `.failed`).
 18. Cache Hugging Face bajo `SERMON_CUT_STORAGE_DIR` (documentar path real).

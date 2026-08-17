@@ -91,7 +91,11 @@ def build_subtitle_artifacts(
         )
         for item in ordered
     ]
-    fallback_texts = [item.transcript_text for item in ordered]
+    # Per-cut captions saved in the Reel editor — strip empties to None.
+    fallback_texts = [
+        (item.transcript_text.strip() if item.transcript_text and item.transcript_text.strip() else None)
+        for item in ordered
+    ]
     source_segments = transcript_to_source_segments(transcript)
 
     result = build_cues_for_reel(

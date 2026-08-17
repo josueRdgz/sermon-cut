@@ -36,6 +36,8 @@ class RenderStartRequest(BaseModel):
     burn_subtitles: bool = True
     # Snapshot the editor value into the Reel before the worker builds FFmpeg.
     audio_offset_ms: int | None = Field(default=None, ge=-1000, le=1000)
+    # When True, skip the blocked-coherence gate after explicit user acknowledgment.
+    acknowledge_coherence: bool = False
 
 
 class RenderJobResponse(BaseModel):

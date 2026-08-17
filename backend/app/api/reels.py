@@ -5,6 +5,7 @@ from __future__ import annotations
 from uuid import UUID
 
 from fastapi import APIRouter, Depends
+from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
@@ -27,6 +28,10 @@ from app.schemas.reel import (
     ReelUpdate,
 )
 from app.services.coherence import service as coherence_service
+from app.services.reel_preview import (
+    current_reel_preview_path,
+    ensure_reel_assembled_preview,
+)
 from app.services.reels import service as reels_service
 
 router = APIRouter(tags=["reels"])
@@ -213,4 +218,27 @@ def auto_fix_coherence(
         report=report,
         fixes=fixes,
         remaining_issues=remaining,
+    )
+
+
+@router.post("/projects/{project_id}/reels/{reel_id}/assembled-preview")
+def prepare_assembled_preview(
+    project_id: UUID,
+    reel_id: UUID,
+    db: Session = Depends(get_db),
+) -> dict[str, bool | str]:
+    """Build (or reuse) an assembled MP4 that includes transitions and overlays."""
+    path = ensure_reel_assembled_preview(db, project_id, reel_id)
+    return {"ready": True, "filename": path.name}
+
+
+@router.get("/projects/{project_id}/reels/{reel_id}/assembled-preview")
+def get_assembled_preview(project_id: UUID, reel_id: UUID) -> FileResponse:
+    path = current_reel_preview_path(project_id)
+    return FileResponse(
+        path,
+        media_type="video/mp4",
+        filename="reel-assembled-preview.mp4",
+        content_disposition_type="inline",
+        headers={"Cache-Control": "private, max-age=0, must-revalidate"},
     )

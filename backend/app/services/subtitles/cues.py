@@ -90,17 +90,6 @@ def _caption_tokens(text: str) -> list[str]:
     return [token for token in sanitize_caption_text(text).split() if token]
 
 
-def _token_key(tokens: list[str]) -> str:
-    return " ".join(token.casefold() for token in tokens)
-
-
-def _is_token_subsequence(short: list[str], long: list[str]) -> bool:
-    if not short:
-        return True
-    iterator = iter(long)
-    return all(any(item.casefold() == token.casefold() for item in iterator) for token in short)
-
-
 def _synthesize_mapped_words(tokens: list[str], start: float, end: float) -> list[MappedWord]:
     """Pack caption tokens evenly across an output window."""
     if not tokens or end <= start:
@@ -131,10 +120,9 @@ def build_cues_for_reel(
 ) -> CueBuildResult:
     """Remap transcript material onto the final reel timeline and split into cues.
 
-    Live word timestamps are preferred when they still match the caption text.
-    When the user edits a fragment and the remaining word clocks no longer cover
-    that text (or the text was rewritten), the edited ``fallback_texts`` are
-    packed onto the cut so the full subtitle remains visible.
+    When a cut has a saved ``fallback_texts`` caption, that text is always packed
+    onto the cut (preview and export burn-in). Otherwise live Whisper word
+    clocks in the source window drive the subtitle.
     """
     timeline = build_output_timeline(reel_segments)
     if not timeline.placements:
@@ -248,9 +236,7 @@ def _mapped_words_for_placement(
         if segment.end > placement.source_start and segment.start < placement.source_end
     ]
     mapped: list[MappedWord] = []
-    live_tokens: list[str] = []
     for segment in overlapping:
-        live_tokens.extend(_caption_tokens(segment.text))
         for word in segment.words:
             text = sanitize_caption_text(word.text)
             if not text:
@@ -264,35 +250,13 @@ def _mapped_words_for_placement(
     fallback_tokens = _caption_tokens(fallback or "")
     output_start = placement.output_start
     output_end = placement.output_start + placement.content_duration
-    mapped_tokens = [word.text for word in mapped]
-    fallback_key = _token_key(fallback_tokens)
-    mapped_key = _token_key(mapped_tokens)
-    live_key = _token_key(live_tokens)
 
+    # No per-cut caption → live word clocks in this window.
     if not fallback_tokens:
         return mapped
-    if mapped_key == fallback_key:
-        return mapped
-
-    # Legacy contamination: every cut stored the full Whisper span as caption.
-    if (
-        mapped
-        and fallback_key == live_key
-        and len(fallback_tokens) > len(mapped_tokens)
-        and _is_token_subsequence(mapped_tokens, fallback_tokens)
-    ):
-        return mapped
-
-    # Stale reel caption still lists words the live transcript already deleted.
-    if (
-        mapped
-        and live_key == mapped_key
-        and _is_token_subsequence(mapped_tokens, fallback_tokens)
-        and fallback_key != live_key
-    ):
-        return mapped
-
-    # User-edited per-cut caption is authoritative — always honor it.
+    # Saved fragment subtitle is authoritative for preview AND export burn-in.
+    # Always pack the saved text onto this cut so edits cannot be overridden by
+    # leftover Whisper word clocks.
     return _synthesize_mapped_words(fallback_tokens, output_start, output_end)
 
 
@@ -365,14 +329,16 @@ def _cues_from_phrases(
         start = group[0].start
         end = max(w.end for w in group)
         raw = " ".join(w.text for w in group)
-        text = wrap_lines(
-            _case(sanitize_caption_text(raw), options.uppercase),
-            max_lines=max_lines,
-            max_chars=max_chars,
+        display = _case(sanitize_caption_text(raw), options.uppercase)
+        cues.extend(
+            _cues_from_caption_blocks(
+                display,
+                start=start,
+                end=max(end, start + 0.05),
+                max_lines=max_lines,
+                max_chars=max_chars,
+            )
         )
-        if not text:
-            continue
-        cues.append(SubtitleCue(start=start, end=max(end, start + 0.05), text=text))
     return cues
 
 
@@ -388,39 +354,33 @@ def _cues_from_segments(
     for index, placement in enumerate(placements):
         fallback = fallback_texts[index] if index < len(fallback_texts) else None
         mapped = _mapped_words_for_placement(placement, transcript_segments, fallback)
+        window_start = placement.output_start
+        window_end = placement.output_start + placement.content_duration
         if mapped:
             raw = sanitize_caption_text(" ".join(word.text for word in mapped))
             if raw:
-                text = wrap_lines(
-                    _case(raw, options.uppercase),
-                    max_lines=max_lines,
-                    max_chars=max_chars,
-                )
-                if text:
-                    cues.append(
-                        SubtitleCue(
-                            start=placement.output_start,
-                            end=placement.output_start + placement.content_duration,
-                            text=text,
-                        )
+                cues.extend(
+                    _cues_from_caption_blocks(
+                        _case(raw, options.uppercase),
+                        start=window_start,
+                        end=max(window_end, window_start + 0.05),
+                        max_lines=max_lines,
+                        max_chars=max_chars,
                     )
+                )
             continue
 
         raw_fallback = sanitize_caption_text(fallback or "")
         if raw_fallback:
-            text = wrap_lines(
-                _case(raw_fallback, options.uppercase),
-                max_lines=max_lines,
-                max_chars=max_chars,
-            )
-            if text:
-                cues.append(
-                    SubtitleCue(
-                        start=placement.output_start,
-                        end=placement.output_start + placement.content_duration,
-                        text=text,
-                    )
+            cues.extend(
+                _cues_from_caption_blocks(
+                    _case(raw_fallback, options.uppercase),
+                    start=window_start,
+                    end=max(window_end, window_start + 0.05),
+                    max_lines=max_lines,
+                    max_chars=max_chars,
                 )
+            )
             continue
 
         overlapping = [
@@ -435,14 +395,15 @@ def _cues_from_segments(
             raw = sanitize_caption_text(seg.text)
             if not raw:
                 continue
-            text = wrap_lines(
-                _case(raw, options.uppercase),
-                max_lines=max_lines,
-                max_chars=max_chars,
-            )
             out_start, out_end = mapped_interval
-            cues.append(
-                SubtitleCue(start=out_start, end=max(out_end, out_start + 0.05), text=text)
+            cues.extend(
+                _cues_from_caption_blocks(
+                    _case(raw, options.uppercase),
+                    start=out_start,
+                    end=max(out_end, out_start + 0.05),
+                    max_lines=max_lines,
+                    max_chars=max_chars,
+                )
             )
     cues.sort(key=lambda c: (c.start, c.end))
     return cues
@@ -465,35 +426,95 @@ def _ref_size(font_size: int) -> int:
     return max(18, int(font_size * 0.65))
 
 
-def wrap_lines(text: str, *, max_lines: int, max_chars: int) -> str:
-    """Wrap on whitespace / punctuation without exceeding safe line counts."""
-    words = _WORD_SPLIT.split(text.strip())
-    if not words or words == [""]:
-        return ""
+def pack_words_into_lines(words: list[str], max_chars: int) -> list[str]:
+    """Pack tokens into visual lines. Never splits a token mid-word."""
+    limit = max(1, max_chars)
     lines: list[str] = []
     current = ""
     for word in words:
-        candidate = word if not current else f"{current} {word}"
-        if len(candidate) <= max_chars:
+        if not word:
+            continue
+        if not current:
+            # A single overlong word still occupies its own line intact.
+            current = word
+            continue
+        candidate = f"{current} {word}"
+        if len(candidate) <= limit:
             current = candidate
             continue
-        if current:
-            lines.append(current)
-        current = word
-        if len(lines) >= max_lines:
-            break
-    if current and len(lines) < max_lines:
         lines.append(current)
-    elif current and lines:
-        # Overflow: append truncated remainder to last line with ellipsis.
-        remaining = current
-        last = lines[-1]
-        room = max_chars - len(last) - 1
-        if room > 3:
-            lines[-1] = f"{last} {remaining[: room - 1]}…"
-        else:
-            lines[-1] = last[: max(1, max_chars - 1)] + "…"
-    return "\\N".join(lines[:max_lines])
+        current = word
+    if current:
+        lines.append(current)
+    return lines
+
+
+def split_caption_blocks(text: str, *, max_lines: int, max_chars: int) -> list[str]:
+    """Split a caption into ASS cue bodies (``\\N`` line breaks).
+
+    Long captions become several blocks of at most ``max_lines`` each so nothing
+    is truncated with an ellipsis mid-word.
+    """
+    cleaned = sanitize_caption_text(text)
+    words = [token for token in _WORD_SPLIT.split(cleaned) if token]
+    if not words:
+        return []
+    lines = pack_words_into_lines(words, max_chars)
+    line_limit = max(1, max_lines)
+    blocks: list[str] = []
+    for index in range(0, len(lines), line_limit):
+        chunk = lines[index : index + line_limit]
+        if chunk:
+            blocks.append("\\N".join(chunk))
+    return blocks
+
+
+def wrap_lines(text: str, *, max_lines: int, max_chars: int) -> str:
+    """Wrap on whitespace without cutting words.
+
+    Prefer ``split_caption_blocks`` when the caller can emit multiple cues; this
+    helper returns only the first block for simple call sites.
+    """
+    blocks = split_caption_blocks(text, max_lines=max_lines, max_chars=max_chars)
+    return blocks[0] if blocks else ""
+
+
+def _cues_from_caption_blocks(
+    text: str,
+    *,
+    start: float,
+    end: float,
+    max_lines: int,
+    max_chars: int,
+) -> list[SubtitleCue]:
+    """Turn a caption into one or more timed cues that never truncate words."""
+    blocks = split_caption_blocks(text, max_lines=max_lines, max_chars=max_chars)
+    if not blocks:
+        return []
+    span = max(0.05, end - start)
+    if len(blocks) == 1:
+        return [SubtitleCue(start=start, end=start + span, text=blocks[0])]
+
+    weights = [max(1, len(block.replace("\\N", " "))) for block in blocks]
+    total_weight = sum(weights)
+    cues: list[SubtitleCue] = []
+    elapsed = 0.0
+    for index, (block, weight) in enumerate(zip(blocks, weights, strict=True)):
+        cue_start = start + span * elapsed / total_weight
+        elapsed += weight
+        cue_end = (
+            start + span
+            if index == len(blocks) - 1
+            else start + span * elapsed / total_weight
+        )
+        cues.append(
+            SubtitleCue(
+                start=cue_start,
+                end=max(cue_end, cue_start + 0.05),
+                text=block,
+            )
+        )
+    return cues
 
 
 def _case(text: str, uppercase: bool) -> str:
