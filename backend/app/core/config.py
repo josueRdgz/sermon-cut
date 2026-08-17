@@ -8,6 +8,7 @@ from functools import lru_cache
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from app import __version__
 from app.core.paths import ROOT_DIR, default_database_url
 
 
@@ -31,7 +32,7 @@ class Settings(BaseSettings):
     )
 
     app_name: str = "Sermon Cut"
-    app_version: str = "0.4.1"
+    app_version: str = __version__
     api_prefix: str = "/api"
 
     # Optional override for local media + SQLite (absolute or relative path).
