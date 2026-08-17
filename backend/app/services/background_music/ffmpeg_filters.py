@@ -27,6 +27,7 @@ class BackgroundMusicSpec:
     target_lufs: float
     true_peak_db: float
     lra: float = 11.0
+    source_duration_seconds: float | None = None
 
 
 # Prudent spoken-word defaults (voice stays clearly above the bed).
@@ -106,6 +107,7 @@ def build_music_prep_filter(
     fade_in_seconds: float,
     fade_out_seconds: float,
     timeline_seconds: float,
+    source_duration_seconds: float | None = None,
 ) -> str:
     """Trim / fade / pad one music input to the target timeline length."""
     timeline = max(0.05, timeline_seconds)
@@ -118,12 +120,20 @@ def build_music_prep_filter(
         parts.append(f"atrim=start={_fmt(start)}")
     parts.append("asetpts=PTS-STARTPTS")
 
-    fade_in = max(0.0, min(fade_in_seconds, timeline / 2.0))
-    fade_out = max(0.0, min(fade_out_seconds, timeline / 2.0))
+    audible = timeline
+    if source_duration_seconds is not None:
+        usable = max(0.0, source_duration_seconds - start)
+        if end_seconds is not None and end_seconds > start:
+            usable = min(usable, end_seconds - start)
+        audible = min(timeline, usable)
+
+    fade_in = max(0.0, min(fade_in_seconds, audible / 2.0 if audible > 0 else 0.0))
+    fade_out = max(0.0, min(fade_out_seconds, audible / 2.0 if audible > 0 else 0.0))
     if fade_in > 0:
         parts.append(f"afade=t=in:st=0:d={_fmt(fade_in)}")
     if fade_out > 0:
-        fo_start = max(0.0, timeline - fade_out)
+        # Fade at the end of the *audible* bed, not after the silence pad.
+        fo_start = max(0.0, audible - fade_out)
         parts.append(f"afade=t=out:st={_fmt(fo_start)}:d={_fmt(fade_out)}")
 
     vol = max(0.0, min(1.0, volume))
@@ -194,6 +204,7 @@ def build_background_music_graph(
             fade_in_seconds=spec.fade_in_seconds,
             fade_out_seconds=spec.fade_out_seconds,
             timeline_seconds=main_duration,
+            source_duration_seconds=spec.source_duration_seconds,
         )
     )
     lines.extend(

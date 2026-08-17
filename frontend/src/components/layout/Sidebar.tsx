@@ -16,7 +16,21 @@ const NAV_ITEMS: NavItem[] = [
   { to: '/projects/new', label: 'Nuevo proyecto', icon: Plus },
 ];
 
-export function Sidebar() {
+export interface WorkspaceNavItem {
+  id: string;
+  label: string;
+  icon: LucideIcon;
+}
+
+interface SidebarProps {
+  workspace?: {
+    items: WorkspaceNavItem[];
+    activeId: string;
+    onSelect: (id: string) => void;
+  };
+}
+
+export function Sidebar({ workspace }: SidebarProps) {
   return (
     <nav className={styles.root} aria-label="Navegación principal">
       {NAV_ITEMS.map(({ to, label, icon: Icon, end }) => (
@@ -28,9 +42,40 @@ export function Sidebar() {
           aria-label={label}
           className={({ isActive }) => `${styles.item} ${isActive ? styles.active : ''}`}
         >
-          <Icon size={19} strokeWidth={2} aria-hidden />
+          <Icon size={18} strokeWidth={2} aria-hidden />
+          <span className={styles.label}>{label}</span>
         </NavLink>
       ))}
+      {workspace && workspace.items.length > 0 && (
+        <>
+          <div className={styles.divider} role="presentation" />
+          <div className={styles.workspace} role="tablist" aria-label="Flujo del proyecto">
+            {workspace.items.map((section) => {
+              const Icon = section.icon;
+              const selected = section.id === workspace.activeId;
+              return (
+                <button
+                  key={section.id}
+                  id={`workspace-tab-${section.id}`}
+                  type="button"
+                  role="tab"
+                  title={section.label}
+                  aria-label={section.label}
+                  aria-selected={selected}
+                  aria-controls={`workspace-panel-${section.id}`}
+                  className={`${styles.item} ${styles.workspaceItem} ${
+                    selected ? styles.active : ''
+                  }`}
+                  onClick={() => workspace.onSelect(section.id)}
+                >
+                  <Icon size={18} strokeWidth={2} aria-hidden />
+                  <span className={styles.label}>{section.label}</span>
+                </button>
+              );
+            })}
+          </div>
+        </>
+      )}
     </nav>
   );
 }

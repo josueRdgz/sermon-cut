@@ -41,6 +41,8 @@ class ReelSegmentUpdate(BaseModel):
     manual_crop_x: float | None = Field(default=None, ge=0.0, le=1.0)
     manual_crop_y: float | None = Field(default=None, ge=0.0, le=1.0)
     manual_crop_zoom: float | None = Field(default=None, ge=0.8, le=2.0)
+    caption_in_ms: int | None = Field(default=None, ge=0)
+    caption_out_ms: int | None = Field(default=None, ge=0)
 
 
 class ReelSegmentReorderItem(BaseModel):
@@ -121,6 +123,8 @@ class ReelSegmentResponse(BaseModel):
     selection_reason: str | None = None
     selection_score: float | None = None
     narrative_category: str | None = None
+    caption_in_ms: int | None = None
+    caption_out_ms: int | None = None
 
 
 class ReelResponse(BaseModel):

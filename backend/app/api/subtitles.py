@@ -17,7 +17,11 @@ from app.schemas.subtitles import (
     SubtitleTemplateListResponse,
 )
 from app.services.reels import service as reels_service
-from app.services.subtitles import options_for_reel, transcript_to_source_segments
+from app.services.subtitles import (
+    caption_windows_for_segments,
+    options_for_reel,
+    transcript_to_source_segments,
+)
 from app.services.subtitles.cues import build_cues_for_reel
 from app.services.subtitles.templates import TEMPLATES
 from app.services.subtitles.timeline import TimelineSegment
@@ -78,6 +82,7 @@ def preview_subtitles(
         transcript_segments=transcript_to_source_segments(transcript),
         fallback_texts=[item.transcript_text for item in ordered],
         options=options,
+        caption_windows=caption_windows_for_segments(ordered),
     )
     cues = [
         SubtitleCuePreview(

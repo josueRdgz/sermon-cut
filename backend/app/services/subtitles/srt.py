@@ -4,7 +4,11 @@ from __future__ import annotations
 
 from app.models.reel import Reel
 from app.models.transcript import Transcript
-from app.services.subtitles import options_for_reel, transcript_to_source_segments
+from app.services.subtitles import (
+    caption_windows_for_segments,
+    options_for_reel,
+    transcript_to_source_segments,
+)
 from app.services.subtitles.cues import build_cues_for_reel
 from app.services.subtitles.timeline import TimelineSegment
 
@@ -36,6 +40,7 @@ def render_srt_for_reel(reel: Reel, transcript: Transcript | None) -> str:
             for item in ordered
         ],
         options=options_for_reel(reel),
+        caption_windows=caption_windows_for_segments(ordered),
     )
     blocks = []
     for index, cue in enumerate(result.cues, start=1):

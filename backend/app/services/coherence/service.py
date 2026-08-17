@@ -85,7 +85,9 @@ def _overall_severity(issues: list[CoherenceIssue]) -> CoherenceSeverity:
 
 
 def _can_render(severity: CoherenceSeverity) -> bool:
-    return severity == CoherenceSeverity.valid
+    # Warnings are a soft gate (review or dismiss). Only *blocked* findings
+    # must prevent export — matching ``assert_render_allowed``.
+    return severity != CoherenceSeverity.blocked
 
 
 def _text_in_window(transcript: Transcript | None, start: float, end: float) -> str:
@@ -99,6 +101,26 @@ def _text_in_window(transcript: Transcript | None, start: float, end: float) -> 
             continue
         parts.append(segment.text.strip())
     return " ".join(parts).strip()
+
+
+def _caption_in_window(
+    transcript: Transcript | None,
+    start: float,
+    end: float,
+    words: list[TranscriptWordView] | None = None,
+) -> str:
+    """Caption text from words whose midpoint falls inside the cut window."""
+    collected = words if words is not None else _collect_words(transcript)
+    parts: list[str] = []
+    for word in collected:
+        mid = (word.start + word.end) / 2.0
+        if start - 1e-6 <= mid < end + 1e-6:
+            token = word.text.strip()
+            if token:
+                parts.append(token)
+    if parts:
+        return " ".join(parts)
+    return _text_in_window(transcript, start, end)
 
 
 def _collect_words(transcript: Transcript | None) -> list[TranscriptWordView]:
@@ -145,13 +167,17 @@ def _build_segment_views(
 ) -> tuple[list[SegmentView], list[str]]:
     views: list[SegmentView] = []
     deleted: list[str] = []
+    words = _collect_words(transcript)
     prev_end: float | None = None
     for index, segment in enumerate(ordered, start=1):
         gap = 0.0 if prev_end is None else max(0.0, segment.source_start_seconds - prev_end)
         text = (segment.transcript_text or "").strip()
         if not text:
-            text = _text_in_window(
-                transcript, segment.source_start_seconds, segment.source_end_seconds
+            text = _caption_in_window(
+                transcript,
+                segment.source_start_seconds,
+                segment.source_end_seconds,
+                words,
             )
         views.append(
             SegmentView(
@@ -422,7 +448,7 @@ def expand_segment_context(
         transcript = transcripts_service.get_transcript_for_project(db, project_id)
     except NotFoundError:
         transcript = None
-    refreshed = _text_in_window(transcript, new_start, new_end)
+    refreshed = _caption_in_window(transcript, new_start, new_end)
 
     from app.schemas.reel import ReelSegmentUpdate
 
@@ -454,6 +480,7 @@ _NEEDS_SOFT_TRANSITION = {
     "VOLUME_JUMP",
     "JOIN_NOISE_OR_SILENCE",
     "FRAMING_JUMP",
+    "ABRUPT_TOPIC_CHANGE",
 }
 
 
@@ -551,15 +578,35 @@ def auto_fix_reel(
                 include_media_probes=options.include_media_probes,
             ),
         )
+        ordered = sorted(reel.segments, key=lambda item: item.order)
+        changed = False
+        for segment in ordered:
+            if (segment.transcript_text or "").strip():
+                continue
+            refreshed = _caption_in_window(
+                transcript,
+                segment.source_start_seconds,
+                segment.source_end_seconds,
+                words,
+            )
+            if refreshed:
+                segment.transcript_text = refreshed
+                fixes.append(
+                    f"Fragmento {segment.order + 1}: subtítulo rellenado desde la transcripción."
+                )
+                changed = True
+
         active = [issue for issue in report.issues if not issue.dismissed]
         if not active:
+            if changed:
+                reels_service._touch(reel)  # noqa: SLF001 — shared timestamp helper
+                db.commit()
+                reel = reels_service.get_reel_for_project(db, project_id, reel_id)
             break
 
-        ordered = sorted(reel.segments, key=lambda item: item.order)
         by_segment: dict[int, set[str]] = {}
         for issue in active:
             by_segment.setdefault(issue.segment_id, set()).add(issue.code)
-        changed = False
 
         for segment_id, codes in by_segment.items():
             if segment_id < 1 or segment_id > len(ordered):
@@ -588,7 +635,7 @@ def auto_fix_reel(
             if start != segment.source_start_seconds or end != segment.source_end_seconds:
                 segment.source_start_seconds = start
                 segment.source_end_seconds = end
-                refreshed = _text_in_window(transcript, start, end)
+                refreshed = _caption_in_window(transcript, start, end, words)
                 if refreshed:
                     segment.transcript_text = refreshed
                 changed = True
