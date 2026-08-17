@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.4.11] — 2026-08-17
+
+### Fixed
+
+- Vista previa NLE: la capa de subtítulos ya no bloquea clic derecho ni clics
+  fuera del texto cuando el visor está agrandado; solo captura eventos en modo
+  interactivo (pestaña Subtítulos).
+- Splitter horizontal de timeline corregido (arrastrar hacia arriba agranda el
+  visor).
+- Captura de puntero liberada al soltar overlays y regla del monitor Fuente.
+- Videos con controles nativos (predicación, transcripción, reparar audio,
+  export): sin pantalla completa/PiP del reproductor que bloqueaba la app en
+  Tauri.
+
 ## [0.4.10] — 2026-08-17
 
 ### Changed

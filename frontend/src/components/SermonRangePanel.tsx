@@ -4,6 +4,7 @@ import { ApiError } from '../api/client';
 import { applySermonRange, projectVideoUrl } from '../api/projects';
 import type { Project } from '../types/project';
 import { formatDuration, formatTimecode } from '../utils/format';
+import { nativeVideoControlProps } from '../utils/nativeMediaControls';
 
 interface Props {
   project: Project;
@@ -93,7 +94,7 @@ export function SermonRangePanel({ project, onUpdated }: Props) {
       <video
         ref={videoRef}
         className="sermon-range__player"
-        controls
+        {...nativeVideoControlProps}
         src={projectVideoUrl(project.id, project.updated_at)}
         onTimeUpdate={(event) => setPlayhead(event.currentTarget.currentTime)}
         onLoadedMetadata={(event) => {

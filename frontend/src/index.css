@@ -598,6 +598,14 @@ a:hover {
   border-radius: var(--radius-md);
 }
 
+.media-player::-webkit-media-controls-fullscreen-button,
+.sermon-range__player::-webkit-media-controls-fullscreen-button,
+.audio-repair__video-preview video::-webkit-media-controls-fullscreen-button,
+.transcript-editor__video::-webkit-media-controls-fullscreen-button,
+.render-result__video::-webkit-media-controls-fullscreen-button {
+  display: none;
+}
+
 .media-player--placeholder {
   display: grid;
   place-items: center;
@@ -1535,6 +1543,10 @@ a:hover {
 }
 
 .reel-player__subtitle-slot > * {
+  pointer-events: none;
+}
+
+.reel-player__subtitle-slot > .subtitle-overlay--interactive {
   pointer-events: auto;
 }
 
@@ -1707,8 +1719,8 @@ a:hover {
 }
 
 .subtitle-overlay--on-player.subtitle-overlay--center {
-  margin: auto 0;
-  height: 100%;
+  margin: 0;
+  height: auto;
 }
 
 .subtitle-overlay--on-player.subtitle-overlay--top {

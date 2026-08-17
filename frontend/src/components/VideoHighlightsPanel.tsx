@@ -33,6 +33,7 @@ import {
   type EditorialPresetId,
 } from '../utils/editorialPresets';
 import { formatDuration } from '../utils/format';
+import { nativeVideoControlProps } from '../utils/nativeMediaControls';
 import { pinWorkspaceNav } from '../utils/workspaceScroll';
 import { highlightPullQuote } from '../utils/highlightQuote';
 import {
@@ -725,9 +726,7 @@ export function VideoHighlightsPanel({
                   key={previewSrc}
                   ref={videoRef}
                   className="media-player"
-                  controls
-                  disablePictureInPicture
-                  playsInline
+                  {...nativeVideoControlProps}
                   preload="metadata"
                   src={previewSrc}
                 />
@@ -1093,7 +1092,7 @@ export function VideoHighlightsPanel({
             )}
             {renderJob?.status === 'completed' && (
               <div className="stack">
-                <video className="media-player" controls src={renderOutputUrl(renderJob.id)} />
+                <video className="media-player" {...nativeVideoControlProps} src={renderOutputUrl(renderJob.id)} />
                 <p>
                   <a className="button" href={renderOutputUrl(renderJob.id, true)}>
                     Descargar MP4

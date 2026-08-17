@@ -84,7 +84,9 @@ function beginOverlayDrag(
   if (!(layerEl instanceof HTMLElement)) return;
   const bounds = layerEl;
   const moveOverlay = onMove;
-  event.currentTarget.setPointerCapture(event.pointerId);
+  const target = event.currentTarget;
+  const pointerId = event.pointerId;
+  target.setPointerCapture(pointerId);
 
   function pointToNorm(clientX: number, clientY: number) {
     const rect = bounds.getBoundingClientRect();
@@ -96,17 +98,26 @@ function beginOverlayDrag(
   }
 
   function onPointerMove(move: globalThis.PointerEvent) {
+    if (move.pointerId !== pointerId) return;
     const next = pointToNorm(move.clientX, move.clientY);
     if (next) moveOverlay(overlay.id, next.x, next.y);
   }
 
-  function onPointerUp() {
+  function onPointerUp(upEvent: globalThis.PointerEvent) {
+    if (upEvent.pointerId !== pointerId) return;
+    try {
+      target.releasePointerCapture(pointerId);
+    } catch {
+      /* already released */
+    }
     window.removeEventListener('pointermove', onPointerMove);
     window.removeEventListener('pointerup', onPointerUp);
+    window.removeEventListener('pointercancel', onPointerUp);
   }
 
   window.addEventListener('pointermove', onPointerMove);
-  window.addEventListener('pointerup', onPointerUp, { once: true });
+  window.addEventListener('pointerup', onPointerUp);
+  window.addEventListener('pointercancel', onPointerUp);
   const start = pointToNorm(event.clientX, event.clientY);
   if (start) moveOverlay(overlay.id, start.x, start.y);
 }

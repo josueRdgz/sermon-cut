@@ -22,6 +22,7 @@ import type { AspectRatio, ReelSegment } from '../types/reel';
 import type { RenderJob, RenderLayout } from '../types/render';
 import { ACTIVE_RENDER_STATUSES } from '../types/render';
 import { formatDuration } from '../utils/format';
+import { nativeVideoControlProps } from '../utils/nativeMediaControls';
 import { ConfirmDialog } from './ConfirmDialog';
 import { ProgressBar } from './ProgressBar';
 
@@ -727,7 +728,7 @@ export function RenderPanel({
               <video
                 className="render-result__video"
                 src={renderOutputUrl(job.id)}
-                controls
+                {...nativeVideoControlProps}
                 preload="metadata"
               />
               <div className="render-result__meta">

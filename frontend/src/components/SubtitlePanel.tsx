@@ -25,6 +25,8 @@ interface SubtitlePanelProps {
   hideStagePreview?: boolean;
   /** Allow drag / Alt+wheel on the program monitor overlay. */
   interactivePreview?: boolean;
+  /** Project subtitle cues onto the program monitor (subtitles tab only). */
+  mountPreviewOverlay?: boolean;
 }
 
 const GRANULARITY_OPTIONS: { value: SubtitleGranularity; label: string }[] = [
@@ -108,6 +110,7 @@ export function SubtitlePanel({
   onReelUpdated,
   hideStagePreview = false,
   interactivePreview = false,
+  mountPreviewOverlay = true,
 }: SubtitlePanelProps) {
   const [templates, setTemplates] = useState<SubtitleTemplateInfo[]>([]);
   const [preview, setPreview] = useState<SubtitlePreview | null>(null);
@@ -208,7 +211,7 @@ export function SubtitlePanel({
     typeof document !== 'undefined' ? document.getElementById('reel-subtitle-overlay') : null;
 
   const overlayNode =
-    reel.subtitle_enabled && liveCueText && overlayHost ? (
+    mountPreviewOverlay && reel.subtitle_enabled && liveCueText && overlayHost ? (
       <SubtitlePreviewOverlay
         text={liveCueText}
         style={reel.subtitle_style}

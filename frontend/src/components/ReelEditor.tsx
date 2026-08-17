@@ -2629,6 +2629,7 @@ export function ReelEditor({
                   previewSegmentIndex={orderedSegments.length > 0 ? previewIndex : null}
                   onReelUpdated={replaceReel}
                   hideStagePreview
+                  mountPreviewOverlay={activeTool === 'subtitles'}
                   interactivePreview={activeTool === 'subtitles' && previewMode === 'logical'}
                 />
               </div>
@@ -2739,7 +2740,7 @@ export function ReelEditor({
             <NleSplitter
               orientation="horizontal"
               label="Alto de la línea temporal"
-              onDrag={(delta) => patchLayout({ timelinePx: layout.timelinePx - delta })}
+              onDrag={(delta) => patchLayout({ timelinePx: layout.timelinePx + delta })}
             />
             <div className="reel-nle__timeline-slot" style={{ flexBasis: `${layout.timelinePx}px` }}>
           <ReelTimelineStrip

@@ -11,6 +11,7 @@ import {
 } from '../api/transcripts';
 import type { Transcript, TranscriptSegment } from '../types/transcript';
 import { formatDuration } from '../utils/format';
+import { nativeVideoControlProps } from '../utils/nativeMediaControls';
 import { ConfirmDialog } from './ConfirmDialog';
 import { TranscriptionPanel } from './TranscriptionPanel';
 
@@ -222,7 +223,7 @@ export function TranscriptEditor({
         <video
           ref={videoRef}
           className="transcript-editor__video"
-          controls
+          {...nativeVideoControlProps}
           preload="metadata"
           src={projectVideoUrl(projectId, mediaRevision)}
         >

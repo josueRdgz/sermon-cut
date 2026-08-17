@@ -14,6 +14,7 @@ import {
 import { ApiError } from '../api/client';
 import type { AudioRepairJob, AudioRepairIssue } from '../types/audioRepair';
 import { formatDuration } from '../utils/format';
+import { nativeVideoControlProps } from '../utils/nativeMediaControls';
 import { ProgressBar } from './ProgressBar';
 
 interface AudioRepairPanelProps {
@@ -419,7 +420,7 @@ export function AudioRepairPanel({ projectId, hasVideo }: AudioRepairPanelProps)
                 <span>Video reparado (vista)</span>
                 <video
                   ref={repairedVideoRef}
-                  controls
+                  {...nativeVideoControlProps}
                   preload="metadata"
                   src={repairedVideoUrl(job.id)}
                 />

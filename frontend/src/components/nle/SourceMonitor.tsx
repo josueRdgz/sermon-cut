@@ -83,6 +83,16 @@ export function SourceMonitor({
           if (!event.currentTarget.hasPointerCapture(event.pointerId)) return;
           seekFromRatio(event.clientX, event.currentTarget);
         }}
+        onPointerUp={(event) => {
+          if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+            event.currentTarget.releasePointerCapture(event.pointerId);
+          }
+        }}
+        onPointerCancel={(event) => {
+          if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+            event.currentTarget.releasePointerCapture(event.pointerId);
+          }
+        }}
       >
         {segments.map((segment) => {
           const left = (segment.source_start_seconds / duration) * 100;

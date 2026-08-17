@@ -122,6 +122,7 @@ export function SubtitlePreviewOverlay({
         width: 'max-content',
         maxWidth: '92%',
         textTransform: uppercase ? 'uppercase' : 'none',
+        pointerEvents: interactive ? 'auto' : 'none',
       }}
       onPointerDown={beginDrag}
       onPointerMove={moveDrag}
