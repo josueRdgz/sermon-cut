@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from app.models.reel import Reel
+from app.models.reel import Reel, ReelSegment
 from app.models.transcript import Transcript
 from app.services.subtitles.ass import render_ass_document, write_ass_file
 from app.services.subtitles.cues import (
@@ -36,6 +36,20 @@ def options_for_reel(reel: Reel) -> SubtitleOptions:
         margin_bottom=getattr(reel, "subtitle_margin_bottom", None),
         bible_reference=getattr(reel, "subtitle_bible_reference", None),
     )
+
+
+def caption_windows_for_segments(
+    segments: list[ReelSegment],
+) -> list[tuple[float, float] | None]:
+    windows: list[tuple[float, float] | None] = []
+    for item in segments:
+        inn = getattr(item, "caption_in_ms", None)
+        out = getattr(item, "caption_out_ms", None)
+        if inn is None or out is None or out <= inn:
+            windows.append(None)
+        else:
+            windows.append((inn / 1000.0, out / 1000.0))
+    return windows
 
 
 def transcript_to_source_segments(transcript: Transcript | None) -> list[SourceSegment]:
@@ -93,7 +107,11 @@ def build_subtitle_artifacts(
     ]
     # Per-cut captions saved in the Reel editor — strip empties to None.
     fallback_texts = [
-        (item.transcript_text.strip() if item.transcript_text and item.transcript_text.strip() else None)
+        (
+            item.transcript_text.strip()
+            if item.transcript_text and item.transcript_text.strip()
+            else None
+        )
         for item in ordered
     ]
     source_segments = transcript_to_source_segments(transcript)
@@ -103,6 +121,7 @@ def build_subtitle_artifacts(
         transcript_segments=source_segments,
         fallback_texts=fallback_texts,
         options=opts,
+        caption_windows=caption_windows_for_segments(ordered),
     )
     if not result.cues:
         return None

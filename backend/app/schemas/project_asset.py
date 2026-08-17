@@ -7,7 +7,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict
 
-from app.models.project_asset import ProjectAssetKind
+from app.models.asset import ProjectAssetKind
 
 
 class ProjectAssetResponse(BaseModel):

@@ -46,7 +46,6 @@ from app.models.highlight import (
     SubtitleDelivery,
 )
 from app.models.project import Project, ProjectContentMode, ProjectSourceKind, ProjectStatus
-from app.models.project_asset import ProjectAsset, ProjectAssetKind
 from app.models.reel import (
     AspectRatio,
     ContentKind,
@@ -58,7 +57,6 @@ from app.models.reel import (
     SubtitleStyle,
     TransitionType,
 )
-from app.models.reel_overlay import ReelOverlay, ReelOverlayKind
 from app.models.render_job import RenderJob, RenderJobStatus
 from app.models.transcript import (
     Transcript,

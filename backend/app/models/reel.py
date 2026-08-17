@@ -5,12 +5,16 @@ from __future__ import annotations
 import enum
 import uuid
 from datetime import UTC, datetime
+from typing import TYPE_CHECKING
 
 from sqlalchemy import Boolean, DateTime, Enum, Float, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.types import Uuid
 
 from app.db.base import Base
+
+if TYPE_CHECKING:
+    from app.models.asset import ReelOverlay
 
 
 def _utc_now() -> datetime:
@@ -159,7 +163,7 @@ class Reel(Base):
         cascade="all, delete-orphan",
         order_by="ReelSegment.order",
     )
-    overlays: Mapped[list["ReelOverlay"]] = relationship(
+    overlays: Mapped[list[ReelOverlay]] = relationship(
         "ReelOverlay",
         back_populates="reel",
         cascade="all, delete-orphan",

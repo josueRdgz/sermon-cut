@@ -605,7 +605,7 @@ class RenderManager:
                 else None
             )
 
-            from app.models.reel_overlay import ReelOverlayKind
+            from app.models.asset import ProjectAsset, ReelOverlayKind
             from app.services.overlays import list_overlays_for_render
             from app.services.overlays_render import render_title_card
             from app.services.render.args import OverlaySpec
@@ -615,7 +615,7 @@ class RenderManager:
             for row_index, row in enumerate(overlay_rows):
                 path: Path | None = None
                 if row.kind == ReelOverlayKind.image and row.asset_id is not None:
-                    from app.models.project_asset import ProjectAsset
+                    from app.models.asset import ProjectAsset
 
                     asset = session.get(ProjectAsset, row.asset_id)
                     if asset is not None:

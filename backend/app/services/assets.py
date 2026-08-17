@@ -1,4 +1,4 @@
-"""Project media-bin asset storage and CRUD."""
+"""Project media-bin assets (images and B-roll video)."""
 
 from __future__ import annotations
 
@@ -6,25 +6,35 @@ from collections.abc import AsyncIterator
 from pathlib import Path
 from uuid import UUID, uuid4
 
+from PIL import Image
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
 from app.core.exceptions import NotFoundError, ValidationAppError
-from app.core.paths import project_dir
-from app.models.project_asset import ProjectAsset, ProjectAssetKind
-from app.schemas.project_asset import ProjectAssetListResponse, ProjectAssetResponse
+from app.models.asset import ProjectAsset, ProjectAssetKind
+from app.schemas.asset import ProjectAssetResponse
 from app.services import projects as projects_service
 from app.services import storage
+from app.services.ffprobe import probe_video
 
-IMAGE_EXTENSIONS = storage.COVER_EXTENSIONS
-IMAGE_MIME_TYPES = storage.COVER_MIME_TYPES
+_ASSET_IMAGE_EXTENSIONS = storage.COVER_EXTENSIONS
+_ASSET_IMAGE_MIMES = storage.COVER_MIME_TYPES
+_ASSET_VIDEO_EXTENSIONS = storage.VIDEO_EXTENSIONS
+_ASSET_VIDEO_MIMES = storage.VIDEO_MIME_TYPES
 
-
-def assets_subdir(project_id: UUID) -> Path:
-    path = project_dir(project_id) / "assets"
-    path.mkdir(parents=True, exist_ok=True)
-    return path
+_IMAGE_MEDIA_TYPES = {
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".png": "image/png",
+    ".webp": "image/webp",
+}
+_VIDEO_MEDIA_TYPES = {
+    ".mp4": "video/mp4",
+    ".mov": "video/quicktime",
+    ".mkv": "video/x-matroska",
+    ".webm": "video/webm",
+}
 
 
 def media_url(project_id: UUID, asset_id: UUID) -> str:
@@ -41,21 +51,21 @@ def to_response(asset: ProjectAsset) -> ProjectAssetResponse:
         original_name=asset.original_name,
         width=asset.width,
         height=asset.height,
+        duration_ms=asset.duration_ms,
         created_at=asset.created_at,
         media_url=media_url(asset.project_id, asset.id),
     )
 
 
-def list_assets(db: Session, project_id: UUID) -> ProjectAssetListResponse:
+def list_assets(db: Session, project_id: UUID) -> list[ProjectAsset]:
     projects_service.get_project(db, project_id)
-    rows = list(
+    return list(
         db.scalars(
             select(ProjectAsset)
             .where(ProjectAsset.project_id == project_id)
             .order_by(ProjectAsset.created_at.desc())
-        )
+        ).all()
     )
-    return ProjectAssetListResponse(items=[to_response(row) for row in rows], total=len(rows))
 
 
 def get_asset(db: Session, project_id: UUID, asset_id: UUID) -> ProjectAsset:
@@ -67,52 +77,84 @@ def get_asset(db: Session, project_id: UUID, asset_id: UUID) -> ProjectAsset:
 
 
 def resolve_asset_path(project_id: UUID, asset: ProjectAsset) -> Path:
-    path = storage.resolve_inside_project(project_id, asset.storage_path)
-    if not path.is_file():
-        raise NotFoundError("Asset file is missing on disk.", code="asset_file_missing")
-    return path
+    return storage.resolve_inside_project(project_id, asset.storage_path)
 
 
-async def create_image_asset(
+def media_type_for(asset: ProjectAsset) -> str:
+    suffix = Path(asset.filename).suffix.lower()
+    if asset.kind == ProjectAssetKind.video:
+        return _VIDEO_MEDIA_TYPES.get(suffix, "video/mp4")
+    return _IMAGE_MEDIA_TYPES.get(suffix, "image/png")
+
+
+def _classify_upload(filename: str, content_type: str | None) -> ProjectAssetKind:
+    suffix = Path(filename).suffix.lower()
+    if suffix in _ASSET_IMAGE_EXTENSIONS:
+        storage.validate_mime(content_type, _ASSET_IMAGE_MIMES)
+        return ProjectAssetKind.image
+    if suffix in _ASSET_VIDEO_EXTENSIONS:
+        storage.validate_mime(content_type, _ASSET_VIDEO_MIMES)
+        return ProjectAssetKind.video
+    raise ValidationAppError(
+        "Unsupported asset. Upload an image (JPEG, PNG, WebP) or a video clip "
+        "(MP4, MOV, MKV, WebM).",
+        code="unsupported_asset",
+    )
+
+
+def _image_size(path: Path) -> tuple[int | None, int | None]:
+    try:
+        with Image.open(path) as image:
+            return image.width, image.height
+    except OSError:
+        return None, None
+
+
+async def create_asset(
     db: Session,
     project_id: UUID,
     *,
-    original_name: str | None,
+    original_filename: str | None,
     content_type: str | None,
     chunks: AsyncIterator[bytes],
 ) -> ProjectAsset:
     project = projects_service.get_project(db, project_id)
-    safe_name = storage.sanitize_filename(original_name, fallback_stem="asset")
-    storage.validate_extension(safe_name, IMAGE_EXTENSIONS)
-    storage.validate_mime(content_type, IMAGE_MIME_TYPES)
+    settings = get_settings()
+    safe_name = storage.sanitize_filename(original_filename, fallback_stem="asset")
+    kind = _classify_upload(safe_name, content_type)
+    extension = Path(safe_name).suffix.lower()
+    stored_name = f"asset-{uuid4().hex}{extension}"
+    destination = storage.resolve_inside_project(project.id, stored_name)
 
-    asset_id = uuid4()
-    relative = f"assets/{asset_id.hex}{Path(safe_name).suffix.lower()}"
-    destination = storage.resolve_inside_project(project.id, relative)
-    destination.parent.mkdir(parents=True, exist_ok=True)
-
-    max_bytes = get_settings().max_upload_bytes
+    max_bytes = (
+        settings.max_upload_bytes
+        if kind == ProjectAssetKind.video
+        else settings.max_cover_upload_bytes
+    )
     await storage.save_upload_stream(destination, chunks, max_bytes=max_bytes)
-    storage.assert_file_magic(destination, kind="image")
+    storage.assert_file_magic(
+        destination,
+        kind="video" if kind == ProjectAssetKind.video else "image",
+    )
 
-    width = height = None
-    try:
-        from PIL import Image
-
-        with Image.open(destination) as image:
-            width, height = image.size
-    except Exception:  # noqa: BLE001 — dimensions are optional metadata
-        width = height = None
+    width = height = duration_ms = None
+    if kind == ProjectAssetKind.image:
+        width, height = _image_size(destination)
+    else:
+        metadata = probe_video(destination)
+        width, height = metadata.width, metadata.height
+        if metadata.duration_seconds and metadata.duration_seconds > 0:
+            duration_ms = int(round(metadata.duration_seconds * 1000))
 
     asset = ProjectAsset(
-        id=asset_id,
         project_id=project.id,
-        kind=ProjectAssetKind.image,
-        filename=Path(relative).name,
-        storage_path=relative,
-        original_name=original_name,
+        kind=kind,
+        filename=Path(stored_name).name,
+        storage_path=stored_name,
+        original_name=original_filename,
         width=width,
         height=height,
+        duration_ms=duration_ms,
     )
     db.add(asset)
     db.commit()
@@ -122,7 +164,7 @@ async def create_image_asset(
 
 def delete_asset(db: Session, project_id: UUID, asset_id: UUID) -> None:
     asset = get_asset(db, project_id, asset_id)
-    path = storage.resolve_inside_project(project_id, asset.storage_path)
+    path = resolve_asset_path(project_id, asset)
     db.delete(asset)
     db.commit()
     path.unlink(missing_ok=True)

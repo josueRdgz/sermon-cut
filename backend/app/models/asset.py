@@ -103,3 +103,4 @@ class ReelOverlay(Base):
     )
 
     asset: Mapped[ProjectAsset | None] = relationship(back_populates="overlays")
+    reel: Mapped[object] = relationship("Reel", back_populates="overlays")

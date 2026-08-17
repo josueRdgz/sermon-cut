@@ -47,10 +47,9 @@ def test_resolve_inside_project_blocks_traversal(
     storage_root,  # noqa: ARG001
 ) -> None:
     project_id = uuid4()
-    # Even if a malicious name slips through, only the basename is used.
-    path = resolve_inside_project(project_id, "../../secret.txt")
-    assert path.name == "secret.txt"
-    assert str(project_id) in str(path)
+    with pytest.raises(ValidationAppError) as exc:
+        resolve_inside_project(project_id, "../../secret.txt")
+    assert exc.value.code == "invalid_path"
 
 
 def test_assert_file_magic_accepts_jpeg(tmp_path: Path) -> None:

@@ -86,6 +86,25 @@ class RenderSegmentSpec:
 
 
 @dataclass(frozen=True)
+class OverlaySpec:
+    """A still, title PNG or B-roll clip composited on the main timeline.
+
+    ``x``/``y`` are the centre of the overlay as fractions of the canvas.
+    ``scale`` is the overlay width as a fraction of the canvas width.
+    Video B-roll is silent — the sermon remains the A-roll.
+    """
+
+    path: Path
+    start_seconds: float
+    duration_seconds: float
+    x: float = 0.5
+    y: float = 0.35
+    scale: float = 0.4
+    opacity: float = 1.0
+    kind: str = "image"
+
+
+@dataclass(frozen=True)
 class EndCardSpec:
     """The mandatory closing screen appended after the main content.
 
@@ -106,19 +125,6 @@ class EndCardSpec:
     music_end_seconds: float | None = None
     music_fade_in_seconds: float | None = None
     music_fade_out_seconds: float | None = None
-
-
-@dataclass(frozen=True)
-class OverlaySpec:
-    """Image or pre-rendered title card placed on the main output clock."""
-
-    path: Path
-    start_seconds: float
-    duration_seconds: float
-    x: float = 0.5
-    y: float = 0.5
-    scale: float = 0.45
-    opacity: float = 1.0
 
 
 @dataclass(frozen=True)
@@ -451,64 +457,61 @@ def escape_filter_path(path: Path) -> str:
     return f"'{escaped}'"
 
 
-def _overlay_enable_expr(start: float, end: float) -> str:
-    """FFmpeg enable expression for an overlay time window."""
-    return f"between(t\\,{_fmt(start)}\\,{_fmt(end)})"
-
-
-def apply_overlays(
-    *,
-    video_label: str,
-    overlays: list[OverlaySpec],
-    input_start_index: int,
-    canvas_width: int,
-    canvas_height: int,
-) -> tuple[list[str], list[str], str, int]:
-    """Build input args + filter lines that composite overlays onto ``video_label``.
-
-    Returns ``(input_args, filter_lines, new_video_label, next_input_index)``.
-    """
-    if not overlays:
-        return [], [], video_label, input_start_index
-
-    input_args: list[str] = []
-    filters: list[str] = []
-    current = video_label
-    next_index = input_start_index
-    short_side = min(canvas_width, canvas_height)
-
-    for index, overlay in enumerate(overlays):
-        if overlay.duration_seconds <= 0 or not overlay.path.is_file():
+def _overlay_inputs(overlays: list[OverlaySpec], *, fps: float) -> list[str]:
+    """FFmpeg ``-i`` arguments for overlay stills and B-roll clips."""
+    args: list[str] = []
+    for spec in overlays:
+        if spec.kind == "video":
+            args += ["-i", str(spec.path)]
             continue
-        input_args += [
+        hold = max(spec.start_seconds + spec.duration_seconds + 0.25, 0.5)
+        args += [
             "-loop",
             "1",
+            "-framerate",
+            _fmt(fps),
             "-t",
-            _fmt(overlay.duration_seconds),
+            _fmt(hold),
             "-i",
-            str(overlay.path),
+            str(spec.path),
         ]
-        target_w = max(8, int(round(short_side * max(0.05, overlay.scale))))
-        ov_in = f"{next_index}:v"
-        scaled = f"ovsc{index}"
-        out = f"ovout{index}"
-        opacity = max(0.05, min(1.0, overlay.opacity))
-        filters.append(
-            f"[{ov_in}]scale={target_w}:-1:force_original_aspect_ratio=decrease,"
-            f"format=rgba,colorchannelmixer=aa={_fmt(opacity)}[{scaled}]"
-        )
-        start = max(0.0, overlay.start_seconds)
-        end = start + max(0.05, overlay.duration_seconds)
-        x_expr = f"(W-w)*{_fmt(max(0.0, min(1.0, overlay.x)))}"
-        y_expr = f"(H-h)*{_fmt(max(0.0, min(1.0, overlay.y)))}"
-        filters.append(
-            f"[{current}][{scaled}]overlay=x={x_expr}:y={y_expr}:"
-            f"enable='{_overlay_enable_expr(start, end)}'[{out}]"
-        )
-        current = out
-        next_index += 1
+    return args
 
-    return input_args, filters, current, next_index
+
+def _overlay_filters(
+    overlays: list[OverlaySpec],
+    *,
+    input_start: int,
+    base_label: str,
+    canvas_width: int,
+) -> tuple[list[str], str]:
+    """Composite overlays onto ``base_label`` in z-order. Video audio is ignored."""
+    lines: list[str] = []
+    current = base_label
+    for index, spec in enumerate(overlays):
+        src = input_start + index
+        start = max(0.0, spec.start_seconds)
+        duration = max(0.05, spec.duration_seconds)
+        width_px = max(8, int(round(canvas_width * min(max(spec.scale, 0.05), 3.0))))
+        opacity = min(1.0, max(0.05, spec.opacity))
+        chain: list[str] = []
+        if spec.kind == "video":
+            chain.append(f"trim=duration={_fmt(duration)}")
+            chain.append("setpts=PTS-STARTPTS")
+        chain.append(f"scale={width_px}:-1:force_original_aspect_ratio=decrease")
+        chain.append("format=yuva420p")
+        if opacity < 0.999:
+            chain.append(f"colorchannelmixer=aa={_fmt(opacity)}")
+        lines.append(f"[{src}:v]{','.join(chain)}[ov{index}]")
+        x_expr = f"main_w*{_fmt(spec.x)}-overlay_w/2"
+        y_expr = f"main_h*{_fmt(spec.y)}-overlay_h/2"
+        enable = f"between(t,{_fmt(start)},{_fmt(start + duration)})"
+        lines.append(
+            f"[{current}][ov{index}]overlay=x='{x_expr}':y='{y_expr}'"
+            f":enable='{enable}':repeatlast=0[ol{index}]"
+        )
+        current = f"ol{index}"
+    return lines, current
 
 
 def build_render_command(
@@ -645,21 +648,14 @@ def build_render_command(
         next_input += 1
 
     overlay_list = [item for item in (overlays or []) if item.duration_seconds > 0]
-    overlay_start_index = next_input
-    overlay_input_args, _, _, next_input = apply_overlays(
-        video_label="v0",
-        overlays=overlay_list,
-        input_start_index=overlay_start_index,
-        canvas_width=width,
-        canvas_height=height,
-    )
-    args += overlay_input_args
+    overlay_input_start = next_input
+    if overlay_list:
+        args += _overlay_inputs(overlay_list, fps=output_fps)
+        next_input += len(overlay_list)
 
     end_card_mode: str | None = None
-    end_card_image_index: int | None = None
     if end_card is not None:
         end_card_mode = resolve_end_card_audio_mode(end_card, has_audio=has_audio)
-        end_card_image_index = next_input
         args += _end_card_inputs(end_card, source=source, mode=end_card_mode, fps=output_fps)
 
     filters: list[str] = []
@@ -692,22 +688,21 @@ def build_render_command(
         join_lines, video_label, audio_label, expected = _join_chain(segments)
         filters += join_lines
 
-    if overlay_list:
-        _, overlay_filters, video_label, _ = apply_overlays(
-            video_label=video_label,
-            overlays=overlay_list,
-            input_start_index=overlay_start_index,
-            canvas_width=width,
-            canvas_height=height,
-        )
-        filters += overlay_filters
-
     if ass_path is not None:
         ass_filter = f"ass={escape_filter_path(ass_path)}"
         if fonts_dir is not None:
             ass_filter += f":fontsdir={escape_filter_path(fonts_dir)}"
         filters.append(f"[{video_label}]{ass_filter}[vout]")
         video_label = "vout"
+
+    if overlay_list:
+        overlay_lines, video_label = _overlay_filters(
+            overlay_list,
+            input_start=overlay_input_start,
+            base_label=video_label,
+            canvas_width=width,
+        )
+        filters += overlay_lines
 
     if full_reel_music is not None and music_input_index is not None:
         mix_lines, audio_label = build_background_music_graph(
@@ -729,7 +724,7 @@ def build_render_command(
         filters.append(f"[alim]{loud_filter}[aout]")
         audio_label = "aout"
 
-    if end_card is not None and end_card_mode is not None and end_card_image_index is not None:
+    if end_card is not None and end_card_mode is not None:
         # The main audio only fades at the boundary when the card does not carry
         # it over; in continue mode the fade happens inside the card instead.
         main_fade = (
@@ -744,7 +739,7 @@ def build_render_command(
             )
             audio_label = "amain"
 
-        image_index = end_card_image_index
+        image_index = next_input
         filters += _end_card_chains(
             end_card,
             mode=end_card_mode,

@@ -7,7 +7,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.models.reel_overlay import ReelOverlayKind
+from app.models.asset import ReelOverlayKind
 
 
 class ReelOverlayCreate(BaseModel):
@@ -17,11 +17,11 @@ class ReelOverlayCreate(BaseModel):
     style_json: str | None = None
     start_ms: int = Field(default=0, ge=0)
     duration_ms: int = Field(default=3000, ge=200, le=120_000)
-    x: float = Field(default=0.5, ge=0.0, le=1.0)
-    y: float = Field(default=0.5, ge=0.0, le=1.0)
-    scale: float = Field(default=0.45, ge=0.05, le=2.0)
-    opacity: float = Field(default=1.0, ge=0.05, le=1.0)
-    z_index: int = Field(default=0, ge=0, le=100)
+    x: float | None = Field(default=None, ge=0.0, le=1.0)
+    y: float | None = Field(default=None, ge=0.0, le=1.0)
+    scale: float | None = Field(default=None, ge=0.05, le=2.0)
+    opacity: float | None = Field(default=None, ge=0.05, le=1.0)
+    z_index: int | None = Field(default=None, ge=0, le=100)
     order: int | None = Field(default=None, ge=0)
 
 

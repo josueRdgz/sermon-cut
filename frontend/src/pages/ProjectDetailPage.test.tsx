@@ -110,6 +110,10 @@ function renderPage() {
   );
 }
 
+function workspaceButton(name: string) {
+  return screen.getByRole('button', { name });
+}
+
 describe('ProjectDetailPage workspace', () => {
   beforeEach(() => {
     vi.mocked(getProject).mockResolvedValue(PROJECT);
@@ -120,29 +124,26 @@ describe('ProjectDetailPage workspace', () => {
     renderPage();
     await screen.findByRole('heading', { name: PROJECT.title });
 
-    expect(screen.getByRole('tab', { name: /Proyecto/ })).toHaveAttribute('aria-selected', 'true');
+    expect(workspaceButton('Proyecto')).toHaveAttribute('aria-current', 'page');
     expect(screen.getByText('Panel de transcripción')).not.toBeVisible();
 
-    fireEvent.click(screen.getByRole('tab', { name: /Transcripción/ }));
+    fireEvent.click(workspaceButton('Transcripción'));
 
     expect(screen.getByText('Panel de transcripción')).toBeVisible();
     expect(screen.getByText('Panel del editor')).not.toBeVisible();
-    expect(screen.getByRole('tab', { name: /Predicación/ })).toBeInTheDocument();
+    expect(workspaceButton('Predicación')).toBeInTheDocument();
   });
 
   it('opens the editor automatically after accepting an AI proposal', async () => {
     renderPage();
     await screen.findByRole('heading', { name: PROJECT.title });
-    fireEvent.click(screen.getByRole('tab', { name: /Análisis IA/ }));
+    fireEvent.click(workspaceButton('Análisis IA'));
     fireEvent.click(screen.getByRole('button', { name: 'Aceptar propuesta' }));
 
     await waitFor(() => {
-      expect(screen.getByRole('tab', { name: /Editor de Reel/ })).toHaveAttribute(
-        'aria-selected',
-        'true',
-      );
+      expect(workspaceButton('Editor de Reel')).toHaveAttribute('aria-current', 'page');
     });
     expect(screen.getByText('Panel del editor')).toBeVisible();
-    expect(screen.getByRole('tablist', { name: 'Flujo del proyecto' })).toBeInTheDocument();
+    expect(screen.getByRole('navigation', { name: 'Secciones del proyecto' })).toBeInTheDocument();
   });
 });

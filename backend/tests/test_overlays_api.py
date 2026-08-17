@@ -108,7 +108,7 @@ def test_upload_image_and_create_overlay(
         f"/api/projects/{project_id}/reels/{reel_id}/overlays/{body['id']}"
     )
     assert deleted.status_code == 204
-    assert (storage_root / project_id / asset["filename"]).is_file()
+    assert (storage_root / project_id / asset["storage_path"]).is_file()
 
 
 def test_upload_video_broll_and_create_overlay(

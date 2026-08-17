@@ -117,6 +117,7 @@ def build_cues_for_reel(
     transcript_segments: list[SourceSegment],
     fallback_texts: list[str | None],
     options: SubtitleOptions,
+    caption_windows: list[tuple[float, float] | None] | None = None,
 ) -> CueBuildResult:
     """Remap transcript material onto the final reel timeline and split into cues.
 
@@ -167,12 +168,54 @@ def build_cues_for_reel(
         cues = _append_reference(cues, options.bible_reference, options)
 
     cues = _suppress_overlapping_cues(cues)
+    if caption_windows:
+        cues = remap_cues_to_caption_windows(cues, timeline.placements, caption_windows)
 
     return CueBuildResult(
         cues=cues,
         granularity_used=granularity,
         total_duration=timeline.total_duration,
     )
+
+
+def remap_cues_to_caption_windows(
+    cues: list[SubtitleCue],
+    placements: list[SegmentPlacement],
+    windows: list[tuple[float, float] | None],
+) -> list[SubtitleCue]:
+    """Move/scale cues from the video clip onto an independent caption window."""
+    if not cues or not any(window is not None for window in windows):
+        return cues
+    remapped: list[SubtitleCue] = []
+    for cue in cues:
+        placed = False
+        for placement, window in zip(placements, windows, strict=False):
+            if window is None:
+                continue
+            src0 = placement.output_start
+            src1 = src0 + placement.content_duration
+            mid = (cue.start + cue.end) / 2
+            if mid < src0 - 0.02 or mid > src1 + 0.02:
+                continue
+            dst0, dst1 = window
+            span = max(src1 - src0, 0.01)
+            scale = max(0.0, dst1 - dst0) / span
+            start = dst0 + (cue.start - src0) * scale
+            end = dst0 + (cue.end - src0) * scale
+            remapped.append(
+                SubtitleCue(
+                    start=max(dst0, start),
+                    end=min(dst1, max(end, start + 0.05)),
+                    text=cue.text,
+                    words=cue.words,
+                    highlight=cue.highlight,
+                )
+            )
+            placed = True
+            break
+        if not placed:
+            remapped.append(cue)
+    return remapped
 
 
 def _suppress_overlapping_cues(cues: list[SubtitleCue]) -> list[SubtitleCue]:

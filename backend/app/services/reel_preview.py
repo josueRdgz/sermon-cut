@@ -13,10 +13,9 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
 from app.core.exceptions import AppError, NotFoundError, ValidationAppError
+from app.models.asset import ProjectAsset, ReelOverlayKind
 from app.models.project import Project
-from app.models.project_asset import ProjectAsset
 from app.models.reel import Reel
-from app.models.reel_overlay import ReelOverlayKind
 from app.services import storage
 from app.services.ffprobe import probe_video
 from app.services.overlays import list_overlays_for_render
