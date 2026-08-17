@@ -1,23 +1,26 @@
-export const NLE_LAYOUT_KEY = 'sermon-cut.nle.layout.v4';
+export const NLE_LAYOUT_KEY = 'sermon-cut.nle.layout.v5';
 
 export interface NleLayout {
   binPx: number;
   inspectorPx: number;
   timelinePx: number;
   dualMonitors: boolean;
+  /** DaVinci-style wide inspector column (≥42% workspace). */
+  inspectorWide: boolean;
 }
 
 export const DEFAULT_NLE_LAYOUT: NleLayout = {
   binPx: 168,
-  inspectorPx: 340,
+  inspectorPx: 400,
   timelinePx: 240,
   dualMonitors: false,
+  inspectorWide: false,
 };
 
 export const BIN_MIN = 148;
 export const BIN_MAX = 260;
-export const INSPECTOR_MIN = 300;
-export const INSPECTOR_MAX = 520;
+export const INSPECTOR_MIN = 320;
+export const INSPECTOR_MAX = 680;
 export const TIMELINE_MIN = 220;
 export const TIMELINE_MAX = 480;
 
@@ -35,6 +38,7 @@ export function clampNleLayout(partial: Partial<NleLayout>): NleLayout {
       TIMELINE_MAX,
     ),
     dualMonitors: partial.dualMonitors ?? DEFAULT_NLE_LAYOUT.dualMonitors,
+    inspectorWide: partial.inspectorWide ?? DEFAULT_NLE_LAYOUT.inspectorWide,
   };
 }
 

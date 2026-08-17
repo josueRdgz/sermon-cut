@@ -72,6 +72,18 @@
   --dur-fast: 120ms;
   --dur: 180ms;
 
+  /* NLE timeline (Resolve-inspired muted palette) */
+  --nle-track-bg: #141414;
+  --nle-track-border: #2a2a2a;
+  --nle-clip-video: #3a4f6a;
+  --nle-clip-video-alt: #33465e;
+  --nle-clip-caption: #4a4460;
+  --nle-clip-overlay: #5c4a38;
+  --nle-clip-music: #355243;
+  --nle-ruler: #3a3a3a;
+  --nle-playhead: #c9a227;
+  --nle-selection: #d4a017;
+
   /* Layout metrics */
   --topbar-h: 52px;
   --statusbar-h: 40px;

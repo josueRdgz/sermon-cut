@@ -2248,12 +2248,14 @@ export function ReelEditor({
             <div
               className={`reel-nle__workspace${binCollapsed ? ' reel-nle__workspace--bin-collapsed' : ''}${
                 inspectorCollapsed ? ' reel-nle__workspace--inspector-collapsed' : ''
-              }`}
+              }${layout.inspectorWide && !inspectorCollapsed ? ' reel-nle__workspace--inspector-wide' : ''}`}
               style={{
                 ['--nle-bin' as string]: binCollapsed ? 'auto' : `${layout.binPx}px`,
                 ['--nle-inspector' as string]: inspectorCollapsed
                   ? '2.15rem'
-                  : `${layout.inspectorPx}px`,
+                  : layout.inspectorWide
+                    ? 'minmax(420px, 44%)'
+                    : `${layout.inspectorPx}px`,
               }}
             >
               <MediaBinPanel
@@ -2372,7 +2374,7 @@ export function ReelEditor({
             />
             <aside className={`reel-nle__inspector reel-nle__inspector--${activeTool}${
               inspectorCollapsed ? ' reel-nle__inspector--collapsed' : ''
-            }`}>
+            }${layout.inspectorWide ? ' reel-nle__inspector--wide' : ''}`}>
               <button
                 type="button"
                 className="reel-nle__inspector-toggle"
@@ -2381,6 +2383,17 @@ export function ReelEditor({
               >
                 {inspectorCollapsed ? '▸' : '▾'} Inspector
               </button>
+              {!inspectorCollapsed && (
+                <button
+                  type="button"
+                  className={`reel-nle__inspector-wide${layout.inspectorWide ? ' reel-nle__inspector-wide--active' : ''}`}
+                  title="Ampliar inspector (estilo Resolve)"
+                  aria-pressed={layout.inspectorWide}
+                  onClick={() => patchLayout({ inspectorWide: !layout.inspectorWide })}
+                >
+                  {layout.inspectorWide ? '◧ Ancho' : '◨ Ancho'}
+                </button>
+              )}
               {!inspectorCollapsed && (
               <>
               <div
@@ -2616,6 +2629,7 @@ export function ReelEditor({
                   previewSegmentIndex={orderedSegments.length > 0 ? previewIndex : null}
                   onReelUpdated={replaceReel}
                   hideStagePreview
+                  interactivePreview={activeTool === 'subtitles' && previewMode === 'logical'}
                 />
               </div>
 

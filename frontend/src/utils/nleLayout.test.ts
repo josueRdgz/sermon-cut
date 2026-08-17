@@ -4,9 +4,10 @@ describe('nleLayout', () => {
   it('clamps panel sizes into usable bounds', () => {
     expect(clampNleLayout({ binPx: 40, inspectorPx: 900, timelinePx: 80 })).toEqual({
       binPx: 148,
-      inspectorPx: 520,
+      inspectorPx: 680,
       timelinePx: 220,
       dualMonitors: false,
+      inspectorWide: false,
     });
   });
 

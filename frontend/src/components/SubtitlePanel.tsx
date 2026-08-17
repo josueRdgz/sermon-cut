@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 
 import { ApiError } from '../api/client';
@@ -6,6 +6,12 @@ import { updateReel } from '../api/reels';
 import { getSubtitlePreview, listSubtitleTemplates } from '../api/subtitles';
 import type { Reel, SubtitleGranularity, SubtitlePosition, SubtitleStyle } from '../types/reel';
 import type { SubtitleCuePreview, SubtitlePreview, SubtitleTemplateInfo } from '../types/subtitle';
+import {
+  SubtitlePreviewOverlay,
+  type SubtitleLayoutPatch,
+  FONT_MAX,
+  MARGIN_MAX,
+} from './SubtitlePreviewOverlay';
 
 interface SubtitlePanelProps {
   projectId: string;
@@ -17,6 +23,8 @@ interface SubtitlePanelProps {
   onReelUpdated: (reel: Reel) => void;
   /** Hide the duplicate gradient stage when the main player already shows cues. */
   hideStagePreview?: boolean;
+  /** Allow drag / Alt+wheel on the program monitor overlay. */
+  interactivePreview?: boolean;
 }
 
 const GRANULARITY_OPTIONS: { value: SubtitleGranularity; label: string }[] = [
@@ -99,11 +107,14 @@ export function SubtitlePanel({
   previewSegmentIndex,
   onReelUpdated,
   hideStagePreview = false,
+  interactivePreview = false,
 }: SubtitlePanelProps) {
   const [templates, setTemplates] = useState<SubtitleTemplateInfo[]>([]);
   const [preview, setPreview] = useState<SubtitlePreview | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const layoutTimerRef = useRef<number | null>(null);
+  const pendingLayoutRef = useRef<SubtitleLayoutPatch>({});
 
   const loadPreview = useCallback(async () => {
     try {
@@ -137,7 +148,7 @@ export function SubtitlePanel({
     reel.segments.map((segment) => `${segment.id}:${segment.transcript_text ?? ''}`).join('|'),
   ]);
 
-  const patch = useCallback(
+  const saveReelPatch = useCallback(
     async (payload: Parameters<typeof updateReel>[2]) => {
       setBusy(true);
       setError(null);
@@ -151,6 +162,34 @@ export function SubtitlePanel({
       }
     },
     [projectId, reel.id, onReelUpdated],
+  );
+
+  const flushLayoutPatch = useCallback(
+    (layoutPatch: SubtitleLayoutPatch) => {
+      pendingLayoutRef.current = { ...pendingLayoutRef.current, ...layoutPatch };
+      onReelUpdated({ ...reel, ...layoutPatch });
+      if (layoutTimerRef.current != null) {
+        window.clearTimeout(layoutTimerRef.current);
+      }
+      layoutTimerRef.current = window.setTimeout(() => {
+        layoutTimerRef.current = null;
+        const payload = pendingLayoutRef.current;
+        pendingLayoutRef.current = {};
+        if (Object.keys(payload).length > 0) {
+          void saveReelPatch(payload);
+        }
+      }, 280);
+    },
+    [onReelUpdated, saveReelPatch, reel],
+  );
+
+  useEffect(
+    () => () => {
+      if (layoutTimerRef.current != null) {
+        window.clearTimeout(layoutTimerRef.current);
+      }
+    },
+    [],
   );
 
   const outputTime = useMemo(() => {
@@ -168,25 +207,23 @@ export function SubtitlePanel({
   const overlayHost =
     typeof document !== 'undefined' ? document.getElementById('reel-subtitle-overlay') : null;
 
-  // Only paint on the player while a cue is active — never fall back to the
-  // first caption or a sample phrase during silence / between fragments.
   const overlayNode =
-    reel.subtitle_enabled && liveCueText ? (
-      <div
-        className={`${styleClass} subtitle-overlay--on-player`}
-        style={{
-          fontSize: `min(4cqh, ${Math.max(8, reel.subtitle_font_size * 0.018 * 100)}cqh)`,
-          opacity: reel.subtitle_opacity,
-          paddingBottom: 0,
-          textTransform: reel.subtitle_uppercase ? 'uppercase' : 'none',
-        }}
-      >
-        <span className="subtitle-overlay__text">{liveCueText}</span>
-      </div>
+    reel.subtitle_enabled && liveCueText && overlayHost ? (
+      <SubtitlePreviewOverlay
+        text={liveCueText}
+        style={reel.subtitle_style}
+        position={reel.subtitle_position}
+        fontSize={reel.subtitle_font_size}
+        opacity={reel.subtitle_opacity}
+        marginBottom={reel.subtitle_margin_bottom}
+        uppercase={reel.subtitle_uppercase}
+        interactive={interactivePreview}
+        onLayoutChange={flushLayoutPatch}
+      />
     ) : null;
 
   return (
-    <div className="subtitle-panel">
+    <div className="subtitle-panel subtitle-panel--inspector">
       {overlayHost && overlayNode ? createPortal(overlayNode, overlayHost) : null}
       <div className="reel-editor__section-header">
         <h4>Subtítulos incrustados (ASS)</h4>
@@ -195,15 +232,16 @@ export function SubtitlePanel({
             type="checkbox"
             checked={reel.subtitle_enabled}
             disabled={busy}
-            onChange={(e) => void patch({ subtitle_enabled: e.target.checked })}
+            onChange={(e) => void saveReelPatch({ subtitle_enabled: e.target.checked })}
           />
           <span>Incluir en el render</span>
         </label>
       </div>
 
-      <p className="muted">
-        Los tiempos se recalculan sobre la línea temporal final del Reel (no se conservan los del
-        video original). Fuentes del sistema únicamente — sin descargas.
+      <p className="muted subtitle-panel__hint">
+        {interactivePreview
+          ? 'Arrastra el subtítulo en la vista previa para moverlo. Alt + rueda del ratón cambia el tamaño.'
+          : 'Abre esta pestaña para ajustar posición y tamaño directamente en el visor.'}
       </p>
 
       <div className="transcript-toolbar">
@@ -215,7 +253,7 @@ export function SubtitlePanel({
             onChange={(e) => {
               const style = e.target.value as SubtitleStyle;
               const template = templates.find((item) => item.id === style);
-              void patch({
+              void saveReelPatch({
                 subtitle_style: style,
                 subtitle_font_size: template?.default_font_size,
                 subtitle_max_words: template?.default_max_words,
@@ -247,7 +285,7 @@ export function SubtitlePanel({
             value={reel.subtitle_granularity}
             disabled={busy || !reel.subtitle_enabled}
             onChange={(e) =>
-              void patch({ subtitle_granularity: e.target.value as SubtitleGranularity })
+              void saveReelPatch({ subtitle_granularity: e.target.value as SubtitleGranularity })
             }
           >
             {GRANULARITY_OPTIONS.map((option) => (
@@ -263,7 +301,7 @@ export function SubtitlePanel({
           <select
             value={reel.subtitle_position}
             disabled={busy || !reel.subtitle_enabled}
-            onChange={(e) => void patch({ subtitle_position: e.target.value as SubtitlePosition })}
+            onChange={(e) => void saveReelPatch({ subtitle_position: e.target.value as SubtitlePosition })}
           >
             {POSITION_OPTIONS.map((option) => (
               <option key={option.value} value={option.value}>
@@ -280,10 +318,10 @@ export function SubtitlePanel({
           <input
             type="range"
             min={24}
-            max={96}
+            max={FONT_MAX}
             value={reel.subtitle_font_size}
             disabled={busy || !reel.subtitle_enabled}
-            onChange={(e) => void patch({ subtitle_font_size: Number(e.target.value) })}
+            onChange={(e) => void saveReelPatch({ subtitle_font_size: Number(e.target.value) })}
           />
           <span className="muted">{reel.subtitle_font_size}px</span>
         </label>
@@ -295,7 +333,7 @@ export function SubtitlePanel({
             max={24}
             value={reel.subtitle_max_words}
             disabled={busy || !reel.subtitle_enabled}
-            onChange={(e) => void patch({ subtitle_max_words: Number(e.target.value) })}
+            onChange={(e) => void saveReelPatch({ subtitle_max_words: Number(e.target.value) })}
           />
         </label>
         <label className="field field--inline">
@@ -307,7 +345,7 @@ export function SubtitlePanel({
             step={0.05}
             value={reel.subtitle_opacity}
             disabled={busy || !reel.subtitle_enabled}
-            onChange={(e) => void patch({ subtitle_opacity: Number(e.target.value) })}
+            onChange={(e) => void saveReelPatch({ subtitle_opacity: Number(e.target.value) })}
           />
         </label>
         <label className="field field--inline">
@@ -315,10 +353,10 @@ export function SubtitlePanel({
           <input
             type="range"
             min={40}
-            max={400}
+            max={MARGIN_MAX}
             value={reel.subtitle_margin_bottom}
             disabled={busy || !reel.subtitle_enabled}
-            onChange={(e) => void patch({ subtitle_margin_bottom: Number(e.target.value) })}
+            onChange={(e) => void saveReelPatch({ subtitle_margin_bottom: Number(e.target.value) })}
           />
           <span className="muted">{reel.subtitle_margin_bottom}px</span>
         </label>
@@ -327,7 +365,7 @@ export function SubtitlePanel({
             type="checkbox"
             checked={reel.subtitle_uppercase}
             disabled={busy || !reel.subtitle_enabled}
-            onChange={(e) => void patch({ subtitle_uppercase: e.target.checked })}
+            onChange={(e) => void saveReelPatch({ subtitle_uppercase: e.target.checked })}
           />
           <span>Mayúsculas</span>
         </label>
@@ -342,7 +380,7 @@ export function SubtitlePanel({
             placeholder="p. ej. Juan 3:16"
             disabled={busy || !reel.subtitle_enabled}
             onBlur={(e) =>
-              void patch({
+              void saveReelPatch({
                 subtitle_bible_reference: e.target.value.trim() || null,
               })
             }

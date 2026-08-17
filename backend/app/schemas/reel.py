@@ -69,12 +69,12 @@ class ReelCreate(BaseModel):
     subtitle_style: SubtitleStyle = SubtitleStyle.reformed_sober
     subtitle_enabled: bool = True
     subtitle_granularity: SubtitleGranularity = SubtitleGranularity.auto
-    subtitle_font_size: int = Field(default=52, ge=24, le=96)
+    subtitle_font_size: int = Field(default=52, ge=24, le=120)
     subtitle_position: SubtitlePosition = SubtitlePosition.bottom
     subtitle_uppercase: bool = False
     subtitle_max_words: int = Field(default=6, ge=1, le=24)
     subtitle_opacity: float = Field(default=1.0, ge=0.2, le=1.0)
-    subtitle_margin_bottom: int = Field(default=120, ge=40, le=400)
+    subtitle_margin_bottom: int = Field(default=120, ge=40, le=500)
     subtitle_bible_reference: str | None = Field(default=None, max_length=200)
     aspect_ratio: AspectRatio = AspectRatio.nine_sixteen
     status: ReelStatus = ReelStatus.draft
@@ -92,12 +92,12 @@ class ReelUpdate(BaseModel):
     subtitle_style: SubtitleStyle | None = None
     subtitle_enabled: bool | None = None
     subtitle_granularity: SubtitleGranularity | None = None
-    subtitle_font_size: int | None = Field(default=None, ge=24, le=96)
+    subtitle_font_size: int | None = Field(default=None, ge=24, le=120)
     subtitle_position: SubtitlePosition | None = None
     subtitle_uppercase: bool | None = None
     subtitle_max_words: int | None = Field(default=None, ge=1, le=24)
     subtitle_opacity: float | None = Field(default=None, ge=0.2, le=1.0)
-    subtitle_margin_bottom: int | None = Field(default=None, ge=40, le=400)
+    subtitle_margin_bottom: int | None = Field(default=None, ge=40, le=500)
     subtitle_bible_reference: str | None = Field(default=None, max_length=200)
     aspect_ratio: AspectRatio | None = None
     status: ReelStatus | None = None
