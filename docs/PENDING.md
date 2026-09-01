@@ -13,7 +13,7 @@ tú (o un próximo ciclo) debéis hacer**. Complementa
 
 ### Cada vez que clones / actualices
 
-- [ ] `./scripts/setup-macos.sh` **o** `setup-linux.sh` **o** `setup-windows.ps1`
+- [ ] `./scripts/clone-macos.sh` / `setup-macos.sh` **o** `setup-linux.sh` **o** `setup-windows.ps1`
 - [ ] Copia `.env.example` → `.env` y rellena solo lo que uses
 - [ ] Instala **FFmpeg + FFprobe** en el PATH (no se empaquetan)
 - [ ] `cd backend && .venv/bin/python -m app.cli doctor`

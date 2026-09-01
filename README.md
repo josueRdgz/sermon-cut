@@ -31,7 +31,7 @@ la fuente con subtítulos quemados, SRT o ambos.
 | Docker | **No** | **No** | **No** |
 
 ```bash
-# macOS (ejemplo)
+# macOS (ejemplo; setup-macos.sh también puede instalar estas fórmulas)
 brew install python@3.12 node ffmpeg
 ffmpeg -version && ffprobe -version
 ```
@@ -78,11 +78,25 @@ Si `ffmpeg` no está en el `PATH`, el endpoint de render responde `503` con
 ## Puesta en marcha (recomendada)
 
 ```bash
-# macOS
+# macOS — clonar y preparar (Homebrew instala Python 3.12, Node y FFmpeg si faltan;
+# usa el python3.12 de brew, no el 3.9 de /usr/bin)
+git clone https://github.com/josueRdgz/sermon-cut.git
+cd sermon-cut
+./scripts/clone-macos.sh
+# App de escritorio (.dmg): ./scripts/clone-macos.sh --with-desktop
+
+# Equivalente si ya tienes el clon:
 ./scripts/setup-macos.sh
+./scripts/setup-macos.sh --with-desktop   # whisper + Gemini + tracking + rustup
 
 # Linux
 ./scripts/setup-linux.sh
+```
+
+Sin clon previo, desde Terminal en el Mac:
+
+```bash
+bash -c "$(curl -fsSL https://raw.githubusercontent.com/josueRdgz/sermon-cut/main/scripts/clone-macos.sh)"
 ```
 
 ```powershell
