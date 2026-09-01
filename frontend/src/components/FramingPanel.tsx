@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 
+import { ApiError } from '../api/client';
 import {
   clearTracking,
   computeTracking,
@@ -11,6 +12,7 @@ import {
 } from '../api/framing';
 import type { FramingMode, FramingPreview, FramingStatus, TrackingReport } from '../types/framing';
 import type { Reel, ReelSegment } from '../types/reel';
+import { quantizeFramingPreviewTime } from '../utils/framingPreview';
 
 interface FramingPanelProps {
   projectId: string;
@@ -19,6 +21,8 @@ interface FramingPanelProps {
   onReelChange: (reel: Reel) => void;
   /** Smaller preview for the NLE inspector. */
   compact?: boolean;
+  /** When false the panel is hidden: do not hit FFmpeg for stills. */
+  active?: boolean;
 }
 
 const MODE_OPTIONS: { value: FramingMode; label: string }[] = [
@@ -34,6 +38,7 @@ export function FramingPanel({
   sourceTime,
   onReelChange,
   compact = false,
+  active = true,
 }: FramingPanelProps) {
   const [status, setStatus] = useState<FramingStatus | null>(null);
   const [report, setReport] = useState<TrackingReport | null>(null);
@@ -65,19 +70,27 @@ export function FramingPanel({
   }, [reel.segments, manualSegmentId]);
 
   useEffect(() => {
-    if (sourceTime == null) return;
-    let cancelled = false;
-    getFramingPreview(projectId, reel.id, sourceTime)
-      .then((data) => {
-        if (!cancelled) setPreview(data);
-      })
-      .catch(() => {
-        if (!cancelled) setPreview(null);
-      });
+    // Compact inspector has no still; hidden tabs must not extract JPEGs while
+    // the program monitor plays (Safari then reports "Load failed").
+    if (!active || compact || sourceTime == null) return;
+    const quantized = quantizeFramingPreviewTime(sourceTime);
+    const controller = new AbortController();
+    const timer = window.setTimeout(() => {
+      getFramingPreview(projectId, reel.id, quantized, undefined, controller.signal)
+        .then((data) => {
+          if (!controller.signal.aborted) setPreview(data);
+        })
+        .catch((err: unknown) => {
+          if (controller.signal.aborted) return;
+          if (err instanceof ApiError && err.code === 'request_cancelled') return;
+          setPreview(null);
+        });
+    }, 280);
     return () => {
-      cancelled = true;
+      window.clearTimeout(timer);
+      controller.abort();
     };
-  }, [projectId, reel.id, sourceTime, status?.framing_mode, status?.has_cache]);
+  }, [active, compact, projectId, reel.id, sourceTime, status?.framing_mode, status?.has_cache]);
 
   const handleMode = async (mode: FramingMode) => {
     setBusy(true);

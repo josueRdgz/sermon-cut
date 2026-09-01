@@ -5,7 +5,7 @@ import type {
   ManualCropPayload,
   TrackingReport,
 } from '../types/framing';
-import { API_BASE_URL, apiDeleteJson, apiGet, apiJson } from './client';
+import { API_BASE_URL, DEFAULT_FETCH_TIMEOUT_MS, LONG_FETCH_TIMEOUT_MS, apiDeleteJson, apiGet, apiJson } from './client';
 
 export function getFramingStatus(projectId: string, reelId: string): Promise<FramingStatus> {
   return apiGet(`/api/projects/${projectId}/reels/${reelId}/framing`);
@@ -24,11 +24,16 @@ export function computeTracking(
   reelId: string,
   payload: { tracker?: string; sample_fps?: number } = {},
 ): Promise<TrackingReport> {
-  return apiJson(`/api/projects/${projectId}/reels/${reelId}/framing/track`, 'POST', {
-    tracker: 'opencv',
-    sample_fps: 2,
-    ...payload,
-  });
+  return apiJson(
+    `/api/projects/${projectId}/reels/${reelId}/framing/track`,
+    'POST',
+    {
+      tracker: 'opencv',
+      sample_fps: 2,
+      ...payload,
+    },
+    { timeoutMs: LONG_FETCH_TIMEOUT_MS },
+  );
 }
 
 export function clearTracking(projectId: string, reelId: string): Promise<FramingStatus> {
@@ -53,10 +58,15 @@ export function getFramingPreview(
   reelId: string,
   sourceTime: number,
   segmentId?: string,
+  signal?: AbortSignal,
 ): Promise<FramingPreview> {
   const params = new URLSearchParams({ source_time: String(sourceTime) });
   if (segmentId) params.set('segment_id', segmentId);
-  return apiGet(`/api/projects/${projectId}/reels/${reelId}/framing/preview?${params}`);
+  return apiGet(
+    `/api/projects/${projectId}/reels/${reelId}/framing/preview?${params}`,
+    DEFAULT_FETCH_TIMEOUT_MS,
+    signal,
+  );
 }
 
 export function framingPreviewImageUrl(

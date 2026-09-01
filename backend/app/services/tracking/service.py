@@ -425,9 +425,10 @@ def preview_frame(
     still_name = None
     try:
         preview_root = tracking_cache.preview_dir(project_id, reel_id)
-        still = preview_root / f"t-{source_time:.2f}.jpg"
+        bucket = round(source_time * 4.0) / 4.0
+        still = preview_root / f"t-{bucket:.2f}.jpg"
         if not still.is_file():
-            extract_still(source, at_seconds=source_time, output=still)
+            extract_still(source, at_seconds=bucket, output=still, wait=False)
         still_name = still.name
     except Exception as exc:  # noqa: BLE001
         logger.info("Preview still skipped: %s", exc)

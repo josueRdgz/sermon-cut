@@ -111,10 +111,14 @@ async function fetchWithTimeout(
   }
 }
 
-export async function apiGet<T>(path: string, timeoutMs = DEFAULT_FETCH_TIMEOUT_MS): Promise<T> {
+export async function apiGet<T>(
+  path: string,
+  timeoutMs = DEFAULT_FETCH_TIMEOUT_MS,
+  signal?: AbortSignal,
+): Promise<T> {
   const response = await fetchWithTimeout(
     `${API_BASE_URL}${path}`,
-    { headers: { Accept: 'application/json' } },
+    { headers: { Accept: 'application/json' }, signal },
     timeoutMs,
   );
   if (!response.ok) throw await parseError(response);

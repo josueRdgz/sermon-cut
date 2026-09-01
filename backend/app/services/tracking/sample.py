@@ -6,6 +6,7 @@ import logging
 import shutil
 import subprocess
 import tempfile
+import threading
 from collections.abc import Callable
 from pathlib import Path
 
@@ -16,14 +17,21 @@ logger = logging.getLogger(__name__)
 
 FFmpegRunner = Callable[[list[str]], None]
 
+_extract_lock = threading.Lock()
+_STILL_TIMEOUT_SECONDS = 20.0
+
 
 def _default_runner(args: list[str]) -> None:
-    completed = subprocess.run(  # noqa: S603
-        args,
-        capture_output=True,
-        text=True,
-        check=False,
-    )
+    try:
+        completed = subprocess.run(  # noqa: S603
+            args,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=_STILL_TIMEOUT_SECONDS,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise RuntimeError("ffmpeg frame extract timed out") from exc
     if completed.returncode != 0:
         raise RuntimeError(completed.stderr[-500:] or "ffmpeg frame extract failed")
 
@@ -50,6 +58,7 @@ def extract_still(
     output: Path,
     ffmpeg: str | None = None,
     runner: FFmpegRunner = _default_runner,
+    wait: bool = True,
 ) -> Path:
     """Grab a single JPEG still — analysis only, never a full export."""
     binary = ffmpeg or shutil.which("ffmpeg")
@@ -72,7 +81,13 @@ def extract_still(
         "-y",
         str(output),
     ]
-    runner(args)
+    acquired = _extract_lock.acquire(timeout=None if wait else 0.05)
+    if not acquired:
+        raise RuntimeError("preview still busy")
+    try:
+        runner(args)
+    finally:
+        _extract_lock.release()
     return output
 
 
