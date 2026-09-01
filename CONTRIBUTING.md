@@ -14,9 +14,12 @@ PRs, and discussions.
 ### macOS
 
 ```bash
-./scripts/setup-macos.sh
-./scripts/start-backend.sh   # terminal 1
-./scripts/start-frontend.sh  # terminal 2
+git clone https://github.com/josueRdgz/sermon-cut.git
+cd sermon-cut
+./scripts/clone-macos.sh          # o ./scripts/setup-macos.sh
+# ./scripts/clone-macos.sh --with-desktop   # Rust + extras para el .dmg
+./scripts/start-backend.sh        # terminal 1
+./scripts/start-frontend.sh       # terminal 2
 ```
 
 ### Linux

@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- Instalación macOS en un paso: `scripts/clone-macos.sh` clona el repo si hace
+  falta y `setup-macos.sh` instala con Homebrew las fórmulas que falten
+  (`python@3.12`, `node`, `ffmpeg`), elige Python 3.12 de brew en lugar del
+  3.9 del sistema, y acepta `--with-desktop` (extras + rustup) para generar
+  el `.dmg`.
+
 ## [0.4.11] — 2026-08-17
 
 ### Fixed

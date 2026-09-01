@@ -77,7 +77,7 @@ Esa forma **no se elimina**.
 
 ## Requisitos
 
-1. Setup normal del repo (`./scripts/setup-macos.sh`, `setup-linux.sh` o `setup-windows.ps1`).
+1. Setup normal del repo (`./scripts/setup-macos.sh --with-desktop`, `setup-linux.sh` o `setup-windows.ps1`). En macOS, `--with-desktop` instala extras Python (whisper/gemini/tracking) y rustup si faltan.
 2. **FFmpeg** y **FFprobe** en el PATH del sistema.
 3. **Rust** estable vía [rustup](https://rustup.rs/) (`cargo`, `rustc`).
 4. En macOS: Xcode Command Line Tools (`xcode-select --install`).
