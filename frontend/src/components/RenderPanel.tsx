@@ -159,33 +159,41 @@ export function RenderPanel({
   }, [selectedProfile, quality]);
 
   useEffect(() => {
-    let cancelled = false;
     if (segmentCount === 0) {
       setCoherence(null);
       setCoherenceAcknowledged(false);
-      return () => {
-        cancelled = true;
-      };
+      return;
     }
-    setCoherenceLoading(true);
-    validateReelCoherence(projectId, reelId, {
-      include_ai_review: false,
-      include_media_probes: false,
-    })
-      .then((report) => {
-        if (!cancelled) {
-          setCoherence(report);
-          setCoherenceAcknowledged(false);
-        }
-      })
-      .catch(() => {
-        if (!cancelled) setCoherence(null);
-      })
-      .finally(() => {
-        if (!cancelled) setCoherenceLoading(false);
-      });
+    const controller = new AbortController();
+    const timer = window.setTimeout(() => {
+      setCoherenceLoading(true);
+      validateReelCoherence(
+        projectId,
+        reelId,
+        {
+          include_ai_review: false,
+          include_media_probes: false,
+        },
+        controller.signal,
+      )
+        .then((report) => {
+          if (!controller.signal.aborted) {
+            setCoherence(report);
+            setCoherenceAcknowledged(false);
+          }
+        })
+        .catch((err: unknown) => {
+          if (controller.signal.aborted) return;
+          if (err instanceof ApiError && err.code === 'request_cancelled') return;
+          if (!controller.signal.aborted) setCoherence(null);
+        })
+        .finally(() => {
+          if (!controller.signal.aborted) setCoherenceLoading(false);
+        });
+    }, 450);
     return () => {
-      cancelled = true;
+      window.clearTimeout(timer);
+      controller.abort();
     };
   }, [projectId, reelId, segmentCount, segments]);
 

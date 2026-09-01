@@ -52,9 +52,13 @@ async function parseError(response: Response): Promise<ApiError> {
 function withTimeoutSignal(
   timeoutMs: number,
   external?: AbortSignal,
-): { signal: AbortSignal; clear: () => void } {
+): { signal: AbortSignal; clear: () => void; timedOut: () => boolean } {
   const controller = new AbortController();
-  const timer = window.setTimeout(() => controller.abort(), timeoutMs);
+  let timedOut = false;
+  const timer = window.setTimeout(() => {
+    timedOut = true;
+    controller.abort();
+  }, timeoutMs);
   const onExternalAbort = () => controller.abort();
   if (external) {
     if (external.aborted) controller.abort();
@@ -66,6 +70,7 @@ function withTimeoutSignal(
       window.clearTimeout(timer);
       if (external) external.removeEventListener('abort', onExternalAbort);
     },
+    timedOut: () => timedOut,
   };
 }
 
@@ -74,11 +79,14 @@ async function fetchWithTimeout(
   init: RequestInit = {},
   timeoutMs = DEFAULT_FETCH_TIMEOUT_MS,
 ): Promise<Response> {
-  const { signal, clear } = withTimeoutSignal(timeoutMs, init.signal ?? undefined);
+  const { signal, clear, timedOut } = withTimeoutSignal(timeoutMs, init.signal ?? undefined);
   try {
     return await fetch(input, { ...init, signal });
   } catch (err) {
     if (err instanceof DOMException && err.name === 'AbortError') {
+      if (!timedOut() && init.signal?.aborted) {
+        throw new ApiError('La solicitud se canceló.', 0, 'request_cancelled');
+      }
       throw new ApiError(
         'La solicitud tardó demasiado o se canceló. Inténtalo de nuevo.',
         0,

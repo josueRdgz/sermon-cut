@@ -114,8 +114,22 @@ def detect_silences(
         "null",
         "-",
     ]
+    timeout = min(120.0, max(20.0, duration * 3.0))
     try:
-        output = runner(args)
+        if runner is _default_runner:
+            completed = subprocess.run(  # noqa: S603 — controlled arg list
+                args,
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=timeout,
+            )
+            output = (completed.stderr or "") + (completed.stdout or "")
+        else:
+            output = runner(args)
+    except subprocess.TimeoutExpired:
+        logger.warning("silencedetect timed out for %s", source)
+        return []
     except OSError:
         logger.warning("silencedetect failed for %s", source)
         return []

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import type { ReelSegment } from '../types/reel';
-import { previewTimelineIdentity, resolvePreviewSeek } from './reelPreview';
+import { previewTimelineIdentity, playheadAfterTrim, resolvePreviewSeek } from './reelPreview';
 
 function segment(
   id: string,
@@ -103,5 +103,45 @@ describe('previewTimelineIdentity', () => {
     expect(previewTimelineIdentity('reel-1', trimmed)).not.toBe(
       previewTimelineIdentity('reel-1', original),
     );
+  });
+});
+
+describe('playheadAfterTrim', () => {
+  const segments = [segment('a', 0, 10, 20), segment('b', 1, 40, 50)];
+
+  it('keeps the playhead when the cut still contains the current time', () => {
+    expect(playheadAfterTrim(segments, 0, 15)).toEqual({
+      segmentIndex: 0,
+      sourceTime: 15,
+      outputTime: 5,
+      seekRequired: false,
+    });
+  });
+
+  it('does not jump to the first fragment when a later clip is trimmed', () => {
+    const trimmed = [segment('a', 0, 10, 20), segment('b', 1, 42, 50)];
+    expect(playheadAfterTrim(trimmed, 1, 45)).toMatchObject({
+      segmentIndex: 1,
+      sourceTime: 45,
+      seekRequired: false,
+    });
+  });
+
+  it('clamps into the new in-point when the start passes the playhead', () => {
+    const trimmed = [segment('a', 0, 16, 20), segment('b', 1, 40, 50)];
+    expect(playheadAfterTrim(trimmed, 0, 15)).toMatchObject({
+      segmentIndex: 0,
+      sourceTime: 16,
+      seekRequired: true,
+    });
+  });
+
+  it('advances to the next clip when the out-point passes the playhead', () => {
+    const trimmed = [segment('a', 0, 10, 14), segment('b', 1, 40, 50)];
+    expect(playheadAfterTrim(trimmed, 0, 15)).toMatchObject({
+      segmentIndex: 1,
+      sourceTime: 40,
+      seekRequired: true,
+    });
   });
 });

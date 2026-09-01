@@ -7,13 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
-### Added
+### Fixed
 
-- Instalación macOS en un paso: `scripts/clone-macos.sh` clona el repo si hace
-  falta y `setup-macos.sh` instala con Homebrew las fórmulas que falten
-  (`python@3.12`, `node`, `ffmpeg`), elige Python 3.12 de brew en lugar del
-  3.9 del sistema, y acepta `--with-desktop` (extras + rustup) para generar
-  el `.dmg`.
+- Editor de Reel: definir un corte ya no para la reproducción ni salta al
+  primer fragmento. El visor mantiene el playhead en el clip editado.
+- Recortar un fragmento deja de lanzar validaciones de coherencia en cada
+  movimiento (debounce + cancelación). Eso evitaba el error «La solicitud
+  tardó demasiado o se canceló» y un preview congelado.
+- Analizar cortes técnicos usa el timeout largo (3 min) y FFmpeg
+  silencedetect ya no puede colgarse sin límite.
 
 ## [0.4.11] — 2026-08-17
 

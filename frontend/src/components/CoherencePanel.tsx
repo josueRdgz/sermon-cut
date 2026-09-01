@@ -6,6 +6,7 @@ import {
   expandCoherenceContext,
   validateReelCoherence,
 } from '../api/coherence';
+import { ApiError } from '../api/client';
 import { removeReelSegment, updateReelSegment } from '../api/reels';
 import type { CoherenceIssue, CoherenceReport } from '../types/coherence';
 import type { Reel, ReelSegment } from '../types/reel';
@@ -68,6 +69,7 @@ export function CoherencePanel({
       });
       publish(next);
     } catch (err) {
+      if (err instanceof ApiError && err.code === 'request_cancelled') return;
       setError(err instanceof Error ? err.message : 'No se pudo validar la unión');
       publish(null);
     } finally {
@@ -76,8 +78,41 @@ export function CoherencePanel({
   }, [projectId, reelId, segmentCount, includeAi, includeMedia, publish]);
 
   useEffect(() => {
-    void runValidate();
-  }, [runValidate, segmentsSignature]);
+    if (segmentCount === 0) {
+      publish(null);
+      return;
+    }
+    const controller = new AbortController();
+    const timer = window.setTimeout(() => {
+      setBusy(true);
+      setError(null);
+      void validateReelCoherence(
+        projectId,
+        reelId,
+        {
+          include_ai_review: includeAi,
+          include_media_probes: includeMedia,
+        },
+        controller.signal,
+      )
+        .then((next) => {
+          if (!controller.signal.aborted) publish(next);
+        })
+        .catch((err: unknown) => {
+          if (controller.signal.aborted) return;
+          if (err instanceof ApiError && err.code === 'request_cancelled') return;
+          setError(err instanceof Error ? err.message : 'No se pudo validar la unión');
+          publish(null);
+        })
+        .finally(() => {
+          if (!controller.signal.aborted) setBusy(false);
+        });
+    }, 450);
+    return () => {
+      window.clearTimeout(timer);
+      controller.abort();
+    };
+  }, [projectId, reelId, segmentCount, includeAi, includeMedia, segmentsSignature, publish]);
 
   const handleDismiss = async (issue: CoherenceIssue) => {
     setBusy(true);
