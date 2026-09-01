@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+
+- Editor de Reel: definir un corte ya no para la reproducción ni salta al
+  primer fragmento. El visor mantiene el playhead en el clip editado.
+- Recortar un fragmento deja de lanzar validaciones de coherencia en cada
+  movimiento (debounce + cancelación). Eso evitaba el error «La solicitud
+  tardó demasiado o se canceló» y un preview congelado.
+- Analizar cortes técnicos usa el timeout largo (3 min) y FFmpeg
+  silencedetect ya no puede colgarse sin límite.
+
 ## [0.4.11] — 2026-08-17
 
 ### Fixed

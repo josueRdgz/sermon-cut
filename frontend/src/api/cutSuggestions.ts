@@ -3,7 +3,7 @@ import type {
   CutSuggestionActionResponse,
   CutSuggestionsReport,
 } from '../types/cutSuggestions';
-import { apiGet, apiJson } from './client';
+import { LONG_FETCH_TIMEOUT_MS, apiGet, apiJson } from './client';
 
 export function generateCutSuggestions(
   projectId: string,
@@ -19,6 +19,7 @@ export function generateCutSuggestions(
       include_fillers: true,
       ...payload,
     },
+    { timeoutMs: LONG_FETCH_TIMEOUT_MS },
   );
 }
 

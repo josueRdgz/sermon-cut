@@ -376,6 +376,7 @@ export function VideoHighlightsPanel({
       })
       .catch((reason: unknown) => {
         if (controller.signal.aborted) return;
+        if (reason instanceof ApiError && reason.code === 'request_cancelled') return;
         setPreviewSrc(null);
         setError(errorText(reason));
       })

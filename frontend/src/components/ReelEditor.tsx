@@ -62,6 +62,7 @@ import {
 import type { BackgroundMusicSettings } from '../types/backgroundMusic';
 import {
   previewTimelineIdentity,
+  playheadAfterTrim,
   resolvePreviewSeek,
   type PreviewSeekTarget,
 } from '../utils/reelPreview';
@@ -290,6 +291,8 @@ export function ReelEditor({
   const reloadEpochRef = useRef(0);
   const previewIndexRef = useRef(0);
   const previewingRef = useRef(false);
+  const previewOutputTimeRef = useRef(0);
+  const lastPreviewReelIdRef = useRef<string | null>(null);
   const focusedReelRef = useRef<string | null>(null);
   const audioOffsetRef = useRef(0);
   const pendingAudioTimeRef = useRef<number | null>(null);
@@ -605,30 +608,20 @@ export function ReelEditor({
     }
   }
 
-  async function adjustEdge(segment: ReelSegment, edge: 'start' | 'end', delta: number) {
-    if (!activeReel) return;
+  function adjustEdge(segment: ReelSegment, edge: 'start' | 'end', delta: number) {
     const start =
       edge === 'start'
         ? round3(segment.source_start_seconds + delta)
         : segment.source_start_seconds;
     const end =
       edge === 'end' ? round3(segment.source_end_seconds + delta) : segment.source_end_seconds;
-    setBusy(true);
-    setError(null);
-    try {
-      const updated = await updateReelSegment(projectId, activeReel.id, segment.id, {
-        source_start_seconds: start,
-        source_end_seconds: end,
-      });
-      replaceReel(updated);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Ajuste inválido');
-    } finally {
-      setBusy(false);
-    }
+    handleTrimSegment(segment.id, {
+      source_start_seconds: start,
+      source_end_seconds: end,
+    });
   }
 
-  async function handleSegmentField(
+  function handleSegmentField(
     segment: ReelSegment,
     patch: {
       source_start_seconds?: number;
@@ -639,26 +632,48 @@ export function ReelEditor({
     },
   ) {
     if (!activeReel) return;
-    setBusy(true);
-    setError(null);
-    try {
-      const payload = { ...patch };
-      if (patch.transition_type && patch.transition_type !== 'hard_cut') {
-        const currentMs =
-          patch.transition_duration_ms ?? segment.transition_duration_ms ?? 0;
-        if (patch.transition_duration_ms === undefined && currentMs <= 0) {
-          payload.transition_duration_ms = 350;
-        }
-      } else if (patch.transition_type === 'hard_cut') {
-        payload.transition_duration_ms = 0;
+    if (patch.source_start_seconds != null || patch.source_end_seconds != null) {
+      handleTrimSegment(segment.id, {
+        source_start_seconds: patch.source_start_seconds,
+        source_end_seconds: patch.source_end_seconds,
+      });
+      if (
+        patch.transition_type == null &&
+        patch.transition_duration_ms == null &&
+        patch.transcript_text == null
+      ) {
+        return;
       }
-      const updated = await updateReelSegment(projectId, activeReel.id, segment.id, payload);
-      replaceReel(updated);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'No se pudo actualizar el fragmento');
-    } finally {
-      setBusy(false);
     }
+    const payload = { ...patch };
+    if (patch.transition_type && patch.transition_type !== 'hard_cut') {
+      const currentMs = patch.transition_duration_ms ?? segment.transition_duration_ms ?? 0;
+      if (patch.transition_duration_ms === undefined && currentMs <= 0) {
+        payload.transition_duration_ms = 350;
+      }
+    } else if (patch.transition_type === 'hard_cut') {
+      payload.transition_duration_ms = 0;
+    }
+    setReels((prev) =>
+      prev.map((reel) => {
+        if (reel.id !== activeReel.id) return reel;
+        return {
+          ...reel,
+          segments: reel.segments.map((item) =>
+            item.id === segment.id ? { ...item, ...payload } : item,
+          ),
+        };
+      }),
+    );
+    debounceSegmentPersist(async () => {
+      try {
+        const updated = await updateReelSegment(projectId, activeReel.id, segment.id, payload);
+        replaceReel(updated);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'No se pudo actualizar el fragmento');
+        void reload();
+      }
+    });
   }
 
   async function handleRemoveSegment(segmentId: string) {
@@ -1787,41 +1802,88 @@ export function ReelEditor({
   const previewIdentity = previewTimelineIdentity(activeReel?.id, orderedSegments);
 
   useEffect(() => {
-    previewingRef.current = false;
-    setPreviewing(false);
-    previewIndexRef.current = 0;
-    setPreviewIndex(0);
-    setPreviewOutputTime(0);
-    clearCutTimer();
-    programLaneRef.current = 0;
-    setProgramLane(0);
+    previewOutputTimeRef.current = previewOutputTime;
+  }, [previewOutputTime]);
 
-    const video = videoARef.current;
-    const audio = audioRef.current;
+  useEffect(() => {
     const first = orderedSegments[0];
-    videoBRef.current?.pause();
-    if (!video || !first) {
+    const reelId = activeReel?.id ?? null;
+    const reelChanged = lastPreviewReelIdRef.current !== reelId;
+    lastPreviewReelIdRef.current = reelId;
+
+    const pauseProgram = () => {
+      previewingRef.current = false;
+      setPreviewing(false);
+      clearCutTimer();
+      programLaneRef.current = 0;
+      setProgramLane(0);
+      videoARef.current?.pause();
+      videoBRef.current?.pause();
+      audioRef.current?.pause();
+    };
+
+    const showSourceFrame = (sourceSeconds: number) => {
+      const video = programVideo() ?? videoARef.current;
+      const audio = audioRef.current;
+      if (!video) return;
+      const apply = () => {
+        setMediaTime(video, sourceSeconds);
+        applyPreviewGain();
+        if (usesSeparateAudio() && audio) {
+          syncAudioToVideo(sourceSeconds, true);
+        }
+        setSourceTime(sourceSeconds);
+        prefetchStandby();
+      };
+      if (video.readyState >= HTMLMediaElement.HAVE_METADATA) {
+        apply();
+      } else {
+        video.addEventListener('loadedmetadata', apply, { once: true });
+      }
+    };
+
+    if (!first) {
+      pauseProgram();
+      previewIndexRef.current = 0;
+      setPreviewIndex(0);
+      setPreviewOutputTime(0);
       setSourceTime(null);
       return;
     }
-    video.pause();
-    audio?.pause();
-    const showFirstFrame = () => {
-      video.currentTime = first.source_start_seconds;
-      applyPreviewGain();
-      if (usesSeparateAudio() && audio) {
-        syncAudioToVideo(first.source_start_seconds, true);
-      }
-      setSourceTime(first.source_start_seconds);
-      prefetchStandby();
-    };
-    if (video.readyState >= HTMLMediaElement.HAVE_METADATA) {
-      showFirstFrame();
-    } else {
-      video.addEventListener('loadedmetadata', showFirstFrame, { once: true });
-      return () => video.removeEventListener('loadedmetadata', showFirstFrame);
+
+    if (reelChanged) {
+      pauseProgram();
+      previewIndexRef.current = 0;
+      setPreviewIndex(0);
+      setPreviewOutputTime(0);
+      showSourceFrame(first.source_start_seconds);
+      return;
     }
-  }, [previewIdentity]); // eslint-disable-line react-hooks/exhaustive-deps -- do not reset on metadata-only Reel updates
+
+    const video = programVideo();
+    const liveSource =
+      video && video.readyState >= HTMLMediaElement.HAVE_METADATA
+        ? video.currentTime
+        : (sourceTime ?? first.source_start_seconds);
+    const next = playheadAfterTrim(orderedSegments, previewIndexRef.current, liveSource);
+    if (!next) return;
+    previewIndexRef.current = next.segmentIndex;
+    setPreviewIndex(next.segmentIndex);
+    setPreviewOutputTime(next.outputTime);
+    previewOutputTimeRef.current = next.outputTime;
+    setSourceTime(next.sourceTime);
+    if (next.seekRequired) {
+      if (previewingRef.current && !scrubbingRef.current) {
+        void jumpPreviewToSource(next.sourceTime, true);
+      } else {
+        showSourceFrame(next.sourceTime);
+      }
+    } else if (previewingRef.current) {
+      scheduleCutAdvance();
+    }
+    setPreviewMode((mode) => (mode === 'assembled' ? 'logical' : mode));
+    setAssembledPreviewSrc((src) => (src ? null : src));
+  }, [previewIdentity]); // eslint-disable-line react-hooks/exhaustive-deps -- keep playhead on trim; only reset when the Reel changes
 
   useEffect(() => {
     void listAssets(projectId)

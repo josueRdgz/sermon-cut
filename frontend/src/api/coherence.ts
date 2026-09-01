@@ -7,17 +7,23 @@ import type {
   CoherenceReport,
   CoherenceValidatePayload,
 } from '../types/coherence';
-import { apiJson } from './client';
+import { LONG_FETCH_TIMEOUT_MS, apiJson } from './client';
 
 export function validateReelCoherence(
   projectId: string,
   reelId: string,
   payload: CoherenceValidatePayload = {},
+  signal?: AbortSignal,
 ): Promise<CoherenceReport> {
+  const longRunning = Boolean(payload.include_ai_review || payload.include_media_probes);
   return apiJson<CoherenceReport>(
     `/api/projects/${projectId}/reels/${reelId}/validate`,
     'POST',
     payload,
+    {
+      timeoutMs: longRunning ? LONG_FETCH_TIMEOUT_MS : undefined,
+      signal,
+    },
   );
 }
 
