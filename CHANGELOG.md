@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- Encuadre: el inspector ya no extrae un JPEG con FFmpeg en cada `timeupdate`
+  (ni con la pestaña oculta). Eso saturaba el backend en macOS/Safari y
+  mostraba «No se pudo conectar con el backend local».
+- Calcular tracking usa el timeout largo (3 min). Las extracciones de fotograma
+  tienen tope y no se apilan en paralelo.
 - Editor de Reel: definir un corte ya no para la reproducción ni salta al
   primer fragmento. El visor mantiene el playhead en el clip editado.
 - Recortar un fragmento deja de lanzar validaciones de coherencia en cada

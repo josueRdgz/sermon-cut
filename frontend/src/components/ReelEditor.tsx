@@ -2675,6 +2675,7 @@ export function ReelEditor({
                   sourceTime={sourceTime}
                   onReelChange={replaceReel}
                   compact
+                  active={activeTool === 'framing'}
                 />
               </div>
 
