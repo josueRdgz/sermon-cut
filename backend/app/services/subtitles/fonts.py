@@ -52,7 +52,42 @@ _FONT_CANDIDATES: dict[str, tuple[str, ...]] = {
         "/usr/share/fonts/truetype/dejavu/DejaVuSerif.ttf",
         "/usr/share/fonts/TTF/DejaVuSerif.ttf",
     ),
+    "Times New Roman": (
+        "/Library/Fonts/Times New Roman.ttf",
+        "/System/Library/Fonts/Supplemental/Times New Roman.ttf",
+        "/System/Library/Fonts/Times.ttc",
+        r"C:\Windows\Fonts\times.ttf",
+        "/usr/share/fonts/truetype/liberation/LiberationSerif-Regular.ttf",
+    ),
+    "Menlo": (
+        "/System/Library/Fonts/Menlo.ttc",
+        "/System/Library/Fonts/Monaco.ttf",
+        r"C:\Windows\Fonts\consola.ttf",
+        "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf",
+    ),
+    "Avenir": (
+        "/System/Library/Fonts/Avenir.ttc",
+        "/System/Library/Fonts/Avenir Next.ttc",
+        "/System/Library/Fonts/HelveticaNeue.ttc",
+        r"C:\Windows\Fonts\calibri.ttf",
+    ),
 }
+
+
+def list_available_fonts() -> list[str]:
+    """Return family names that resolve to a file on this machine."""
+    found: list[str] = []
+    for family, paths in _FONT_CANDIDATES.items():
+        for path_str in paths:
+            if sys.platform.startswith("win"):
+                if path_str.startswith("/") and not path_str.startswith("//"):
+                    continue
+            elif path_str.startswith("C:\\") or path_str.startswith("c:\\"):
+                continue
+            if Path(path_str).is_file():
+                found.append(family)
+                break
+    return found or ["Helvetica Neue"]
 
 
 @dataclass(frozen=True)

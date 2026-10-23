@@ -1,4 +1,9 @@
-export const NLE_LAYOUT_KEY = 'sermon-cut.nle.layout.v5';
+export const NLE_LAYOUT_KEY = 'sermon-cut.nle.layout.v9';
+export const NLE_COMPACT_MQ = '(max-width: 1099px)';
+
+export function isNleCompact(): boolean {
+  return typeof window !== 'undefined' && window.matchMedia(NLE_COMPACT_MQ).matches;
+}
 
 export interface NleLayout {
   binPx: number;
@@ -10,19 +15,19 @@ export interface NleLayout {
 }
 
 export const DEFAULT_NLE_LAYOUT: NleLayout = {
-  binPx: 168,
-  inspectorPx: 400,
-  timelinePx: 240,
+  binPx: 200,
+  inspectorPx: 360,
+  timelinePx: 280,
   dualMonitors: false,
   inspectorWide: false,
 };
 
-export const BIN_MIN = 148;
-export const BIN_MAX = 260;
-export const INSPECTOR_MIN = 320;
-export const INSPECTOR_MAX = 680;
-export const TIMELINE_MIN = 220;
-export const TIMELINE_MAX = 480;
+export const BIN_MIN = 132;
+export const BIN_MAX = 320;
+export const INSPECTOR_MIN = 200;
+export const INSPECTOR_MAX = 480;
+export const TIMELINE_MIN = 180;
+export const TIMELINE_MAX = 520;
 
 export function clampNleLayout(partial: Partial<NleLayout>): NleLayout {
   return {

@@ -48,10 +48,35 @@ export function timeToPx(time: number, pxPerSecond: number): number {
   return Math.max(0, time) * pxPerSecond;
 }
 
-/** Convert a pixel offset back to output seconds. */
+/** Convert a pixel offset (or drag delta) back to seconds. Sign is preserved. */
 export function pxToTime(px: number, pxPerSecond: number): number {
-  if (!(pxPerSecond > 0)) return 0;
-  return Math.max(0, px / pxPerSecond);
+  if (!(pxPerSecond > 0) || !Number.isFinite(px)) return 0;
+  return px / pxPerSecond;
+}
+
+const MIN_CAPTION_MS = 200;
+
+/** Slide or trim a caption on the output clock without shrinking past 200 ms. */
+export function shiftCaptionWindow(
+  inMs: number,
+  outMs: number,
+  deltaMs: number,
+  edge: 'move' | 'start' | 'end',
+  totalMs: number,
+): { inMs: number; outMs: number } {
+  const total = Math.max(MIN_CAPTION_MS, totalMs);
+  const width = Math.max(MIN_CAPTION_MS, outMs - inMs);
+  let nextIn = inMs;
+  let nextOut = outMs;
+  if (edge === 'move') {
+    nextIn = Math.max(0, Math.min(total - width, inMs + deltaMs));
+    nextOut = nextIn + width;
+  } else if (edge === 'start') {
+    nextIn = Math.max(0, Math.min(outMs - MIN_CAPTION_MS, inMs + deltaMs));
+  } else {
+    nextOut = Math.max(inMs + MIN_CAPTION_MS, Math.min(total, outMs + deltaMs));
+  }
+  return { inMs: Math.round(nextIn), outMs: Math.round(nextOut) };
 }
 
 export interface SourceGapSpan {

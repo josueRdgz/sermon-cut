@@ -43,6 +43,8 @@ class ReelSegmentUpdate(BaseModel):
     manual_crop_zoom: float | None = Field(default=None, ge=0.8, le=2.0)
     caption_in_ms: int | None = Field(default=None, ge=0)
     caption_out_ms: int | None = Field(default=None, ge=0)
+    volume_keyframes: list[dict] | None = None
+    audio_offset_ms: int | None = Field(default=None, ge=-1000, le=1000)
 
 
 class ReelSegmentReorderItem(BaseModel):
@@ -76,6 +78,9 @@ class ReelCreate(BaseModel):
     subtitle_opacity: float = Field(default=1.0, ge=0.2, le=1.0)
     subtitle_margin_bottom: int = Field(default=120, ge=40, le=500)
     subtitle_bible_reference: str | None = Field(default=None, max_length=200)
+    subtitle_font_family: str | None = Field(default=None, max_length=80)
+    subtitle_x: float | None = Field(default=None, ge=0.0, le=1.0)
+    subtitle_y: float | None = Field(default=None, ge=0.0, le=1.0)
     aspect_ratio: AspectRatio = AspectRatio.nine_sixteen
     status: ReelStatus = ReelStatus.draft
     audio_offset_ms: int = Field(default=0, ge=-1000, le=1000)
@@ -99,6 +104,9 @@ class ReelUpdate(BaseModel):
     subtitle_opacity: float | None = Field(default=None, ge=0.2, le=1.0)
     subtitle_margin_bottom: int | None = Field(default=None, ge=40, le=500)
     subtitle_bible_reference: str | None = Field(default=None, max_length=200)
+    subtitle_font_family: str | None = Field(default=None, max_length=80)
+    subtitle_x: float | None = Field(default=None, ge=0.0, le=1.0)
+    subtitle_y: float | None = Field(default=None, ge=0.0, le=1.0)
     aspect_ratio: AspectRatio | None = None
     status: ReelStatus | None = None
     framing_mode: str | None = None
@@ -125,6 +133,8 @@ class ReelSegmentResponse(BaseModel):
     narrative_category: str | None = None
     caption_in_ms: int | None = None
     caption_out_ms: int | None = None
+    volume_keyframes: list[dict] = Field(default_factory=list)
+    audio_offset_ms: int = 0
 
 
 class ReelResponse(BaseModel):
@@ -149,6 +159,9 @@ class ReelResponse(BaseModel):
     subtitle_opacity: float
     subtitle_margin_bottom: int
     subtitle_bible_reference: str | None
+    subtitle_font_family: str | None = None
+    subtitle_x: float | None = None
+    subtitle_y: float | None = None
     aspect_ratio: AspectRatio
     status: ReelStatus
     framing_mode: str = "center_crop"
@@ -179,3 +192,7 @@ class ReelFromTranscriptRequest(BaseModel):
     reel_id: UUID | None = None
     transition_type: TransitionType = TransitionType.hard_cut
     transition_duration_ms: int = Field(default=0, ge=0, le=5000)
+
+
+class ReelSegmentSplitRequest(BaseModel):
+    source_seconds: float = Field(gt=0)

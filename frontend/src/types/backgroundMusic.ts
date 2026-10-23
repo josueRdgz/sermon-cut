@@ -15,6 +15,7 @@ export interface BackgroundMusicSettings {
   true_peak_db: number;
   enabled: boolean;
   rights_warning: string;
+  volume_keyframes?: { t_ms: number; gain: number }[];
 }
 
 export interface BackgroundMusicPayload {
@@ -29,6 +30,7 @@ export interface BackgroundMusicPayload {
   target_lufs?: number;
   true_peak_db?: number;
   clear_music?: boolean;
+  volume_keyframes?: { t_ms: number; gain: number }[];
 }
 
 export interface BackgroundMusicPresetInfo {

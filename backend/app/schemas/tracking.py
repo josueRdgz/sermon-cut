@@ -53,6 +53,9 @@ class FramingStatusResponse(BaseModel):
     cache_segments: int = 0
     mediapipe: dict = Field(default_factory=dict)
     cleared: bool = False
+    tracking_status: str = "idle"
+    tracking_error: str | None = None
+    tracking_report: TrackingReport | None = None
 
 
 class FramingPreviewResponse(BaseModel):

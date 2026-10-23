@@ -343,6 +343,20 @@ def test_ass_document_contains_remapped_times(tmp_path: Path) -> None:
     assert ",3," in doc  # opaque box BorderStyle
 
 
+def test_ass_document_uses_pos_override(tmp_path: Path) -> None:
+    options = options_from_reel(style="clear_reading", pos_x=0.25, pos_y=0.4, font_family="Georgia")
+    font = resolve_font("Georgia", tmp_path / "fonts")
+    doc = render_ass_document(
+        cues=[SubtitleCue(start=1.0, end=2.0, text="hola")],
+        options=options,
+        font=font,
+        play_res_x=1080,
+        play_res_y=1920,
+    )
+    assert r"\pos(270,768)" in doc
+    assert r"\an5" in doc
+
+
 def test_render_command_burns_ass_filter(tmp_path: Path) -> None:
     ass = tmp_path / "subs.ass"
     ass.write_text("[Script Info]\n", encoding="utf-8")

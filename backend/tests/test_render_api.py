@@ -509,7 +509,10 @@ def test_acknowledge_coherence_skips_blocked_gate(render_env, monkeypatch) -> No
     client, session_factory, _ = render_env
     project_id, reel_id = _seed_project_and_reel(session_factory)
 
-    blocked = client.post(f"/api/projects/{project_id}/reels/{reel_id}/render", json={})
+    blocked = client.post(
+        f"/api/projects/{project_id}/reels/{reel_id}/render",
+        json={"acknowledge_coherence": False},
+    )
     assert blocked.status_code == 400
     assert blocked.json()["code"] == "coherence_blocked"
 

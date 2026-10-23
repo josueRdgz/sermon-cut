@@ -1,4 +1,9 @@
-import type { Project, ProjectCreatePayload, ProjectListResponse } from '../types/project';
+import type {
+  Project,
+  ProjectCreatePayload,
+  ProjectListResponse,
+  ProjectUpdatePayload,
+} from '../types/project';
 import {
   API_BASE_URL,
   LONG_FETCH_TIMEOUT_MS,
@@ -38,6 +43,10 @@ export function createProject(payload: ProjectCreatePayload): Promise<Project> {
   return apiJson<Project>('/api/projects', 'POST', payload);
 }
 
+export function updateProject(id: string, payload: ProjectUpdatePayload): Promise<Project> {
+  return apiJson<Project>(`/api/projects/${id}`, 'PATCH', payload);
+}
+
 export function deleteProject(id: string): Promise<void> {
   return apiDelete(`/api/projects/${id}`);
 }
@@ -73,4 +82,11 @@ export function applySermonRange(
     { start_seconds: startSeconds, end_seconds: endSeconds },
     { timeoutMs: LONG_FETCH_TIMEOUT_MS },
   );
+}
+
+export function getProjectWaveform(
+  projectId: string,
+  source: 'video' | 'music' = 'video',
+): Promise<{ source: string; peaks: number[] }> {
+  return apiGet(`/api/projects/${projectId}/waveform?source=${source}`, LONG_FETCH_TIMEOUT_MS);
 }

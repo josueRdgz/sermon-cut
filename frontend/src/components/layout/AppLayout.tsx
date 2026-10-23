@@ -11,8 +11,16 @@ interface AppLayoutProps {
 }
 
 export function AppLayout({ header, sidebar, footer, children, flush = false }: AppLayoutProps) {
+  const rootClass = [
+    styles.root,
+    sidebar ? styles.withSidebar : '',
+    footer ? '' : styles.noFooter,
+  ]
+    .filter(Boolean)
+    .join(' ');
+
   return (
-    <div className={`${styles.root} ${sidebar ? styles.withSidebar : ''}`}>
+    <div className={rootClass}>
       <header className={styles.header}>{header}</header>
       {sidebar ? <aside className={styles.sidebar}>{sidebar}</aside> : null}
       <main className={`${styles.main}${flush ? ` ${styles.mainFlush}` : ''}`}>

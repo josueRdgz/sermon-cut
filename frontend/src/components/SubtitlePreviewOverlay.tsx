@@ -6,6 +6,8 @@ export interface SubtitleLayoutPatch {
   subtitle_margin_bottom?: number;
   subtitle_font_size?: number;
   subtitle_position?: SubtitlePosition;
+  subtitle_x?: number | null;
+  subtitle_y?: number | null;
 }
 
 interface SubtitlePreviewOverlayProps {
@@ -16,6 +18,9 @@ interface SubtitlePreviewOverlayProps {
   opacity: number;
   marginBottom: number;
   uppercase: boolean;
+  fontFamily?: string | null;
+  posX?: number | null;
+  posY?: number | null;
   interactive: boolean;
   onLayoutChange: (patch: SubtitleLayoutPatch) => void;
 }
@@ -35,32 +40,49 @@ function bottomPercentToMargin(bottomPercent: number): number {
   return Math.round(MARGIN_MIN + ratio * (MARGIN_MAX - MARGIN_MIN));
 }
 
+function fallbackPos(position: SubtitlePosition): { x: number; y: number } {
+  if (position === 'top') return { x: 0.5, y: 0.12 };
+  if (position === 'center') return { x: 0.5, y: 0.5 };
+  return { x: 0.5, y: 0.88 };
+}
+
 export function SubtitlePreviewOverlay({
   text,
   style,
   position,
   fontSize,
   opacity,
-  marginBottom,
   uppercase,
+  fontFamily,
+  posX,
+  posY,
   interactive,
   onLayoutChange,
 }: SubtitlePreviewOverlayProps) {
-  const dragRef = useRef<{ startY: number; startMargin: number } | null>(null);
+  const dragRef = useRef<{ startX: number; startY: number; originX: number; originY: number } | null>(
+    null,
+  );
+  const free = posX != null && posY != null;
+  const origin = free ? { x: posX, y: posY } : fallbackPos(position);
 
   const styleClass = `subtitle-overlay subtitle-overlay--${style} subtitle-overlay--on-player subtitle-overlay--${position}${
     interactive ? ' subtitle-overlay--interactive' : ''
-  }`;
+  }${free ? ' subtitle-overlay--free' : ''}`;
 
   const beginDrag = useCallback(
     (event: PointerEvent<HTMLDivElement>) => {
       if (!interactive || event.button !== 0) return;
       event.preventDefault();
       event.stopPropagation();
-      dragRef.current = { startY: event.clientY, startMargin: marginBottom };
+      dragRef.current = {
+        startX: event.clientX,
+        startY: event.clientY,
+        originX: origin.x,
+        originY: origin.y,
+      };
       event.currentTarget.setPointerCapture(event.pointerId);
     },
-    [interactive, marginBottom],
+    [interactive, origin.x, origin.y],
   );
 
   const moveDrag = useCallback(
@@ -69,15 +91,20 @@ export function SubtitlePreviewOverlay({
       const stage = event.currentTarget.closest('.reel-player__stage');
       if (!(stage instanceof HTMLElement)) return;
       const rect = stage.getBoundingClientRect();
-      if (rect.height <= 0) return;
-      const deltaY = dragRef.current.startY - event.clientY;
-      const deltaMargin = (deltaY / rect.height) * (MARGIN_MAX - MARGIN_MIN);
-      const nextMargin = Math.round(
-        Math.max(MARGIN_MIN, Math.min(MARGIN_MAX, dragRef.current.startMargin + deltaMargin)),
+      if (rect.width <= 0 || rect.height <= 0) return;
+      const x = Math.max(
+        0.08,
+        Math.min(0.92, dragRef.current.originX + (event.clientX - dragRef.current.startX) / rect.width),
+      );
+      const y = Math.max(
+        0.1,
+        Math.min(0.84, dragRef.current.originY + (event.clientY - dragRef.current.startY) / rect.height),
       );
       onLayoutChange({
-        subtitle_margin_bottom: nextMargin,
-        subtitle_position: 'bottom',
+        subtitle_x: x,
+        subtitle_y: y,
+        subtitle_position: y < 0.33 ? 'top' : y > 0.66 ? 'bottom' : 'center',
+        subtitle_margin_bottom: bottomPercentToMargin((1 - y) * 36),
       });
     },
     [onLayoutChange],
@@ -112,10 +139,12 @@ export function SubtitlePreviewOverlay({
       className={styleClass}
       style={{
         position: 'absolute',
-        left: '50%',
-        bottom: `${marginToBottomPercent(marginBottom)}%`,
-        transform: 'translateX(-50%)',
+        left: `${origin.x * 100}%`,
+        top: `${origin.y * 100}%`,
+        bottom: 'auto',
+        transform: 'translate(-50%, -50%)',
         fontSize: `min(6.5cqh, ${Math.max(10, fontSize * 0.022 * 100)}cqh)`,
+        fontFamily: fontFamily ? `"${fontFamily}", sans-serif` : undefined,
         opacity,
         paddingBottom: 0,
         margin: 0,
@@ -131,7 +160,7 @@ export function SubtitlePreviewOverlay({
       onWheel={onWheel}
       title={
         interactive
-          ? 'Arrastra para mover · Alt + rueda para cambiar tamaño'
+          ? 'Arrastra para colocar en cualquier sitio · Alt + rueda para cambiar tamaño'
           : undefined
       }
     >

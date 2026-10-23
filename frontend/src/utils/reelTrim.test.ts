@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import type { ReelSegment } from '../types/reel';
-import { clampRippleTrim } from './reelTrim';
+import { canJoinSourceWindows, clampRippleTrim, splitTooCloseToEdge } from './reelTrim';
 
 function seg(
   id: string,
@@ -21,6 +21,17 @@ function seg(
     transcript_text: null,
   };
 }
+
+describe('canJoinSourceWindows', () => {
+  it('allows joining a user split that still shares the source cut', () => {
+    expect(canJoinSourceWindows(14, 14)).toBe(true);
+    expect(canJoinSourceWindows(14, 14.04)).toBe(true);
+  });
+
+  it('rejects analysis cuts separated by omitted source', () => {
+    expect(canJoinSourceWindows(9.07, 14)).toBe(false);
+  });
+});
 
 describe('clampRippleTrim', () => {
   const clips = [
@@ -42,5 +53,13 @@ describe('clampRippleTrim', () => {
 
   it('rejects a window shorter than the minimum', () => {
     expect(clampRippleTrim(clips, 'a', { source_end_seconds: 10.05 })).toBeNull();
+  });
+});
+
+describe('splitTooCloseToEdge', () => {
+  it('rejects cuts inside the 0.2s margin', () => {
+    expect(splitTooCloseToEdge(10, 10.1, 20)).toBe(true);
+    expect(splitTooCloseToEdge(10, 19.9, 20)).toBe(true);
+    expect(splitTooCloseToEdge(10, 15, 20)).toBe(false);
   });
 });

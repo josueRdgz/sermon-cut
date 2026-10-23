@@ -2,10 +2,11 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 
 import { ApiError } from '../api/client';
-import { updateReel } from '../api/reels';
-import { getSubtitlePreview, listSubtitleTemplates } from '../api/subtitles';
+import { splitReelSegment, updateReel, updateReelSegment } from '../api/reels';
+import { getSubtitlePreview, listSubtitleFonts, listSubtitleTemplates } from '../api/subtitles';
 import type { Reel, SubtitleGranularity, SubtitlePosition, SubtitleStyle } from '../types/reel';
 import type { SubtitleCuePreview, SubtitlePreview, SubtitleTemplateInfo } from '../types/subtitle';
+import { buildOutputClock } from '../utils/reelOutputClock';
 import {
   SubtitlePreviewOverlay,
   type SubtitleLayoutPatch,
@@ -41,6 +42,8 @@ const POSITION_OPTIONS: { value: SubtitlePosition; label: string }[] = [
   { value: 'center', label: 'Centro' },
   { value: 'top', label: 'Superior' },
 ];
+
+const SUBTITLE_EMOJIS = ['🙏', '❤️', '🔥', '✨', '🙌', '📖', '✝️', '👏', '💭', '🕊️'];
 
 function sourceToOutput(reel: Reel, segmentIndex: number, sourceTime: number): number | null {
   const ordered = [...reel.segments].sort((a, b) => a.order - b.order);
@@ -113,9 +116,12 @@ export function SubtitlePanel({
   mountPreviewOverlay = true,
 }: SubtitlePanelProps) {
   const [templates, setTemplates] = useState<SubtitleTemplateInfo[]>([]);
+  const [fonts, setFonts] = useState<string[]>([]);
   const [preview, setPreview] = useState<SubtitlePreview | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [cueDraft, setCueDraft] = useState('');
+  const [passDraft, setPassDraft] = useState('');
   const layoutTimerRef = useRef<number | null>(null);
   const pendingLayoutRef = useRef<SubtitleLayoutPatch>({});
 
@@ -133,6 +139,9 @@ export function SubtitlePanel({
     listSubtitleTemplates()
       .then((data) => setTemplates(data.items))
       .catch(() => setTemplates([]));
+    listSubtitleFonts()
+      .then((data) => setFonts(data.items.map((item) => item.family)))
+      .catch(() => setFonts(['Helvetica Neue', 'Georgia', 'Arial']));
   }, []);
 
   useEffect(() => {
@@ -143,6 +152,9 @@ export function SubtitlePanel({
     reel.subtitle_enabled,
     reel.subtitle_granularity,
     reel.subtitle_font_size,
+    reel.subtitle_font_family,
+    reel.subtitle_x,
+    reel.subtitle_y,
     reel.subtitle_max_words,
     reel.subtitle_uppercase,
     reel.subtitle_bible_reference,
@@ -201,10 +213,133 @@ export function SubtitlePanel({
   }, [reel, sourceTime, previewSegmentIndex]);
 
   const cue = activeCue(preview, outputTime);
-  const liveCueText =
-    cue && outputTime != null ? highlightedText(cue, outputTime) : null;
+  const editingCue = cue != null && cueDraft !== (cue.text ?? '');
+  const liveCueText = editingCue
+    ? cueDraft
+    : cue && outputTime != null
+      ? highlightedText(cue, outputTime)
+      : null;
   const sample = preview?.cues[0]?.text ?? 'Así dice el Señor: buscadme y viviréis.';
   const stageText = liveCueText ?? sample;
+  const outputClock = useMemo(() => buildOutputClock(reel.segments), [reel.segments]);
+  const cueIndex = cue && preview ? preview.cues.findIndex((item) => item === cue) : -1;
+  const nextCue = cueIndex >= 0 && preview ? preview.cues[cueIndex + 1] ?? null : null;
+
+  function placementAtOutput(time: number) {
+    return (
+      outputClock.placements.find(
+        (item) => time >= item.outputStart && time < item.outputStart + item.contentDuration,
+      ) ?? null
+    );
+  }
+
+  const cueSegmentId = cue ? placementAtOutput(cue.start)?.id ?? null : null;
+  const cueSegment = reel.segments.find((item) => item.id === cueSegmentId) ?? null;
+
+  useEffect(() => {
+    const text = cue?.text ?? '';
+    setCueDraft(text);
+    const words = text.trim().split(/\s+/).filter(Boolean);
+    setPassDraft(words.slice(-2).join(' '));
+  }, [cue?.start, cue?.text]);
+
+  async function saveCueText(nextText: string) {
+    if (!cueSegment) {
+      setError('Coloca el playhead sobre un subtítulo para editarlo.');
+      return;
+    }
+    const trimmed = nextText.trim();
+    if (!trimmed) {
+      setError('El subtítulo no puede quedar vacío.');
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    try {
+      onReelUpdated(
+        await updateReelSegment(projectId, reel.id, cueSegment.id, { transcript_text: trimmed }),
+      );
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'No se pudo guardar el subtítulo');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function passPhraseToNext() {
+    if (!cue || !cueSegment) {
+      setError('Coloca el playhead sobre un subtítulo.');
+      return;
+    }
+    const phrase = passDraft.trim();
+    if (!phrase) {
+      setError('Escribe la palabra o frase que debe pasar al siguiente recuadro.');
+      return;
+    }
+    const cueText = (cueDraft || cue.text).trim();
+    const lower = cueText.toLowerCase();
+    const phraseLower = phrase.toLowerCase();
+    const at = lower.lastIndexOf(phraseLower);
+    if (at < 0) {
+      setError('Esa frase no está en el subtítulo actual.');
+      return;
+    }
+    const kept = cueText.slice(0, at).trim();
+    if (!kept) {
+      setError('Deja al menos una palabra en este recuadro.');
+      return;
+    }
+    const movedWord = cue.words.find((word) =>
+      phraseLower.startsWith(word.text.replace(/[.,;:!?]+$/g, '').toLowerCase()),
+    );
+    const splitAt = movedWord
+      ? placementAtOutput(movedWord.start)
+      : placementAtOutput(cue.start);
+    const sourceSeconds = splitAt
+      ? splitAt.sourceStart + Math.max(0, (movedWord?.start ?? cue.end - 0.15) - splitAt.outputStart)
+      : cueSegment.source_end_seconds - 0.15;
+    setBusy(true);
+    setError(null);
+    try {
+      if (nextCue && placementAtOutput(nextCue.start)?.id !== cueSegment.id) {
+        const nextId = placementAtOutput(nextCue.start)?.id;
+        const nextSegment = reel.segments.find((item) => item.id === nextId);
+        onReelUpdated(
+          await updateReelSegment(projectId, reel.id, cueSegment.id, { transcript_text: kept }),
+        );
+        if (nextSegment) {
+          const joined = `${phrase} ${nextSegment.transcript_text ?? nextCue.text}`.replace(/\s+/g, ' ').trim();
+          onReelUpdated(
+            await updateReelSegment(projectId, reel.id, nextSegment.id, { transcript_text: joined }),
+          );
+        }
+      } else {
+        const splitSource = Math.min(
+          cueSegment.source_end_seconds - 0.2,
+          Math.max(cueSegment.source_start_seconds + 0.2, sourceSeconds),
+        );
+        const updated = await splitReelSegment(projectId, reel.id, cueSegment.id, splitSource);
+        const left = updated.segments.find((item) => item.id === cueSegment.id);
+        const right = updated.segments.find((item) => item.order === (left?.order ?? 0) + 1);
+        let nextReel = updated;
+        if (left) {
+          nextReel = await updateReelSegment(projectId, updated.id, left.id, {
+            transcript_text: kept,
+          });
+        }
+        if (right) {
+          nextReel = await updateReelSegment(projectId, updated.id, right.id, {
+            transcript_text: `${phrase} ${right.transcript_text ?? ''}`.replace(/\s+/g, ' ').trim(),
+          });
+        }
+        onReelUpdated(nextReel);
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'No se pudo pasar la frase al siguiente recuadro');
+    } finally {
+      setBusy(false);
+    }
+  }
 
   const styleClass = `subtitle-overlay subtitle-overlay--${reel.subtitle_style} subtitle-overlay--${reel.subtitle_position}`;
   const overlayHost =
@@ -220,6 +355,9 @@ export function SubtitlePanel({
         opacity={reel.subtitle_opacity}
         marginBottom={reel.subtitle_margin_bottom}
         uppercase={reel.subtitle_uppercase}
+        fontFamily={reel.subtitle_font_family}
+        posX={reel.subtitle_x}
+        posY={reel.subtitle_y}
         interactive={interactivePreview}
         onLayoutChange={flushLayoutPatch}
       />
@@ -243,9 +381,67 @@ export function SubtitlePanel({
 
       <p className="muted subtitle-panel__hint">
         {interactivePreview
-          ? 'Arrastra el subtítulo en la vista previa para moverlo. Alt + rueda del ratón cambia el tamaño.'
-          : 'Abre esta pestaña para ajustar posición y tamaño directamente en el visor.'}
+          ? 'Arrastra el subtítulo en la vista previa para moverlo. Alt + rueda del ratón cambia el tamaño. Ortografía y mayúsculas se corrigen aquí, no en Cortes.'
+          : 'Abre esta pestaña para ajustar posición, tamaño y el texto del recuadro actual.'}
       </p>
+
+      <div className="subtitle-panel__cue-editor">
+        <label className="field">
+          <span>Texto de este recuadro</span>
+          <textarea
+            rows={3}
+            value={cueDraft}
+            disabled={busy || !reel.subtitle_enabled || !cue}
+            placeholder={cue ? 'Corrige ortografía, mayúsculas o añade un emoji…' : 'Reproduce hasta un subtítulo para editarlo'}
+            onChange={(event) => setCueDraft(event.target.value)}
+            onBlur={() => {
+              if (cue && cueDraft.trim() && cueDraft.trim() !== cue.text.trim()) {
+                void saveCueText(cueDraft);
+              }
+            }}
+          />
+        </label>
+        <div className="subtitle-panel__emojis" role="group" aria-label="Emojis">
+          {SUBTITLE_EMOJIS.map((emoji) => (
+            <button
+              key={emoji}
+              type="button"
+              className="button button--inline"
+              disabled={busy || !cue}
+              onClick={() => {
+                const next = `${cueDraft}${emoji}`;
+                setCueDraft(next);
+                void saveCueText(next);
+              }}
+            >
+              {emoji}
+            </button>
+          ))}
+        </div>
+        <p className="muted">
+          Stickers: súbelos en Archivos (imagen) y arrástralos a la línea temporal.
+        </p>
+        <div className="transcript-toolbar">
+          <label className="field">
+            <span>Pasar al siguiente recuadro</span>
+            <input
+              type="text"
+              value={passDraft}
+              disabled={busy || !cue}
+              placeholder="palabra o frase"
+              onChange={(event) => setPassDraft(event.target.value)}
+            />
+          </label>
+          <button
+            type="button"
+            className="button button--secondary"
+            disabled={busy || !cue || !passDraft.trim()}
+            onClick={() => void passPhraseToNext()}
+          >
+            Pasar frase
+          </button>
+        </div>
+      </div>
 
       <div className="transcript-toolbar">
         <label className="field field--inline">
@@ -304,7 +500,14 @@ export function SubtitlePanel({
           <select
             value={reel.subtitle_position}
             disabled={busy || !reel.subtitle_enabled}
-            onChange={(e) => void saveReelPatch({ subtitle_position: e.target.value as SubtitlePosition })}
+            onChange={(e) => {
+              const next = e.target.value as SubtitlePosition;
+              void saveReelPatch({
+                subtitle_position: next,
+                subtitle_x: 0.5,
+                subtitle_y: next === 'top' ? 0.12 : next === 'center' ? 0.5 : 0.88,
+              });
+            }}
           >
             {POSITION_OPTIONS.map((option) => (
               <option key={option.value} value={option.value}>
@@ -316,6 +519,23 @@ export function SubtitlePanel({
       </div>
 
       <div className="transcript-toolbar">
+        <label className="field field--inline">
+          <span>Tipografía</span>
+          <select
+            value={reel.subtitle_font_family ?? ''}
+            disabled={busy || !reel.subtitle_enabled}
+            onChange={(e) =>
+              void saveReelPatch({ subtitle_font_family: e.target.value || null })
+            }
+          >
+            <option value="">Plantilla</option>
+            {fonts.map((family) => (
+              <option key={family} value={family}>
+                {family}
+              </option>
+            ))}
+          </select>
+        </label>
         <label className="field field--inline">
           <span>Tamaño</span>
           <input

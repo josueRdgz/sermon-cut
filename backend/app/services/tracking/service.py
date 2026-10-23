@@ -208,6 +208,9 @@ def status(
 ) -> FramingStatusResponse:
     reel = reels_service.get_reel_for_project(db, project_id, reel_id)
     cached = tracking_cache.load_cache(project_id, reel_id)
+    from app.services.tracking.jobs import get_tracking_job_manager
+
+    job = get_tracking_job_manager().status_for(reel_id)
     return FramingStatusResponse(
         reel_id=reel_id,
         framing_mode=FramingMode(reel.framing_mode or FramingMode.center_crop.value),
@@ -215,6 +218,9 @@ def status(
         cache_segments=len(cached.get("segments", [])) if cached else 0,
         mediapipe=mediapipe_status(),
         cleared=cleared,
+        tracking_status=job.status,
+        tracking_error=job.error,
+        tracking_report=job.report,
     )
 
 

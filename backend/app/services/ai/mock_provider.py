@@ -42,6 +42,9 @@ class MockAIProvider(AIProvider):
 
         # Walk the transcript building non-overlapping candidates.
         cursor = 0
+        extra = prefs.additional_instructions or ""
+        if "Sustituye este candidato" in extra and len(timed) > 1:
+            cursor = 1
         while cursor < len(timed) and len(clips) < prefs.max_reels:
             primary = timed[cursor]
             collected = [primary]
@@ -54,7 +57,7 @@ class MockAIProvider(AIProvider):
                 gap = candidate.start - collected[-1].end
                 if gap > 8.0:
                     break
-                if duration + (candidate.end - candidate.start) > prefs.max_duration_seconds:
+                if duration + (candidate.end - candidate.start) > prefs.max_duration_seconds + 8.0:
                     break
                 collected.append(candidate)
                 duration += candidate.end - candidate.start
@@ -65,7 +68,7 @@ class MockAIProvider(AIProvider):
             if duration < prefs.min_duration_seconds and jump < len(timed):
                 extra = timed[jump]
                 extra_dur = extra.end - extra.start
-                if duration + extra_dur <= prefs.max_duration_seconds:
+                if duration + extra_dur <= prefs.max_duration_seconds + 8.0:
                     collected.append(extra)
                     duration += extra_dur
                     next_index = max(next_index, jump + 1)

@@ -24,8 +24,6 @@ const RIGHTS_NOTICE =
   'responsable de respetar los derechos de autor y las condiciones de la plataforma.';
 
 type VideoSource = 'local' | 'youtube';
-type ContentMode = 'shorts' | 'highlights' | 'both';
-type SourceKind = 'full_service' | 'sermon_only';
 type Step = 'idle' | 'creating' | 'video' | 'importing' | 'cover' | 'done';
 
 const ACTIVE_IMPORT_STATUSES = new Set([
@@ -101,8 +99,6 @@ export function NewProjectPage() {
   const [churchName, setChurchName] = useState(DEFAULT_CHURCH_NAME);
   const [youtubeChannel, setYoutubeChannel] = useState(DEFAULT_YOUTUBE_CHANNEL);
   const [fullSermonUrl, setFullSermonUrl] = useState('');
-  const [contentMode, setContentMode] = useState<ContentMode>('shorts');
-  const [sourceKind, setSourceKind] = useState<SourceKind>('full_service');
   const [videoFile, setVideoFile] = useState<File | null>(null);
   const [coverFile, setCoverFile] = useState<File | null>(null);
   const [step, setStep] = useState<Step>('idle');
@@ -184,8 +180,8 @@ export function NewProjectPage() {
         church_name: churchName.trim(),
         youtube_channel: youtubeChannel.trim(),
         full_sermon_url: mediaUrl || null,
-        content_mode: contentMode,
-        source_kind: sourceKind,
+        content_mode: 'both',
+        source_kind: 'full_service',
       });
 
       if (videoSource === 'local') {
@@ -246,44 +242,10 @@ export function NewProjectPage() {
     <AppChrome projectCount={projects.length}>
       <SectionHeader
         title="Nueva predicación"
-        subtitle="Indica si es el culto o solo el sermón, completa los datos y elige el origen del video."
+        subtitle="Completa los datos y elige el origen del video. En Predicación decidirás si es culto completo o solo el sermón."
       />
 
       <form className="card form" onSubmit={(event) => void handleSubmit(event)}>
-        <fieldset className="field" style={{ border: 'none', padding: 0, margin: 0 }}>
-          <span>¿Qué contiene el video? *</span>
-          <div className="source-toggle" role="radiogroup" aria-label="Tipo de grabación">
-            <label className="source-toggle__option">
-              <input
-                type="radio"
-                name="source-kind"
-                value="full_service"
-                checked={sourceKind === 'full_service'}
-                onChange={() => setSourceKind('full_service')}
-                disabled={busy}
-              />
-              <span>
-                Culto completo
-                <small>Luego marcará inicio y final de la predicación</small>
-              </span>
-            </label>
-            <label className="source-toggle__option">
-              <input
-                type="radio"
-                name="source-kind"
-                value="sermon_only"
-                checked={sourceKind === 'sermon_only'}
-                onChange={() => setSourceKind('sermon_only')}
-                disabled={busy}
-              />
-              <span>
-                Solo el sermón
-                <small>El archivo ya es la predicación</small>
-              </span>
-            </label>
-          </div>
-        </fieldset>
-
         <label className="field">
           <span>Título *</span>
           <input
@@ -294,29 +256,6 @@ export function NewProjectPage() {
             maxLength={300}
           />
         </label>
-
-        <fieldset className="field" style={{ border: 'none', padding: 0, margin: 0 }}>
-          <span>Tipo de contenido *</span>
-          <div className="source-toggle" role="radiogroup" aria-label="Tipo de contenido">
-            {[
-              ['shorts', 'Crear Shorts'],
-              ['highlights', 'Crear Video Highlights'],
-              ['both', 'Crear ambos'],
-            ].map(([value, label]) => (
-              <label className="source-toggle__option" key={value}>
-                <input
-                  type="radio"
-                  name="content-mode"
-                  value={value}
-                  checked={contentMode === value}
-                  onChange={() => setContentMode(value as ContentMode)}
-                  disabled={busy}
-                />
-                <span>{label}</span>
-              </label>
-            ))}
-          </div>
-        </fieldset>
 
         <label className="field">
           <span>Predicador</span>

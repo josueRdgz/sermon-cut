@@ -47,8 +47,9 @@ transcripción (sin inventar ni parafrasear).
 2. `start` y `end` son segundos absolutos del video original.
 3. Prioriza 1 segmento continuo por Reel. Si hacen falta cortes, usa la menor \
 cantidad posible y nunca más de 3 segmentos; ordénalos cronológicamente.
-4. La duración total del Reel (suma de segmentos) debe caer entre el mínimo y \
-el máximo pedidos.
+4. La duración total del Reel (suma de segmentos) debe apuntar al rango \
+pedido. Si hace falta unos segundos extra para completar la idea o la frase, \
+supera el máximo: la idea completa importa más que el tope exacto.
 5. No inventes hashtags sensacionalistas ni títulos que el predicador no \
 sostuvo.
 6. Si un corte elimina contexto necesario, rellénalo en \
@@ -78,13 +79,14 @@ def build_user_prompt(request: AnalysisRequest) -> str:
         "## Preferencias",
         f"- Máximo de Reels a sugerir: {prefs.max_reels}",
         f"- Duración deseada por Reel: {prefs.min_duration_seconds:.0f}"
-        f"–{prefs.max_duration_seconds:.0f} s",
+        f"–{prefs.max_duration_seconds:.0f} s (puedes pasarte unos segundos "
+        "si hace falta completar la idea)",
         f"- Máximo de fragmentos/cortes por Reel: {prefs.max_segments_per_reel}",
         f"- Duración mínima por fragmento: {prefs.min_segment_seconds:.0f} s",
         "- Ritmo: conserva intervenciones continuas largas; no cortes por cada "
         "frase ni por cada línea de subtítulos.",
         f"- Orientación doctrinal/editorial: {prefs.doctrinal_orientation}",
-        "- Ritmo de redes: 25–45 s suele funcionar mejor, salvo que el usuario pida otra duración.",
+        "- Respeta el formato pedido en el contexto (Shorts/Reels cortos o Highlights más largos).",
         TITLE_PACKAGING.strip(),
     ]
     extra = context_block(
@@ -137,7 +139,8 @@ def build_merge_prompt(
             "",
             f"- Sermón: {meta.title} ({meta.duration_seconds:.1f} s)",
             f"- Máximo de Reels: {prefs.max_reels}",
-            f"- Duración: {prefs.min_duration_seconds:.0f}–{prefs.max_duration_seconds:.0f} s",
+            f"- Duración: {prefs.min_duration_seconds:.0f}–{prefs.max_duration_seconds:.0f} s "
+            "(holgura breve si completa la idea)",
             f"- Máximo de fragmentos/cortes por Reel: {prefs.max_segments_per_reel}",
             f"- Duración mínima por fragmento: {prefs.min_segment_seconds:.0f} s",
             "- Prioriza continuidad: conserva 1 segmento siempre que sea posible y no "

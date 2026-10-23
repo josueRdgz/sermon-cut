@@ -255,3 +255,30 @@ def test_reject_candidate(analysis_env) -> None:
     # Accepting a rejected candidate must fail.
     again = client.post(f"/api/projects/{project_id}/analysis/candidates/{candidate_id}/accept")
     assert again.status_code == 409
+
+
+def test_merge_and_replace_candidates(analysis_env) -> None:
+    client, session_factory = analysis_env
+    project_id = _seed_project_with_transcript(session_factory)
+    job = client.post(
+        f"/api/projects/{project_id}/analysis",
+        json={"max_reels": 3, "min_duration_seconds": 10, "max_duration_seconds": 40},
+    ).json()
+    ids = [item["id"] for item in job["candidates"] if item["status"] == "pending"]
+    assert len(ids) >= 2
+
+    merged = client.post(
+        f"/api/projects/{project_id}/analysis/candidates/merge",
+        json={"candidate_ids": ids[:2]},
+    )
+    assert merged.status_code == 200, merged.text
+    assert merged.json()["status"] == "pending"
+    assert len(merged.json()["segments"]) >= 1
+
+    replaced = client.post(
+        f"/api/projects/{project_id}/analysis/candidates/{ids[0]}/replace",
+        json={"instruction": "Otro momento sobre la gracia, distinto al actual"},
+    )
+    assert replaced.status_code == 200, replaced.text
+    assert replaced.json()["id"] == ids[0]
+    assert replaced.json()["status"] == "pending"

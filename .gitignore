@@ -2,6 +2,7 @@
 __pycache__/
 *.py[cod]
 *$py.class
+.venv
 .venv/
 venv/
 env/
@@ -23,6 +24,18 @@ coverage/
 *.local
 *.tsbuildinfo
 .vite/
+
+# Copyrighted Bible modules (import locally; do not commit)
+frontend/public/bible/
+*.bbli
+*.bblx
+*.bbli.zip
+
+# ---- Desktop installer ----
+# The .dmg is >100 MB (GitHub git limit). Ship it with `gh release`; keep the folder.
+releases/*.dmg
+!releases/
+!releases/*.md
 
 # ---- Tauri / Rust ----
 frontend/src-tauri/target/

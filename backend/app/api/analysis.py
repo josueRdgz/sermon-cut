@@ -14,7 +14,9 @@ from app.schemas.analysis import (
     AnalysisCandidateListResponse,
     AnalysisCandidateResponse,
     AnalysisJobResponse,
+    AnalysisMergeRequest,
     AnalysisProviderStatusResponse,
+    AnalysisReplaceRequest,
     AnalysisStartRequest,
 )
 from app.services import projects as projects_service
@@ -136,4 +138,33 @@ def reject_analysis_candidate(
     db: Session = Depends(get_db),
 ) -> AnalysisCandidateResponse:
     candidate = analysis_service.reject_candidate(db, project_id, candidate_id)
+    return analysis_service.candidate_to_response(candidate)
+
+
+@router.post(
+    "/projects/{project_id}/analysis/candidates/merge",
+    response_model=AnalysisCandidateResponse,
+)
+def merge_analysis_candidates(
+    project_id: UUID,
+    payload: AnalysisMergeRequest,
+    db: Session = Depends(get_db),
+) -> AnalysisCandidateResponse:
+    candidate = analysis_service.merge_candidates(db, project_id, payload.candidate_ids)
+    return analysis_service.candidate_to_response(candidate)
+
+
+@router.post(
+    "/projects/{project_id}/analysis/candidates/{candidate_id}/replace",
+    response_model=AnalysisCandidateResponse,
+)
+def replace_analysis_candidate(
+    project_id: UUID,
+    candidate_id: UUID,
+    payload: AnalysisReplaceRequest,
+    db: Session = Depends(get_db),
+) -> AnalysisCandidateResponse:
+    candidate = analysis_service.replace_candidate(
+        db, project_id, candidate_id, payload.instruction
+    )
     return analysis_service.candidate_to_response(candidate)

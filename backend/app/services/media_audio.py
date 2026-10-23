@@ -44,7 +44,7 @@ def preview_audio_path(project_id: UUID, video_filename: str) -> Path:
     if ffmpeg is None:
         raise AppError("FFmpeg is not available.", code="ffmpeg_missing", status_code=503)
 
-    temp = cached.with_name(f".{cached.name}.tmp")
+    temp = cached.with_name(f"{cached.stem}.extract{cached.suffix}")
     log_path = project_dir / "preview-audio.log"
     try:
         try:
@@ -70,6 +70,8 @@ def _extract(ffmpeg: str, source: Path, destination: Path, log_path: Path, *, co
             "-map",
             "0:a:0",
             *audio_args,
+            "-f",
+            "ipod",
             "-movflags",
             "+faststart",
             str(destination),

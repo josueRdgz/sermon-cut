@@ -1,6 +1,6 @@
 .root {
   display: grid;
-  grid-template-rows: var(--topbar-h) 1fr var(--statusbar-h);
+  grid-template-rows: auto 1fr var(--statusbar-h);
   grid-template-columns: 1fr;
   grid-template-areas:
     'header'
@@ -20,8 +20,22 @@
     'footer footer';
 }
 
+.noFooter {
+  grid-template-rows: auto 1fr;
+  grid-template-areas:
+    'header'
+    'main';
+}
+
+.withSidebar.noFooter {
+  grid-template-areas:
+    'header header'
+    'sidebar main';
+}
+
 .header {
   grid-area: header;
+  min-height: var(--topbar-h);
   border-bottom: 1px solid var(--border);
   background: var(--bg-elevated);
 }

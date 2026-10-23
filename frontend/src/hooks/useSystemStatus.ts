@@ -19,6 +19,7 @@ export interface SystemStatus {
   version: string;
   storageUsed: string;
   storageBytes: number;
+  refresh: () => void;
 }
 
 const OVERALL_LABELS: Record<StatusTone, string> = {
@@ -29,7 +30,7 @@ const OVERALL_LABELS: Record<StatusTone, string> = {
 };
 
 export function useSystemStatus(): SystemStatus {
-  const { status, data } = useHealth();
+  const { status, data, refresh } = useHealth();
 
   return useMemo(() => {
     const loading = status === 'loading';
@@ -85,6 +86,7 @@ export function useSystemStatus(): SystemStatus {
       version: data?.version ?? '—',
       storageUsed: formatBytes(data?.storage?.bytes_used),
       storageBytes: data?.storage?.bytes_used ?? 0,
+      refresh,
     };
-  }, [status, data]);
+  }, [status, data, refresh]);
 }

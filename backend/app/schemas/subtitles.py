@@ -25,6 +25,14 @@ class SubtitleTemplateListResponse(BaseModel):
     items: list[SubtitleTemplateInfo]
 
 
+class SubtitleFontInfo(BaseModel):
+    family: str
+
+
+class SubtitleFontListResponse(BaseModel):
+    items: list[SubtitleFontInfo]
+
+
 class SubtitleCuePreview(BaseModel):
     start: float
     end: float

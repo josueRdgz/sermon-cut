@@ -4,7 +4,12 @@ export type TransitionType =
   | 'short_crossfade'
   | 'dip_to_black'
   | 'fade'
-  | 'flash';
+  | 'flash'
+  | 'light_change'
+  | 'wipe_down'
+  | 'wipe_left'
+  | 'slide_down'
+  | 'dissolve';
 export type SubtitleStyle =
   'reformed_sober' | 'modern_highlight' | 'clear_reading' | 'sermon_quote';
 export type SubtitleGranularity = 'auto' | 'segment' | 'phrase' | 'word';
@@ -27,6 +32,8 @@ export interface ReelSegment {
   manual_crop_zoom?: number | null;
   caption_in_ms?: number | null;
   caption_out_ms?: number | null;
+  volume_keyframes?: { t_ms: number; gain: number }[];
+  audio_offset_ms?: number;
 }
 
 export interface Reel {
@@ -47,6 +54,9 @@ export interface Reel {
   subtitle_opacity: number;
   subtitle_margin_bottom: number;
   subtitle_bible_reference: string | null;
+  subtitle_font_family?: string | null;
+  subtitle_x?: number | null;
+  subtitle_y?: number | null;
   aspect_ratio: AspectRatio;
   status: ReelStatus;
   framing_mode?: FramingMode | string;
@@ -100,6 +110,9 @@ export interface ReelUpdatePayload {
   subtitle_opacity?: number;
   subtitle_margin_bottom?: number;
   subtitle_bible_reference?: string | null;
+  subtitle_font_family?: string | null;
+  subtitle_x?: number | null;
+  subtitle_y?: number | null;
   aspect_ratio?: AspectRatio;
   status?: ReelStatus;
   audio_offset_ms?: number;
@@ -113,6 +126,8 @@ export interface ReelSegmentUpdatePayload {
   transition_duration_ms?: number;
   caption_in_ms?: number | null;
   caption_out_ms?: number | null;
+  volume_keyframes?: { t_ms: number; gain: number }[];
+  audio_offset_ms?: number;
 }
 
 export interface ReelFromTranscriptPayload {

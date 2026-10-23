@@ -35,6 +35,9 @@ def options_for_reel(reel: Reel) -> SubtitleOptions:
         opacity=getattr(reel, "subtitle_opacity", None),
         margin_bottom=getattr(reel, "subtitle_margin_bottom", None),
         bible_reference=getattr(reel, "subtitle_bible_reference", None),
+        font_family=getattr(reel, "subtitle_font_family", None),
+        pos_x=getattr(reel, "subtitle_x", None),
+        pos_y=getattr(reel, "subtitle_y", None),
     )
 
 
@@ -127,7 +130,7 @@ def build_subtitle_artifacts(
         return None
 
     template = get_template(opts.style)
-    font = resolve_font(template.font_name, fonts_dir)
+    font = resolve_font(opts.font_family or template.font_name, fonts_dir)
     document = render_ass_document(
         cues=result.cues,
         options=opts,

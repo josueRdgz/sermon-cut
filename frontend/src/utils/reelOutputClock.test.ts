@@ -52,6 +52,8 @@ describe('reelOutputClock', () => {
       }),
     ]);
     expect(clock.totalDuration).toBeCloseTo(10.5, 5);
+    expect(clock.placements[0].overlapSeconds).toBeCloseTo(0.5, 5);
+    expect(clock.placements[1].overlapSeconds).toBe(0);
   });
 
   it('maps source time onto the xfade-aware output clock', () => {

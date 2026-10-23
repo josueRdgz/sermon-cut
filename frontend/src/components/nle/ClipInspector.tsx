@@ -11,19 +11,11 @@ interface ClipInspectorProps {
   nextSegment: ReelSegment | null;
   outputStart: number;
   outputDuration: number;
-  captionDraft: string;
-  captionBaseline: string;
-  captionSaving: boolean;
   busy: boolean;
   cutSuggestions: CutSuggestion[];
   cutBusy: boolean;
   onMove: (direction: -1 | 1) => void;
   onRemove: () => void;
-  onCaptionChange: (value: string) => void;
-  onCaptionCommit: (value: string) => void;
-  onSaveCaption: () => void;
-  onClearCaption: () => void;
-  onOpenSubtitleStyle: () => void;
   onAdjustEdge: (edge: 'start' | 'end', delta: number) => void;
   onField: (patch: {
     source_start_seconds?: number;
@@ -33,6 +25,7 @@ interface ClipInspectorProps {
   }) => void;
   onAcceptCut: (suggestion: CutSuggestion) => void;
   onRejectCut: (suggestion: CutSuggestion) => void;
+  compact?: boolean;
 }
 
 export function ClipInspector({
@@ -42,33 +35,34 @@ export function ClipInspector({
   nextSegment,
   outputStart,
   outputDuration,
-  captionDraft,
-  captionBaseline,
-  captionSaving,
   busy,
   cutSuggestions,
   cutBusy,
   onMove,
   onRemove,
-  onCaptionChange,
-  onCaptionCommit,
-  onSaveCaption,
-  onClearCaption,
-  onOpenSubtitleStyle,
   onAdjustEdge,
   onField,
   onAcceptCut,
   onRejectCut,
+  compact = false,
 }: ClipInspectorProps) {
   const gap = nextSegment
     ? sourceGapSeconds(segment.source_end_seconds, nextSegment.source_start_seconds)
     : null;
-  const dirty = captionDraft !== captionBaseline;
-  const hasCustom = Boolean(segment.transcript_text?.trim());
   const outputEnd = outputStart + outputDuration;
 
   return (
-    <div className="reel-nle__selected-clip reel-nle__selected-clip--roomy">
+    <div
+      className={`reel-nle__selected-clip reel-nle__selected-clip--roomy${
+        compact ? ' reel-nle__selected-clip--compact' : ''
+      }`}
+    >
+      {!compact && (
+      <p className="muted">
+        Selecciona el corte en la línea temporal. Ajusta segundos al inicio o al final. Los
+        subtítulos se editan en Subtítulos; aquí solo se recorta el video.
+      </p>
+      )}
       <div className="reel-nle__selected-clip-header">
         <div>
           <h4>Fragmento {index + 1}</h4>
@@ -111,45 +105,6 @@ export function ClipInspector({
             disabled={busy}
           >
             Quitar
-          </button>
-        </div>
-      </div>
-
-      <div className="reel-transcript-form reel-transcript-form--editor">
-        <p className="reel-transcript-form__label">Subtítulo de este fragmento</p>
-        <textarea
-          className="reel-transcript-form__input"
-          rows={8}
-          value={captionDraft}
-          disabled={captionSaving || busy}
-          placeholder="Texto que debe verse en este fragmento…"
-          onChange={(event) => onCaptionChange(event.target.value)}
-          onBlur={(event) => {
-            const value = event.target.value;
-            if (value.trim() && value !== captionBaseline) onCaptionCommit(value);
-          }}
-        />
-        <div className="reel-transcript-form__actions">
-          <button
-            type="button"
-            className="button"
-            disabled={captionSaving || busy || !dirty || !captionDraft.trim()}
-            onClick={onSaveCaption}
-          >
-            {captionSaving ? 'Guardando…' : dirty ? 'Guardar subtítulo' : 'Guardado'}
-          </button>
-          {hasCustom && (
-            <button
-              type="button"
-              className="button button--secondary"
-              disabled={captionSaving || busy}
-              onClick={onClearCaption}
-            >
-              Texto del video
-            </button>
-          )}
-          <button type="button" className="button button--secondary" onClick={onOpenSubtitleStyle}>
-            Estilo de subtítulos
           </button>
         </div>
       </div>
@@ -240,6 +195,7 @@ export function ClipInspector({
         )}
       </div>
 
+      {!compact && (
       <CutSuggestionMarkers
         suggestions={cutSuggestions}
         segmentUuid={segment.id}
@@ -247,6 +203,7 @@ export function ClipInspector({
         onAccept={onAcceptCut}
         onReject={onRejectCut}
       />
+      )}
     </div>
   );
 }

@@ -48,6 +48,31 @@ export function addReelSegment(
   return apiJson<Reel>(`/api/projects/${projectId}/reels/${reelId}/segments`, 'POST', payload);
 }
 
+export function splitReelSegment(
+  projectId: string,
+  reelId: string,
+  segmentId: string,
+  sourceSeconds: number,
+): Promise<Reel> {
+  return apiJson<Reel>(
+    `/api/projects/${projectId}/reels/${reelId}/segments/${segmentId}/split`,
+    'POST',
+    { source_seconds: sourceSeconds },
+  );
+}
+
+export function joinReelSegment(
+  projectId: string,
+  reelId: string,
+  segmentId: string,
+): Promise<Reel> {
+  return apiJson<Reel>(
+    `/api/projects/${projectId}/reels/${reelId}/segments/${segmentId}/join`,
+    'POST',
+    {},
+  );
+}
+
 export function updateReelSegment(
   projectId: string,
   reelId: string,

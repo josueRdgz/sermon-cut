@@ -84,10 +84,10 @@ def _overall_severity(issues: list[CoherenceIssue]) -> CoherenceSeverity:
     return CoherenceSeverity.valid
 
 
-def _can_render(severity: CoherenceSeverity) -> bool:
-    # Warnings are a soft gate (review or dismiss). Only *blocked* findings
-    # must prevent export — matching ``assert_render_allowed``.
-    return severity != CoherenceSeverity.blocked
+def _can_render(_severity: CoherenceSeverity) -> bool:
+    # Editorial findings are always reviewable, never a hard export gate.
+    # The editor may still export with unresolved joins.
+    return True
 
 
 def _text_in_window(transcript: Transcript | None, start: float, end: float) -> str:
@@ -266,8 +266,8 @@ def _summary(severity: CoherenceSeverity, issues: list[CoherenceIssue]) -> str:
         return "Unión coherente: no se detectaron problemas activos."
     if blocked:
         return (
-            f"Hay {blocked} problema(s) bloqueante(s) y {warnings} advertencia(s). "
-            "Corrige los bloqueos antes de renderizar."
+            f"Hay {blocked} aviso(s) editorial(es) y {warnings} advertencia(s). "
+            "Puedes corregirlos o exportar igual: no bloquean la salida."
         )
     return (
         f"Hay {warnings} advertencia(s). Puedes ignorarlas, editar tiempos, "
@@ -357,7 +357,7 @@ def dismiss_warning(
     reel_id: UUID,
     payload: CoherenceDismissRequest,
 ) -> CoherenceReport:
-    """Persist an ignored warning; blocked findings are rejected."""
+    """Persist an ignored editorial finding (warnings and former blocked issues)."""
     reel = reels_service.get_reel_for_project(db, project_id, reel_id)
     ordered = sorted(reel.segments, key=lambda s: s.order)
     if payload.segment_id < 1 or payload.segment_id > len(ordered):
@@ -386,12 +386,6 @@ def dismiss_warning(
             "No hay una advertencia con ese código en el fragmento indicado.",
             code="warning_not_found",
         )
-    if match.severity == CoherenceSeverity.blocked:
-        raise ValidationAppError(
-            "Los hallazgos bloqueantes no se pueden ignorar; corrige el corte.",
-            code="cannot_dismiss_blocked",
-        )
-
     dismissals = _parse_dismissals(reel.coherence_dismissals_json)
     entry = {
         "code": payload.code,
@@ -670,12 +664,11 @@ def auto_fix_reel(
 
 
 def assert_render_allowed(db: Session, project_id: UUID, reel_id: UUID) -> None:
-    """Server-side gate: refuse render when undismissed *blocked* issues remain.
+    """Kept for API compatibility. Export is never blocked by coherence findings.
 
-    Warnings and info issues are a **soft gate**: the UI asks the user to review
-    or dismiss them, but the API only hard-stops on ``blocked`` severity so
-    operators can still export after an informed decision. See docs/PRIVACY.md
-    and the pastoral disclaimer in the export panel.
+    The UI still surfaces join warnings so the editor can review them. Callers
+    that pass ``acknowledge_coherence=False`` used to hard-stop here; they now
+    only re-run validation so a missing reel still 404s.
     """
     report = validate_reel(
         db,

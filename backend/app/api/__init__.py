@@ -22,6 +22,7 @@ from app.api.overlays import router as overlays_router
 from app.api.projects import router as projects_router
 from app.api.reels import router as reels_router
 from app.api.renders import router as renders_router
+from app.api.settings import router as settings_router
 from app.api.subtitles import router as subtitles_router
 from app.api.transcription import router as transcription_router
 from app.api.transcripts import router as transcripts_router
@@ -29,6 +30,7 @@ from app.api.youtube import router as youtube_router
 
 api_router = APIRouter()
 api_router.include_router(health_router)
+api_router.include_router(settings_router)
 api_router.include_router(projects_router)
 api_router.include_router(assets_router)
 api_router.include_router(transcripts_router)

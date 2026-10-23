@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from uuid import UUID
+
 from pydantic import BaseModel, Field
 
 from app.models.background_music import (
@@ -9,6 +11,10 @@ from app.models.background_music import (
     BackgroundMusicPreset,
     BackgroundMusicScope,
 )
+
+
+class BackgroundMusicFromAssetRequest(BaseModel):
+    asset_id: UUID
 
 
 class BackgroundMusicUpdate(BaseModel):
@@ -23,6 +29,7 @@ class BackgroundMusicUpdate(BaseModel):
     target_lufs: float | None = Field(default=None, ge=-24.0, le=-12.0)
     true_peak_db: float | None = Field(default=None, ge=-3.0, le=-0.5)
     clear_music: bool = False
+    volume_keyframes: list[dict] | None = None
 
 
 class BackgroundMusicResponse(BaseModel):
@@ -39,6 +46,7 @@ class BackgroundMusicResponse(BaseModel):
     true_peak_db: float
     enabled: bool
     rights_warning: str = RIGHTS_WARNING
+    volume_keyframes: list[dict] = Field(default_factory=list)
 
 
 class BackgroundMusicPresetInfo(BaseModel):

@@ -10,6 +10,7 @@ interface StatusBarProps {
   version: string;
   overall: StatusTone;
   overallLabel: string;
+  onStatusClick?: () => void;
 }
 
 export function StatusBar({
@@ -18,6 +19,7 @@ export function StatusBar({
   version,
   overall,
   overallLabel,
+  onStatusClick,
 }: StatusBarProps) {
   return (
     <div className={styles.root}>
@@ -25,10 +27,20 @@ export function StatusBar({
         <MetricCard icon={FolderKanban} label="Proyectos" value={String(projectCount)} />
         <span className={styles.divider} aria-hidden />
         <MetricCard icon={HardDrive} label="Almacenamiento" value={storageUsed} />
-        <span className={styles.divider} aria-hidden />
-        <MetricCard icon={Tag} label="Versión" value={version} />
+        <span className={`${styles.divider} ${styles.hideWhenNarrow}`} aria-hidden />
+        <span className={styles.hideWhenNarrow}>
+          <MetricCard icon={Tag} label="Versión" value={version} />
+        </span>
       </div>
-      <StatusIndicator label={overallLabel} tone={overall} detail="Estado del sistema" />
+      <p className={`${styles.credit} ${styles.hideWhenNarrow}`}>
+        Creado por Josué Rodríguez Ramírez
+      </p>
+      <StatusIndicator
+        label={overallLabel}
+        tone={overall}
+        detail="Estado del sistema"
+        onClick={onStatusClick}
+      />
     </div>
   );
 }

@@ -24,6 +24,7 @@ from app.schemas.reel import (
     ReelResponse,
     ReelSegmentCreate,
     ReelSegmentReorderRequest,
+    ReelSegmentSplitRequest,
     ReelSegmentUpdate,
     ReelUpdate,
 )
@@ -126,6 +127,35 @@ def update_segment(
     db: Session = Depends(get_db),
 ) -> ReelResponse:
     reel = reels_service.update_segment(db, project_id, reel_id, segment_id, payload)
+    return reels_service.to_response(reel)
+
+
+@router.post(
+    "/projects/{project_id}/reels/{reel_id}/segments/{segment_id}/split",
+    response_model=ReelResponse,
+)
+def split_segment(
+    project_id: UUID,
+    reel_id: UUID,
+    segment_id: UUID,
+    payload: ReelSegmentSplitRequest,
+    db: Session = Depends(get_db),
+) -> ReelResponse:
+    reel = reels_service.split_segment(db, project_id, reel_id, segment_id, payload)
+    return reels_service.to_response(reel)
+
+
+@router.post(
+    "/projects/{project_id}/reels/{reel_id}/segments/{segment_id}/join",
+    response_model=ReelResponse,
+)
+def join_segment(
+    project_id: UUID,
+    reel_id: UUID,
+    segment_id: UUID,
+    db: Session = Depends(get_db),
+) -> ReelResponse:
+    reel = reels_service.join_segment(db, project_id, reel_id, segment_id)
     return reels_service.to_response(reel)
 
 

@@ -65,3 +65,25 @@ export function rejectAnalysisCandidate(
     {},
   );
 }
+
+export function mergeAnalysisCandidates(
+  projectId: string,
+  candidateIds: string[],
+): Promise<AnalysisCandidate> {
+  return apiJson(`/api/projects/${projectId}/analysis/candidates/merge`, 'POST', {
+    candidate_ids: candidateIds,
+  });
+}
+
+export function replaceAnalysisCandidate(
+  projectId: string,
+  candidateId: string,
+  instruction: string,
+): Promise<AnalysisCandidate> {
+  return apiJson(
+    `/api/projects/${projectId}/analysis/candidates/${candidateId}/replace`,
+    'POST',
+    { instruction },
+    { timeoutMs: LONG_FETCH_TIMEOUT_MS },
+  );
+}

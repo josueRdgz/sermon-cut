@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import App from './App';
@@ -65,12 +65,16 @@ describe('App', () => {
     expect(screen.getByRole('heading', { name: 'SermonCut' })).toBeInTheDocument();
     expect(screen.getAllByRole('link', { name: 'Nuevo proyecto' }).length).toBeGreaterThan(0);
     await waitFor(() => {
-      expect(screen.getByLabelText('Backend: Conectado')).toBeInTheDocument();
+      expect(screen.getByLabelText('Atención: Estado del sistema')).toBeInTheDocument();
     });
   });
 
-  it('shows backend and FFmpeg status once health loads', async () => {
+  it('muestra el estado de Backend y FFmpeg en Acerca de', async () => {
     render(<App />);
+    await waitFor(() => {
+      expect(screen.getByLabelText('Acerca de')).toBeInTheDocument();
+    });
+    fireEvent.click(screen.getByLabelText('Acerca de'));
     await waitFor(() => {
       expect(screen.getByLabelText('Backend: Conectado')).toBeInTheDocument();
       expect(screen.getByLabelText('FFmpeg: 8.1')).toBeInTheDocument();
