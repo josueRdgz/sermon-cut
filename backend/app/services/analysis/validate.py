@@ -261,8 +261,9 @@ def _validate_clip(
             f"clip shorter than {min_clip_seconds}s ({total_duration:.2f}s)"
         )
     if max_clip_seconds is not None and total_duration > max_clip_seconds:
-        raise ValueError(
-            f"clip longer than {max_clip_seconds}s ({total_duration:.2f}s)"
+        warnings.append(
+            f"Duración {total_duration:.1f}s, un poco por encima del máximo "
+            f"pedido ({max_clip_seconds:.0f}s) para completar la idea."
         )
     ordered = _apply_audio_handles(ordered, video_duration)
 

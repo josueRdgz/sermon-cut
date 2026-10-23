@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import shutil
 from collections.abc import AsyncIterator
 from uuid import UUID
 
@@ -29,6 +30,7 @@ from app.services.background_music.ffmpeg_filters import (
     BackgroundMusicSpec,
     volume_to_db,
 )
+from app.services.audio.volume_envelope import dump_keyframes, parse_keyframes
 from app.services.ffprobe import probe_video
 
 MUSIC_EXTENSIONS = frozenset({".mp3", ".wav", ".m4a", ".ogg"})
@@ -115,6 +117,7 @@ def to_response(row: BackgroundMusicSettings | None) -> BackgroundMusicResponse:
             true_peak_db=settings.true_peak_db,
             enabled=False,
             rights_warning=RIGHTS_WARNING,
+            volume_keyframes=parse_keyframes(None),
         )
     enabled = (
         row.preset != BackgroundMusicPreset.none
@@ -135,6 +138,7 @@ def to_response(row: BackgroundMusicSettings | None) -> BackgroundMusicResponse:
         true_peak_db=row.true_peak_db,
         enabled=enabled,
         rights_warning=RIGHTS_WARNING,
+        volume_keyframes=parse_keyframes(row.volume_keyframes_json),
     )
 
 
@@ -160,6 +164,8 @@ def update_settings(
     if "preset" in data and data["preset"] is not None:
         apply_preset(row, BackgroundMusicPreset(data["preset"]))
         data.pop("preset", None)
+    if "volume_keyframes" in data:
+        data["volume_keyframes_json"] = dump_keyframes(data.pop("volume_keyframes"))
 
     if (
         "start_seconds" in data
@@ -229,6 +235,34 @@ async def attach_music(
     return row
 
 
+def assign_from_asset(db: Session, project_id: UUID, asset_id: UUID) -> BackgroundMusicSettings:
+    from app.models.asset import ProjectAssetKind
+    from app.services import assets as assets_service
+
+    asset = assets_service.get_asset(db, project_id, asset_id)
+    if asset.kind != ProjectAssetKind.audio:
+        raise ValidationAppError("El archivo no es audio.", code="asset_not_audio")
+    source = assets_service.resolve_asset_path(project_id, asset)
+    if not source.is_file():
+        raise NotFoundError("Asset file is missing on disk.", code="asset_missing")
+    extension = source.suffix.lower()
+    if extension not in MUSIC_EXTENSIONS:
+        raise ValidationAppError("Formato de audio no soportado.", code="unsupported_asset")
+    destination = storage.resolve_inside_project(project_id, f"{MUSIC_STEM}{extension}")
+    for existing in MUSIC_EXTENSIONS:
+        previous = storage.resolve_inside_project(project_id, f"{MUSIC_STEM}{existing}")
+        if previous != destination and previous.is_file():
+            previous.unlink(missing_ok=True)
+    shutil.copy2(source, destination)
+    row = ensure_row(db, project_id)
+    row.music_filename = destination.name
+    if row.preset == BackgroundMusicPreset.none:
+        apply_preset(row, BackgroundMusicPreset.very_soft_background)
+    db.commit()
+    db.refresh(row)
+    return row
+
+
 def resolve_spec(db: Session, project_id: UUID) -> BackgroundMusicSpec | None:
     """Return a render-ready spec, or ``None`` when music must stay off."""
     row = get_settings_row(db, project_id)
@@ -244,6 +278,9 @@ def resolve_spec(db: Session, project_id: UUID) -> BackgroundMusicSpec | None:
         source_duration = probe_video(path).duration_seconds
     except AppError:
         source_duration = None
+    from app.services.audio.volume_envelope import parse_keyframes
+
+    keys = parse_keyframes(getattr(row, "volume_keyframes_json", None))
     return BackgroundMusicSpec(
         path=path,
         volume=max(0.0, min(1.0, row.volume)),
@@ -256,6 +293,7 @@ def resolve_spec(db: Session, project_id: UUID) -> BackgroundMusicSpec | None:
         target_lufs=row.target_lufs,
         true_peak_db=row.true_peak_db,
         source_duration_seconds=source_duration,
+        volume_keyframes=tuple((item["t_ms"], item["gain"]) for item in keys),
     )
 
 

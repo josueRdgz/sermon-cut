@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -41,22 +41,11 @@ vi.mock('../components/TranscriptEditor', () => ({
 }));
 
 vi.mock('../components/AnalysisPanel', () => ({
-  AnalysisPanel: ({ onCandidateAccepted }: { onCandidateAccepted: (reelId: string) => void }) => (
-    <div>
-      Panel de análisis
-      <button type="button" onClick={() => onCandidateAccepted('reel-1')}>
-        Aceptar propuesta
-      </button>
-    </div>
-  ),
+  AnalysisPanel: () => <div>Panel de análisis</div>,
 }));
 
 vi.mock('../components/ReelEditor', () => ({
   ReelEditor: () => <div>Panel del editor</div>,
-}));
-
-vi.mock('../components/VideoHighlightsPanel', () => ({
-  VideoHighlightsPanel: () => <div>Panel de Video Highlights</div>,
 }));
 
 vi.mock('../components/SermonRangePanel', () => ({
@@ -134,16 +123,12 @@ describe('ProjectDetailPage workspace', () => {
     expect(workspaceButton('Predicación')).toBeInTheDocument();
   });
 
-  it('opens the editor automatically after accepting an AI proposal', async () => {
+  it('keeps analysis as its own step, without jumping to the editor', async () => {
     renderPage();
     await screen.findByRole('heading', { name: PROJECT.title });
     fireEvent.click(workspaceButton('Análisis IA'));
-    fireEvent.click(screen.getByRole('button', { name: 'Aceptar propuesta' }));
-
-    await waitFor(() => {
-      expect(workspaceButton('Editor de Reel')).toHaveAttribute('aria-current', 'page');
-    });
-    expect(screen.getByText('Panel del editor')).toBeVisible();
-    expect(screen.getByRole('navigation', { name: 'Secciones del proyecto' })).toBeInTheDocument();
+    expect(screen.getByText('Panel de análisis')).toBeVisible();
+    expect(screen.getByText('Panel del editor')).not.toBeVisible();
+    expect(workspaceButton('Análisis IA')).toHaveAttribute('aria-current', 'page');
   });
 });

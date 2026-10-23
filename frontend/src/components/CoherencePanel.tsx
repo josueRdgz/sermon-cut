@@ -9,6 +9,7 @@ import {
 import { ApiError } from '../api/client';
 import { removeReelSegment, updateReelSegment } from '../api/reels';
 import type { CoherenceIssue, CoherenceReport } from '../types/coherence';
+import { coherenceGroupLabel, groupCoherenceIssues } from '../utils/coherenceGroups';
 import type { Reel, ReelSegment } from '../types/reel';
 
 interface CoherencePanelProps {
@@ -22,7 +23,7 @@ interface CoherencePanelProps {
 const SEVERITY_LABEL: Record<string, string> = {
   valid: 'Válido',
   warning: 'Advertencia',
-  blocked: 'Bloqueado',
+  blocked: 'Aviso',
 };
 
 export function CoherencePanel({
@@ -114,15 +115,18 @@ export function CoherencePanel({
     };
   }, [projectId, reelId, segmentCount, includeAi, includeMedia, segmentsSignature, publish]);
 
-  const handleDismiss = async (issue: CoherenceIssue) => {
+  const handleDismiss = async (issues: CoherenceIssue[]) => {
     setBusy(true);
     setError(null);
     try {
-      const next = await dismissCoherenceWarning(projectId, reelId, {
-        code: issue.code,
-        segment_id: issue.segment_id,
-      });
-      publish(next);
+      let next: CoherenceReport | null = null;
+      for (const issue of issues) {
+        next = await dismissCoherenceWarning(projectId, reelId, {
+          code: issue.code,
+          segment_id: issue.segment_id,
+        });
+      }
+      if (next) publish(next);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'No se pudo ignorar la advertencia');
     } finally {
@@ -249,8 +253,9 @@ export function CoherencePanel({
       </div>
 
       <p className="muted">
-        Antes del render se revisa si los empalmes pueden resultar incoherentes o engañosos
-        (conectores sueltos, frases cortadas, referencias sin contexto, saltos de audio/plano).
+        Se revisa si los empalmes pueden resultar incoherentes o engañosos (conectores sueltos,
+        frases cortadas, referencias sin contexto, saltos de audio/plano). Puedes corregirlos o
+        exportar igual: no bloquean la salida.
       </p>
 
       <div className="transcript-toolbar">
@@ -285,15 +290,17 @@ export function CoherencePanel({
       </div>
 
       {report && (
-        <p className={report.severity === 'blocked' ? 'error' : 'muted'}>{report.summary}</p>
+        <p className="muted">{report.summary}</p>
       )}
       {fixResult && <p className="success">{fixResult}</p>}
 
       {activeIssues.length > 0 && (
         <ul className="coherence-list">
-          {activeIssues.map((issue) => (
+          {groupCoherenceIssues(activeIssues).map((group) => {
+            const issue = group.issues[0];
+            return (
             <li
-              key={`${issue.code}-${issue.segment_id}-${issue.message}`}
+              key={group.key}
               className={`coherence-item coherence-item--${issue.severity}`}
             >
               <div className="coherence-item__head">
@@ -301,16 +308,14 @@ export function CoherencePanel({
                 <span className={`badge badge--coherence-${issue.severity}`}>
                   {SEVERITY_LABEL[issue.severity]}
                 </span>
-                <span className="muted">Fragmento {issue.segment_id}</span>
+                <span className="muted">{coherenceGroupLabel(group)}</span>
               </div>
               <p>{issue.message}</p>
               {issue.recommendation && <p className="muted">{issue.recommendation}</p>}
               <div className="button-stack">
-                {issue.severity === 'warning' && (
-                  <button type="button" onClick={() => void handleDismiss(issue)} disabled={busy}>
-                    Ignorar
-                  </button>
-                )}
+                <button type="button" onClick={() => void handleDismiss(group.issues)} disabled={busy}>
+                  Ignorar
+                </button>
                 <button
                   type="button"
                   className="button--ghost"
@@ -337,7 +342,8 @@ export function CoherencePanel({
                 </button>
               </div>
             </li>
-          ))}
+            );
+          })}
         </ul>
       )}
 

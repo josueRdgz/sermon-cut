@@ -233,7 +233,7 @@ export function VideoHighlightsPanel({
         projectId,
         target,
         style,
-        extraEditorialInstructions(preset, editorialContext),
+        extraEditorialInstructions(editorialContext),
       );
       setAnalysisJob(job);
       while (mounted.current && ACTIVE_ANALYSIS.has(job.status)) {

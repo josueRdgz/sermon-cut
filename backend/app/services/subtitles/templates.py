@@ -35,6 +35,9 @@ class SubtitleOptions:
     opacity: float = 1.0
     margin_bottom: int = 120
     bible_reference: str | None = None
+    font_family: str | None = None
+    pos_x: float | None = None
+    pos_y: float | None = None
 
     def with_overrides(self, **kwargs: object) -> SubtitleOptions:
         return replace(self, **kwargs)
@@ -210,6 +213,9 @@ def options_from_reel(
     opacity: float | None = None,
     margin_bottom: int | None = None,
     bible_reference: str | None = None,
+    font_family: str | None = None,
+    pos_x: float | None = None,
+    pos_y: float | None = None,
 ) -> SubtitleOptions:
     template = get_template(style)
     gran = SubtitleGranularity(granularity) if granularity else template.default_granularity
@@ -226,6 +232,9 @@ def options_from_reel(
             margin_bottom if margin_bottom is not None else template.default_margin_bottom
         ),
         bible_reference=bible_reference,
+        font_family=font_family,
+        pos_x=pos_x,
+        pos_y=pos_y,
     )
 
 

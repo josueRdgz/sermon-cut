@@ -87,6 +87,8 @@ class Settings(BaseSettings):
     ai_max_segments_per_reel: int = 3
     ai_min_segment_seconds: float = 8.0
     ai_merge_gap_seconds: float = 1.25
+    # Extra seconds allowed so a clip can finish the idea past the requested max.
+    ai_duration_slack_seconds: float = 8.0
 
     # ---- Loudness (spoken-word friendly) ----
     target_lufs: float = -16.0

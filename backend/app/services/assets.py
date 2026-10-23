@@ -22,6 +22,8 @@ _ASSET_IMAGE_EXTENSIONS = storage.COVER_EXTENSIONS
 _ASSET_IMAGE_MIMES = storage.COVER_MIME_TYPES
 _ASSET_VIDEO_EXTENSIONS = storage.VIDEO_EXTENSIONS
 _ASSET_VIDEO_MIMES = storage.VIDEO_MIME_TYPES
+_ASSET_AUDIO_EXTENSIONS = storage.AUDIO_EXTENSIONS
+_ASSET_AUDIO_MIMES = storage.AUDIO_MIME_TYPES
 
 _IMAGE_MEDIA_TYPES = {
     ".jpg": "image/jpeg",
@@ -34,6 +36,12 @@ _VIDEO_MEDIA_TYPES = {
     ".mov": "video/quicktime",
     ".mkv": "video/x-matroska",
     ".webm": "video/webm",
+}
+_AUDIO_MEDIA_TYPES = {
+    ".mp3": "audio/mpeg",
+    ".wav": "audio/wav",
+    ".m4a": "audio/mp4",
+    ".ogg": "audio/ogg",
 }
 
 
@@ -84,6 +92,8 @@ def media_type_for(asset: ProjectAsset) -> str:
     suffix = Path(asset.filename).suffix.lower()
     if asset.kind == ProjectAssetKind.video:
         return _VIDEO_MEDIA_TYPES.get(suffix, "video/mp4")
+    if asset.kind == ProjectAssetKind.audio:
+        return _AUDIO_MEDIA_TYPES.get(suffix, "audio/mpeg")
     return _IMAGE_MEDIA_TYPES.get(suffix, "image/png")
 
 
@@ -95,9 +105,11 @@ def _classify_upload(filename: str, content_type: str | None) -> ProjectAssetKin
     if suffix in _ASSET_VIDEO_EXTENSIONS:
         storage.validate_mime(content_type, _ASSET_VIDEO_MIMES)
         return ProjectAssetKind.video
+    if suffix in _ASSET_AUDIO_EXTENSIONS:
+        storage.validate_mime(content_type, _ASSET_AUDIO_MIMES)
+        return ProjectAssetKind.audio
     raise ValidationAppError(
-        "Unsupported asset. Upload an image (JPEG, PNG, WebP) or a video clip "
-        "(MP4, MOV, MKV, WebM).",
+        "Unsupported asset. Upload an image, a video clip or an audio file.",
         code="unsupported_asset",
     )
 
@@ -126,16 +138,17 @@ async def create_asset(
     stored_name = f"asset-{uuid4().hex}{extension}"
     destination = storage.resolve_inside_project(project.id, stored_name)
 
-    max_bytes = (
-        settings.max_upload_bytes
-        if kind == ProjectAssetKind.video
-        else settings.max_cover_upload_bytes
-    )
+    if kind == ProjectAssetKind.video:
+        max_bytes = settings.max_upload_bytes
+        magic = "video"
+    elif kind == ProjectAssetKind.audio:
+        max_bytes = settings.max_music_upload_bytes
+        magic = "audio"
+    else:
+        max_bytes = settings.max_cover_upload_bytes
+        magic = "image"
     await storage.save_upload_stream(destination, chunks, max_bytes=max_bytes)
-    storage.assert_file_magic(
-        destination,
-        kind="video" if kind == ProjectAssetKind.video else "image",
-    )
+    storage.assert_file_magic(destination, kind=magic)
 
     width = height = duration_ms = None
     if kind == ProjectAssetKind.image:

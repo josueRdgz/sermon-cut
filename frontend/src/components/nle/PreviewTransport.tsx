@@ -1,15 +1,12 @@
 import { Pause, Play } from 'lucide-react';
 
 import { formatDuration } from '../../utils/format';
-import type { PreviewMode } from './PreviewMonitor';
 
 interface PreviewTransportProps {
   outputTime: number;
   totalDuration: number;
   previewing: boolean;
   previewMuted: boolean;
-  assembledBusy: boolean;
-  previewMode: PreviewMode;
   voiceVolume: number;
   musicVolume: number;
   musicVolumeSaving: boolean;
@@ -23,7 +20,6 @@ interface PreviewTransportProps {
   onVoiceVolume: (value: number) => void;
   onMusicVolume: (value: number) => void;
   onMusicVolumeCommit: (value: number) => void;
-  onPreviewMode: (mode: PreviewMode) => void;
   onDualMonitors: (enabled: boolean) => void;
 }
 
@@ -32,8 +28,6 @@ export function PreviewTransport({
   totalDuration,
   previewing,
   previewMuted,
-  assembledBusy,
-  previewMode,
   voiceVolume,
   musicVolume,
   musicVolumeSaving,
@@ -47,7 +41,6 @@ export function PreviewTransport({
   onVoiceVolume,
   onMusicVolume,
   onMusicVolumeCommit,
-  onPreviewMode,
   onDualMonitors,
 }: PreviewTransportProps) {
   const duration = Math.max(totalDuration, 0.01);
@@ -84,30 +77,6 @@ export function PreviewTransport({
         <span className="reel-nle__time">
           {formatDuration(outputTime)} / {formatDuration(totalDuration)}
         </span>
-        <div className="reel-nle__preview-mode" role="group" aria-label="Modo de vista previa">
-          <button
-            type="button"
-            className={`button button--secondary${
-              previewMode === 'logical' ? ' button--pressed' : ''
-            }`}
-            aria-pressed={previewMode === 'logical'}
-            disabled={assembledBusy}
-            onClick={() => void onPreviewMode('logical')}
-          >
-            Lógica
-          </button>
-          <button
-            type="button"
-            className={`button button--secondary${
-              previewMode === 'assembled' ? ' button--pressed' : ''
-            }`}
-            aria-pressed={previewMode === 'assembled'}
-            disabled={assembledBusy}
-            onClick={() => void onPreviewMode('assembled')}
-          >
-            {assembledBusy ? 'Ensamblando…' : 'Ensamblado'}
-          </button>
-        </div>
         <button
           type="button"
           className="button button--secondary"
@@ -124,7 +93,6 @@ export function PreviewTransport({
         >
           {dualMonitors ? 'Un visor' : 'Fuente'}
         </button>
-        <span className="muted reel-nle__keys">J K L · I O</span>
       </div>
       <div className="reel-nle__mix">
         <label className="reel-nle__mix-slider">

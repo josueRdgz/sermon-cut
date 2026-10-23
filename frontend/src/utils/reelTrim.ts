@@ -1,6 +1,26 @@
 import type { ReelSegment } from '../types/reel';
 
 const MIN_DURATION = 0.2;
+const JOIN_EPSILON = 0.05;
+export const SPLIT_EDGE_MARGIN = 0.2;
+
+export function splitTooCloseToEdge(
+  start: number,
+  cut: number,
+  end: number,
+  margin = SPLIT_EDGE_MARGIN,
+): boolean {
+  return cut <= start + margin || cut >= end - margin;
+}
+
+/** True when two neighbouring clips were split from the same source window. */
+export function canJoinSourceWindows(
+  leftEndSeconds: number,
+  rightStartSeconds: number,
+  epsilon = JOIN_EPSILON,
+): boolean {
+  return Math.abs(leftEndSeconds - rightStartSeconds) <= epsilon;
+}
 
 export interface TrimPatch {
   source_start_seconds?: number;

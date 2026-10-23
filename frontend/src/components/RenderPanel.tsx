@@ -21,6 +21,7 @@ import type { ExportProfile, ExportQuality, SizeEstimate } from '../types/export
 import type { AspectRatio, ReelSegment } from '../types/reel';
 import type { RenderJob, RenderLayout } from '../types/render';
 import { ACTIVE_RENDER_STATUSES } from '../types/render';
+import { groupCoherenceIssues } from '../utils/coherenceGroups';
 import { formatDuration } from '../utils/format';
 import { nativeVideoControlProps } from '../utils/nativeMediaControls';
 import { ConfirmDialog } from './ConfirmDialog';
@@ -69,7 +70,7 @@ const STAGE_LABELS: Record<string, string> = {
 const COHERENCE_LABELS: Record<CoherenceSeverity, string> = {
   valid: 'Coherencia válida',
   warning: 'Advertencias editoriales',
-  blocked: 'Unión bloqueada',
+  blocked: 'Avisos editoriales',
 };
 
 function coherenceBadgeClass(severity: CoherenceSeverity): string {
@@ -108,7 +109,7 @@ export function RenderPanel({
   reelId,
   reelAspectRatio,
   segments,
-  audioOffsetMs,
+  audioOffsetMs: _audioOffsetMs,
   onBeforeStart,
   onGoToCuts,
 }: RenderPanelProps) {
@@ -129,22 +130,36 @@ export function RenderPanel({
   const [meters, setMeters] = useState<BackgroundMusicMeters | null>(null);
   const [coherence, setCoherence] = useState<CoherenceReport | null>(null);
   const [coherenceLoading, setCoherenceLoading] = useState(false);
-  const [coherenceAcknowledged, setCoherenceAcknowledged] = useState(false);
-  const [pendingForceExport, setPendingForceExport] = useState(false);
   const [pendingDeleteRender, setPendingDeleteRender] = useState<RenderJob | null>(null);
   const previousReelRef = useRef<string>(reelId);
   const segmentCount = segments.length;
 
-  const selectedProfile = useMemo(
-    () => profiles.find((item) => item.id === profileId) ?? null,
-    [profiles, profileId],
+  const matchingProfiles = useMemo(
+    () => profiles.filter((item) => item.aspect_ratio === reelAspectRatio),
+    [profiles, reelAspectRatio],
   );
+  const visibleProfiles = matchingProfiles.length > 0 ? matchingProfiles : profiles;
+  const selectedProfile = useMemo(
+    () => visibleProfiles.find((item) => item.id === profileId) ?? visibleProfiles[0] ?? null,
+    [visibleProfiles, profileId],
+  );
+
+  useEffect(() => {
+    if (visibleProfiles.length === 0) return;
+    if (visibleProfiles.some((item) => item.id === profileId)) return;
+    setProfileId(visibleProfiles[0].id);
+  }, [visibleProfiles, profileId]);
 
   useEffect(() => {
     listExportProfiles()
       .then((data) => {
         setProfiles(data.items);
-        const preferred = data.items.find((item) => item.slug === 'youtube-short') ?? data.items[0];
+        const matching = data.items.filter((item) => item.aspect_ratio === reelAspectRatio);
+        const preferred =
+          matching.find((item) => item.slug === 'youtube-short') ??
+          matching[0] ??
+          data.items.find((item) => item.slug === 'youtube-short') ??
+          data.items[0];
         if (preferred) {
           setProfileId((current) => current || preferred.id);
           setCrf(crfForProfile(preferred, 'standard'));
@@ -161,7 +176,6 @@ export function RenderPanel({
   useEffect(() => {
     if (segmentCount === 0) {
       setCoherence(null);
-      setCoherenceAcknowledged(false);
       return;
     }
     const controller = new AbortController();
@@ -179,7 +193,6 @@ export function RenderPanel({
         .then((report) => {
           if (!controller.signal.aborted) {
             setCoherence(report);
-            setCoherenceAcknowledged(false);
           }
         })
         .catch((err: unknown) => {
@@ -303,13 +316,11 @@ export function RenderPanel({
           layout,
           normalize_loudness: normalizeLoudness,
           burn_subtitles: burnSubtitles,
-          audio_offset_ms: audioOffsetMs,
-          acknowledge_coherence: options.acknowledgeCoherence ?? false,
+          acknowledge_coherence: options.acknowledgeCoherence ?? true,
         });
         setJob(started);
         const data = await listRenders(projectId, reelId);
         setHistory(data.items);
-        setPendingForceExport(false);
       } catch (err) {
         const message = err instanceof Error ? err.message : 'No se pudo iniciar el render';
         setError(message);
@@ -331,7 +342,6 @@ export function RenderPanel({
       layout,
       normalizeLoudness,
       burnSubtitles,
-      audioOffsetMs,
       onBeforeStart,
       onGoToCuts,
     ],
@@ -418,8 +428,8 @@ export function RenderPanel({
   const stageLabel = job?.stage ? (STAGE_LABELS[job.stage] ?? job.stage) : '—';
   const canRender = segmentCount > 0 && !!profileId;
   const openIssues = (coherence?.issues ?? []).filter((issue) => !issue.dismissed);
+  const groupedOpenIssues = groupCoherenceIssues(openIssues);
   const blockedExport = coherence?.severity === 'blocked';
-  const showForceExport = blockedExport && coherenceAcknowledged;
 
   return (
     <div className="render-panel">
@@ -443,16 +453,6 @@ export function RenderPanel({
               }
             >
               {busy ? 'Preparando exportación…' : 'Exportar Reel a MP4'}
-            </button>
-          )}
-          {!active && showForceExport && (
-            <button
-              type="button"
-              className="button button--danger"
-              onClick={() => setPendingForceExport(true)}
-              disabled={busy || !canRender}
-            >
-              Exportar de todos modos
             </button>
           )}
         </div>
@@ -490,29 +490,24 @@ export function RenderPanel({
                 {COHERENCE_LABELS[coherence.severity]}
               </span>
               <p className="muted">{coherence.summary}</p>
-              {openIssues.length > 0 && (
+              {groupedOpenIssues.length > 0 && (
                 <ul className="render-panel__coherence-issues">
-                  {openIssues.slice(0, 4).map((issue) => (
-                    <li key={`${issue.code}-${issue.segment_id}`}>
-                      <strong>{issue.severity === 'blocked' ? 'Bloqueado' : 'Aviso'}:</strong>{' '}
-                      {issue.message}
+                  {groupedOpenIssues.slice(0, 4).map((group) => (
+                    <li key={group.key}>
+                      <strong>Aviso:</strong>{' '}
+                      {group.issues[0].message}
                     </li>
                   ))}
-                  {openIssues.length > 4 && (
-                    <li className="muted">… y {openIssues.length - 4} más en Cortes.</li>
+                  {groupedOpenIssues.length > 4 && (
+                    <li className="muted">… y {groupedOpenIssues.length - 4} más en Cortes.</li>
                   )}
                 </ul>
               )}
               {blockedExport && (
-                <label className="field field--checkbox">
-                  <input
-                    type="checkbox"
-                    checked={coherenceAcknowledged}
-                    onChange={(event) => setCoherenceAcknowledged(event.target.checked)}
-                    disabled={busy || active}
-                  />
-                  <span>Entiendo el riesgo editorial y quiero exportar de todos modos</span>
-                </label>
+                <p className="muted">
+                  Puedes exportar igual: estos avisos no bloquean la salida. Corrígelos en Cortes
+                  solo si quieres.
+                </p>
               )}
             </div>
           )}
@@ -521,13 +516,14 @@ export function RenderPanel({
             <label className="field field--inline">
               <span>Perfil</span>
               <select
-                value={profileId}
+                value={selectedProfile?.id ?? profileId}
                 onChange={(e) => setProfileId(e.target.value)}
                 disabled={active || busy}
               >
-                {profiles.map((item) => (
+                {visibleProfiles.map((item) => (
                   <option key={item.id} value={item.id}>
                     {item.name}
+                    {item.aspect_ratio !== reelAspectRatio ? ` (${item.aspect_ratio})` : ''}
                   </option>
                 ))}
               </select>
@@ -878,17 +874,6 @@ export function RenderPanel({
       )}
 
       {error && <p className="error">{error}</p>}
-
-      {pendingForceExport && (
-        <ConfirmDialog
-          title="Exportar con incoherencias"
-          message="La unión del Reel tiene problemas editoriales bloqueados. El MP4 puede alterar el sentido del sermón. ¿Exportar de todos modos?"
-          confirmLabel="Exportar de todos modos"
-          busy={busy}
-          onConfirm={() => void handleStart({ acknowledgeCoherence: true })}
-          onCancel={() => !busy && setPendingForceExport(false)}
-        />
-      )}
 
       {pendingDeleteRender && (
         <ConfirmDialog

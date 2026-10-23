@@ -158,12 +158,7 @@ class AnalysisManager:
             additional_instructions=additional_instructions,
             doctrinal_orientation=orientation,
             progress=0.0,
-            notice=(
-                None
-                if provider.name == "gemini"
-                else "Motor local de evaluación estructural activo. Configure "
-                "SERMON_CUT_GEMINI_API_KEY para habilitar el análisis semántico avanzado."
-            ),
+            notice=None,
         )
         db.add(job)
         project.status = ProjectStatus.analyzing
@@ -332,7 +327,8 @@ class AnalysisManager:
                 max_segments_per_clip=preferences.max_segments_per_reel,
                 merge_gap_seconds=settings.ai_merge_gap_seconds,
                 min_clip_seconds=preferences.min_duration_seconds,
-                max_clip_seconds=preferences.max_duration_seconds,
+                max_clip_seconds=preferences.max_duration_seconds
+                + max(0.0, settings.ai_duration_slack_seconds),
             )
             # Cap to the requested maximum after validation.
             accepted = report.accepted[: job.max_reels]

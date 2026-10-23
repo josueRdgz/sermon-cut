@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 
 import { fetchHealth } from '../api/health';
 import type { HealthResponse } from '../types/health';
@@ -9,12 +9,16 @@ interface UseHealthResult {
   status: Status;
   data: HealthResponse | null;
   error: string | null;
+  refresh: () => void;
 }
 
 export function useHealth(): UseHealthResult {
   const [status, setStatus] = useState<Status>('loading');
   const [data, setData] = useState<HealthResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [tick, setTick] = useState(0);
+
+  const refresh = useCallback(() => setTick((value) => value + 1), []);
 
   useEffect(() => {
     let cancelled = false;
@@ -34,7 +38,7 @@ export function useHealth(): UseHealthResult {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [tick]);
 
-  return { status, data, error };
+  return { status, data, error, refresh };
 }

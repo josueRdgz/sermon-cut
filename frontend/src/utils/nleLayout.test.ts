@@ -3,9 +3,9 @@ import { clampNleLayout, DEFAULT_NLE_LAYOUT } from './nleLayout';
 describe('nleLayout', () => {
   it('clamps panel sizes into usable bounds', () => {
     expect(clampNleLayout({ binPx: 40, inspectorPx: 900, timelinePx: 80 })).toEqual({
-      binPx: 148,
-      inspectorPx: 680,
-      timelinePx: 220,
+      binPx: 132,
+      inspectorPx: 480,
+      timelinePx: 180,
       dualMonitors: false,
       inspectorWide: false,
     });

@@ -3,9 +3,8 @@ import type {
   FramingPreview,
   FramingStatus,
   ManualCropPayload,
-  TrackingReport,
 } from '../types/framing';
-import { API_BASE_URL, DEFAULT_FETCH_TIMEOUT_MS, LONG_FETCH_TIMEOUT_MS, apiDeleteJson, apiGet, apiJson } from './client';
+import { API_BASE_URL, DEFAULT_FETCH_TIMEOUT_MS, apiDeleteJson, apiGet, apiJson } from './client';
 
 export function getFramingStatus(projectId: string, reelId: string): Promise<FramingStatus> {
   return apiGet(`/api/projects/${projectId}/reels/${reelId}/framing`);
@@ -23,7 +22,7 @@ export function computeTracking(
   projectId: string,
   reelId: string,
   payload: { tracker?: string; sample_fps?: number } = {},
-): Promise<TrackingReport> {
+): Promise<FramingStatus> {
   return apiJson(
     `/api/projects/${projectId}/reels/${reelId}/framing/track`,
     'POST',
@@ -32,7 +31,6 @@ export function computeTracking(
       sample_fps: 2,
       ...payload,
     },
-    { timeoutMs: LONG_FETCH_TIMEOUT_MS },
   );
 }
 

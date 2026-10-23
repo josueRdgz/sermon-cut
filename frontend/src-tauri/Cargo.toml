@@ -1,6 +1,6 @@
 [package]
 name = "sermon-cut"
-version = "0.4.11"
+version = "0.4.12"
 description = "Sermon Cut desktop shell (Tauri 2 + local FastAPI)"
 authors = ["Sermon Cut contributors"]
 license = "MIT"
@@ -20,3 +20,13 @@ serde = { version = "1.0", features = ["derive"] }
 log = "0.4"
 tauri = { version = "2.11.3", features = [] }
 tauri-plugin-log = "2"
+
+# Stripping proc-macro dylibs on this toolchain produces
+# "mis-aligned LINKEDIT" and rustc E0463 (can't find crate).
+[profile.release]
+strip = false
+debug = false
+
+[profile.release.build-override]
+opt-level = 0
+strip = false

@@ -368,6 +368,88 @@ def test_reorder_incomplete_rejected(
     assert resp.json()["code"] == "incomplete_reorder"
 
 
+def test_split_and_join_segment(client: TestClient, project_with_duration: str) -> None:
+    project_id = project_with_duration
+    created = client.post(
+        f"/api/projects/{project_id}/reels",
+        json={
+            "title": "Cortar y unir",
+            "segments": [
+                {
+                    "source_start_seconds": 10.0,
+                    "source_end_seconds": 20.0,
+                    "transcript_text": "hola mundo",
+                    "transition_type": "hard_cut",
+                    "transition_duration_ms": 0,
+                }
+            ],
+        },
+    )
+    assert created.status_code == 201, created.text
+    reel_id = created.json()["id"]
+    segment_id = created.json()["segments"][0]["id"]
+    timed = client.patch(
+        f"/api/projects/{project_id}/reels/{reel_id}/segments/{segment_id}",
+        json={"caption_in_ms": 500, "caption_out_ms": 9000, "audio_offset_ms": 180},
+    )
+    assert timed.status_code == 200, timed.text
+    split = client.post(
+        f"/api/projects/{project_id}/reels/{reel_id}/segments/{segment_id}/split",
+        json={"source_seconds": 14.0},
+    )
+    assert split.status_code == 200, split.text
+    parts = split.json()["segments"]
+    assert len(parts) == 2
+    assert parts[0]["source_end_seconds"] == pytest.approx(14.0)
+    assert parts[1]["source_start_seconds"] == pytest.approx(14.0)
+    assert parts[0]["caption_in_ms"] == 500
+    assert parts[0]["caption_out_ms"] == 9000
+    assert parts[0]["audio_offset_ms"] == 180
+    assert parts[1]["audio_offset_ms"] == 180
+    assert parts[1]["caption_in_ms"] is None
+    assert parts[1]["caption_out_ms"] is None
+    joined = client.post(
+        f"/api/projects/{project_id}/reels/{reel_id}/segments/{parts[0]['id']}/join"
+    )
+    assert joined.status_code == 200, joined.text
+    merged = joined.json()["segments"]
+    assert len(merged) == 1
+    assert merged[0]["source_start_seconds"] == pytest.approx(10.0)
+    assert merged[0]["source_end_seconds"] == pytest.approx(20.0)
+
+
+def test_join_rejects_analysis_cuts_with_a_source_gap(
+    client: TestClient, project_with_duration: str
+) -> None:
+    project_id = project_with_duration
+    created = client.post(
+        f"/api/projects/{project_id}/reels",
+        json={
+            "title": "Cortes del análisis",
+            "segments": [
+                {
+                    "source_start_seconds": 10.0,
+                    "source_end_seconds": 14.0,
+                    "transition_type": "hard_cut",
+                    "transition_duration_ms": 0,
+                },
+                {
+                    "source_start_seconds": 20.0,
+                    "source_end_seconds": 26.0,
+                    "transition_type": "hard_cut",
+                    "transition_duration_ms": 0,
+                },
+            ],
+        },
+    )
+    assert created.status_code == 201, created.text
+    left_id = created.json()["segments"][0]["id"]
+    reel_id = created.json()["id"]
+    joined = client.post(f"/api/projects/{project_id}/reels/{reel_id}/segments/{left_id}/join")
+    assert joined.status_code == 400
+    assert joined.json()["code"] == "join_not_user_split"
+
+
 def test_unknown_reel_returns_404(client: TestClient, project_with_duration: str) -> None:
     project_id = project_with_duration
     resp = client.get(f"/api/projects/{project_id}/reels/{uuid4()}")

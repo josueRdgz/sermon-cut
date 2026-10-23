@@ -50,13 +50,15 @@ def build_style_line(
 ) -> str:
     """Build one ``Style:`` row for the ASS Styles section."""
     del play_res_x  # reserved for future scaling heuristics
-    alignment = ass_alignment_for(options.position)
+    alignment = 5 if options.pos_x is not None and options.pos_y is not None else ass_alignment_for(options.position)
     # Safe margins: keep captions away from edges (requirement).
     margin_l = max(48, play_res_y // 24)
     margin_r = margin_l
     margin_v = max(48, options.margin_bottom)
     if options.position.value == "top":
         margin_v = max(48, options.margin_bottom // 2 + 40)
+    if options.pos_x is not None and options.pos_y is not None:
+        margin_l = margin_r = margin_v = 0
 
     primary = _apply_opacity(template.primary_color, options.opacity)
     secondary = _apply_opacity(template.secondary_color, options.opacity)
@@ -80,13 +82,27 @@ def _apply_opacity(ass_color: str, opacity: float) -> str:
     return f"&H{_alpha_prefix(opacity)}{ass_color[4:]}"
 
 
+def _pos_override(options: SubtitleOptions, play_res_x: int, play_res_y: int) -> str:
+    if options.pos_x is None or options.pos_y is None:
+        return ""
+    x = int(round(max(0.0, min(1.0, options.pos_x)) * play_res_x))
+    y = int(round(max(0.0, min(1.0, options.pos_y)) * play_res_y))
+    return rf"{{\an5\pos({x},{y})}}"
+
+
 def format_dialogue_text(
-    cue: SubtitleCue, template: StyleTemplate, options: SubtitleOptions
+    cue: SubtitleCue,
+    template: StyleTemplate,
+    options: SubtitleOptions,
+    *,
+    play_res_x: int = 1080,
+    play_res_y: int = 1920,
 ) -> str:
     """Render cue text, including word-highlight karaoke for modern styles."""
+    prefix = _pos_override(options, play_res_x, play_res_y)
     if cue.highlight and cue.words and template.highlight_current_word:
-        return _karaoke_highlight(cue, template, options)
-    return escape_ass_text(cue.text)
+        return prefix + _karaoke_highlight(cue, template, options)
+    return prefix + escape_ass_text(cue.text)
 
 
 def _karaoke_highlight(
@@ -141,7 +157,9 @@ def render_ass_document(
     for cue in cues:
         if cue.end <= cue.start:
             continue
-        text = format_dialogue_text(cue, template, options)
+        text = format_dialogue_text(
+            cue, template, options, play_res_x=play_res_x, play_res_y=play_res_y
+        )
         if not text.strip():
             continue
         events.append(

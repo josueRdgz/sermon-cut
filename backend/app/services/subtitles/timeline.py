@@ -12,7 +12,17 @@ from dataclasses import dataclass
 
 # Keep in sync with ``app.services.render.args``.
 _XFADE_TRANSITIONS: frozenset[str] = frozenset(
-    {"short_crossfade", "dip_to_black", "fade", "flash"}
+    {
+        "short_crossfade",
+        "dip_to_black",
+        "fade",
+        "flash",
+        "light_change",
+        "wipe_down",
+        "wipe_left",
+        "slide_down",
+        "dissolve",
+    }
 )
 _MIN_XFADE_SLACK = 0.05
 

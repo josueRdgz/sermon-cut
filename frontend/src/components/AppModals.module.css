@@ -1,0 +1,103 @@
+.about {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.aboutRow {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-4);
+  font-size: var(--text-sm);
+  padding-bottom: var(--space-2);
+  border-bottom: 1px solid var(--border);
+}
+
+.aboutKey {
+  color: var(--text-secondary);
+}
+
+.aboutValue {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.tools {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+}
+
+.tool {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: 0.35rem 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.tool:last-child {
+  border-bottom: 0;
+}
+
+.note {
+  margin: 0;
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+  line-height: 1.5;
+}
+
+.credit {
+  margin: 0;
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--text);
+}
+
+.help {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+}
+
+.shortcuts {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.shortcut {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+}
+
+.keys {
+  display: inline-flex;
+  gap: var(--space-1);
+}
+
+kbd.key {
+  min-width: 22px;
+  padding: 2px 7px;
+  font-family: var(--font-sans);
+  font-size: var(--text-xs);
+  font-weight: 600;
+  text-align: center;
+  color: var(--text);
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-bottom-width: 2px;
+  border-radius: var(--radius-sm);
+}
+
+.bibleTitle {
+  margin: 0;
+  font-size: var(--text-sm);
+  font-weight: 700;
+  color: var(--text);
+}

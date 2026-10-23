@@ -27,11 +27,12 @@ class ProjectAssetKind(enum.StrEnum):
 
 
 class ReelOverlayKind(enum.StrEnum):
-    """Visual layer composited over the assembled reel (not A-roll)."""
+    """Layer composited over the assembled reel (not A-roll)."""
 
     image = "image"
     text = "text"
     video = "video"
+    audio = "audio"
 
 
 class ProjectAsset(Base):

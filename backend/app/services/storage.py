@@ -28,6 +28,20 @@ VIDEO_MIME_TYPES: frozenset[str] = frozenset(
     }
 )
 
+AUDIO_EXTENSIONS: frozenset[str] = frozenset({".mp3", ".wav", ".m4a", ".ogg"})
+AUDIO_MIME_TYPES: frozenset[str] = frozenset(
+    {
+        "audio/mpeg",
+        "audio/wav",
+        "audio/x-wav",
+        "audio/wave",
+        "audio/mp4",
+        "audio/aac",
+        "audio/ogg",
+        "application/octet-stream",
+    }
+)
+
 COVER_EXTENSIONS: frozenset[str] = frozenset({".jpg", ".jpeg", ".png", ".webp"})
 COVER_MIME_TYPES: frozenset[str] = frozenset(
     {

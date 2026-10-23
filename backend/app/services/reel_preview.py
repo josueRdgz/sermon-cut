@@ -13,14 +13,12 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
 from app.core.exceptions import AppError, NotFoundError, ValidationAppError
-from app.models.asset import ProjectAsset, ReelOverlayKind
 from app.models.project import Project
 from app.models.reel import Reel
 from app.services import storage
 from app.services.ffprobe import probe_video
-from app.services.overlays import list_overlays_for_render
-from app.services.overlays_render import render_title_card
-from app.services.render.args import OverlaySpec, RenderSegmentSpec, build_render_command
+from app.services.overlays import list_overlays_for_render, specs_for_render
+from app.services.render.args import RenderSegmentSpec, build_render_command
 from app.services.render.binary import locate_ffmpeg
 from app.services.render.runner import FFmpegError, run_ffmpeg
 
@@ -50,6 +48,7 @@ def _identity(reel: Reel, overlay_rows: list) -> str:
                 round(o.y, 3),
                 round(o.scale, 3),
                 round(o.opacity, 3),
+                o.z_index,
             ]
             for o in overlay_rows
         ],
@@ -117,32 +116,7 @@ def ensure_reel_assembled_preview(
 
     temp_dir = project_path / "preview-temp"
     temp_dir.mkdir(parents=True, exist_ok=True)
-    overlay_specs: list[OverlaySpec] = []
-    for index, row in enumerate(overlay_rows):
-        path: Path | None = None
-        if row.kind == ReelOverlayKind.image and row.asset_id is not None:
-            asset = db.get(ProjectAsset, row.asset_id)
-            if asset is not None:
-                candidate = storage.resolve_inside_project(project_id, asset.storage_path)
-                if candidate.is_file():
-                    path = candidate
-        elif row.kind == ReelOverlayKind.text:
-            title_path = temp_dir / f"title-{index}.png"
-            render_title_card(row.text or "", title_path)
-            path = title_path
-        if path is None:
-            continue
-        overlay_specs.append(
-            OverlaySpec(
-                path=path,
-                start_seconds=max(0.0, row.start_ms / 1000.0),
-                duration_seconds=max(0.2, row.duration_ms / 1000.0),
-                x=row.x,
-                y=row.y,
-                scale=row.scale,
-                opacity=row.opacity,
-            )
-        )
+    overlay_specs = specs_for_render(db, project_id, reel_id, temp_dir=temp_dir)
 
     temp = destination.with_name(f"{destination.stem}.building.mp4")
     log_path = project_path / "reel-assembled-preview.log"

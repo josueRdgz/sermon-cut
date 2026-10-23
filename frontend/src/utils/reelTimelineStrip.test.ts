@@ -6,6 +6,8 @@ import {
   buildSourceGaps,
   outputTimeFromTrackRatio,
   playheadPercent,
+  pxToTime,
+  shiftCaptionWindow,
 } from './reelTimelineStrip';
 
 function seg(id: string, duration: number, order: number): ReelSegment {
@@ -81,3 +83,25 @@ describe('reelTimelineStrip', () => {
     expect(spans[1].leftRatio).toBeLessThan(spans[0].leftRatio + spans[0].widthRatio);
   });
 });
+
+describe('shiftCaptionWindow', () => {
+  it('slides a caption left down to 0 without changing its width', () => {
+    const next = shiftCaptionWindow(4000, 7000, -5000, 'move', 30_000);
+    expect(next.inMs).toBe(0);
+    expect(next.outMs).toBe(3000);
+  });
+
+  it('slides a caption right without stretching it', () => {
+    const next = shiftCaptionWindow(0, 3000, 1500, 'move', 30_000);
+    expect(next.inMs).toBe(1500);
+    expect(next.outMs).toBe(4500);
+  });
+});
+
+describe('pxToTime', () => {
+  it('keeps the sign of a drag delta so clips can move left', () => {
+    expect(pxToTime(-80, 40)).toBeCloseTo(-2);
+    expect(pxToTime(80, 40)).toBeCloseTo(2);
+  });
+});
+

@@ -7,8 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.4.12] — 2026-10-23
+
+### Added
+
+- Editor NLE: franjas de video/audio, curva de volumen con puntos en el A-roll,
+  transiciones visibles en el preview (fundido, negro, destello, borrados) y
+  desfase de voz por corte.
+- Ajustes de la app, Biblia Reina Valera 1960 (importación local desde e-Sword)
+  y menús Configuración / Ayuda / Acerca de.
+- Menús contextuales en la línea temporal y atajos documentados en Ayuda.
+
+### Changed
+
+- Chrome compacto: Archivos y Ajustes no se pisan; el visor llena el hueco si
+  ambos están cerrados. Cortes recorta sin Metadatos; «Añadir fragmento» muestra
+  u oculta el formulario. La barra superior solo lleva el nombre del Reel.
+
 ### Fixed
 
+- Preview: FFmpeg no generaba `preview-audio.m4a` (temporal `.tmp` sin muxer),
+  el navegador mostraba «The element has no supported sources» y Reproducir no
+  avanzaba.
+- La curva de volumen no se oía cuando había desfase de voz (el gain iba al
+  video silenciado).
+- Las transiciones del timeline eran un corte seco en el visor.
 - Encuadre: el inspector ya no extrae un JPEG con FFmpeg en cada `timeupdate`
   (ni con la pestaña oculta). Eso saturaba el backend en macOS/Safari y
   mostraba «No se pudo conectar con el backend local».

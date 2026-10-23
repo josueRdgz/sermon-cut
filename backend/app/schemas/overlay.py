@@ -16,11 +16,11 @@ class ReelOverlayCreate(BaseModel):
     text: str | None = Field(default=None, max_length=2000)
     style_json: str | None = None
     start_ms: int = Field(default=0, ge=0)
-    duration_ms: int = Field(default=3000, ge=200, le=120_000)
+    duration_ms: int = Field(default=3000, ge=200, le=600_000)
     x: float | None = Field(default=None, ge=0.0, le=1.0)
     y: float | None = Field(default=None, ge=0.0, le=1.0)
     scale: float | None = Field(default=None, ge=0.05, le=2.0)
-    opacity: float | None = Field(default=None, ge=0.05, le=1.0)
+    opacity: float | None = Field(default=None, ge=0.0, le=1.0)
     z_index: int | None = Field(default=None, ge=0, le=100)
     order: int | None = Field(default=None, ge=0)
 
@@ -30,11 +30,11 @@ class ReelOverlayUpdate(BaseModel):
     text: str | None = Field(default=None, max_length=2000)
     style_json: str | None = None
     start_ms: int | None = Field(default=None, ge=0)
-    duration_ms: int | None = Field(default=None, ge=200, le=120_000)
+    duration_ms: int | None = Field(default=None, ge=200, le=600_000)
     x: float | None = Field(default=None, ge=0.0, le=1.0)
     y: float | None = Field(default=None, ge=0.0, le=1.0)
     scale: float | None = Field(default=None, ge=0.05, le=2.0)
-    opacity: float | None = Field(default=None, ge=0.05, le=1.0)
+    opacity: float | None = Field(default=None, ge=0.0, le=1.0)
     z_index: int | None = Field(default=None, ge=0, le=100)
     order: int | None = Field(default=None, ge=0)
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from uuid import UUID
 
@@ -10,6 +11,7 @@ from sqlalchemy.orm import Session
 
 from app.core.exceptions import NotFoundError, ValidationAppError
 from app.models.asset import ProjectAsset, ProjectAssetKind, ReelOverlay, ReelOverlayKind
+from app.models.project import Project
 from app.schemas.overlay import (
     ReelOverlayCreate,
     ReelOverlayListResponse,
@@ -19,12 +21,33 @@ from app.schemas.overlay import (
 from app.services.assets import media_url, resolve_asset_path
 from app.services.overlays_render import render_title_card
 from app.services.reels import service as reels_service
+from app.services import storage
 
 _DEFAULTS = {
     ReelOverlayKind.image: {"x": 0.5, "y": 0.35, "scale": 0.4},
     ReelOverlayKind.text: {"x": 0.5, "y": 0.22, "scale": 1.0},
     ReelOverlayKind.video: {"x": 0.78, "y": 0.22, "scale": 0.38},
+    ReelOverlayKind.audio: {"x": 0.5, "y": 0.5, "scale": 1.0},
 }
+
+
+def overlay_source_window(style_json: str | None) -> tuple[float, float] | None:
+    """Parse a sermon-source in/out window stored on ``style_json``."""
+    if not style_json:
+        return None
+    try:
+        data = json.loads(style_json)
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(data, dict):
+        return None
+    start = data.get("source_start_seconds")
+    end = data.get("source_end_seconds")
+    if not isinstance(start, (int, float)) or not isinstance(end, (int, float)):
+        return None
+    if end <= start:
+        return None
+    return float(start), float(end)
 
 
 def to_response(overlay: ReelOverlay, *, project_id: UUID) -> ReelOverlayResponse:
@@ -108,25 +131,34 @@ def create_overlay(
     duration_ms = payload.duration_ms
     asset_id = payload.asset_id
 
-    if payload.kind in {ReelOverlayKind.image, ReelOverlayKind.video}:
+    source_window = overlay_source_window(payload.style_json)
+    sermon_layer = (
+        payload.kind == ReelOverlayKind.video and asset_id is None and source_window is not None
+    )
+    if payload.kind in {ReelOverlayKind.image, ReelOverlayKind.video, ReelOverlayKind.audio}:
         if asset_id is None:
-            raise ValidationAppError(
-                "Image and video overlays need an asset from the media bin.",
-                code="asset_required",
-            )
-        expected = (
-            ProjectAssetKind.video
-            if payload.kind == ReelOverlayKind.video
-            else ProjectAssetKind.image
-        )
-        asset = _require_asset(db, project_id, asset_id, expected=expected)
-        if (
-            payload.kind == ReelOverlayKind.video
-            and payload.duration_ms == 3000
-            and asset.duration_ms
-            and asset.duration_ms > 0
-        ):
-            duration_ms = min(asset.duration_ms, 600_000)
+            if sermon_layer:
+                start, end = source_window
+                duration_ms = min(duration_ms, max(200, int(round((end - start) * 1000))))
+            else:
+                raise ValidationAppError(
+                    "Image, video and audio overlays need an asset from the media bin.",
+                    code="asset_required",
+                )
+        else:
+            expected = {
+                ReelOverlayKind.video: ProjectAssetKind.video,
+                ReelOverlayKind.audio: ProjectAssetKind.audio,
+                ReelOverlayKind.image: ProjectAssetKind.image,
+            }[payload.kind]
+            asset = _require_asset(db, project_id, asset_id, expected=expected)
+            if (
+                payload.kind in {ReelOverlayKind.video, ReelOverlayKind.audio}
+                and payload.duration_ms == 3000
+                and asset.duration_ms
+                and asset.duration_ms > 0
+            ):
+                duration_ms = min(asset.duration_ms, 600_000)
     elif payload.kind == ReelOverlayKind.text:
         asset_id = None
         if not (payload.text or "").strip():
@@ -140,6 +172,7 @@ def create_overlay(
         kind=payload.kind,
         asset_id=asset_id,
         text=payload.text,
+        style_json=payload.style_json,
         start_ms=payload.start_ms,
         duration_ms=duration_ms,
         x=defaults["x"] if payload.x is None else payload.x,
@@ -165,11 +198,11 @@ def update_overlay(
     overlay = get_overlay(db, project_id, reel_id, overlay_id)
     values = payload.model_dump(exclude_unset=True)
     if "asset_id" in values and values["asset_id"] is not None:
-        expected = (
-            ProjectAssetKind.video
-            if overlay.kind == ReelOverlayKind.video
-            else ProjectAssetKind.image
-        )
+        expected = {
+            ReelOverlayKind.video: ProjectAssetKind.video,
+            ReelOverlayKind.audio: ProjectAssetKind.audio,
+            ReelOverlayKind.image: ProjectAssetKind.image,
+        }.get(overlay.kind, ProjectAssetKind.image)
         if overlay.kind == ReelOverlayKind.text:
             raise ValidationAppError(
                 "Text overlays do not use a media asset.",
@@ -213,15 +246,25 @@ def specs_for_render(
     """Resolve overlay files for FFmpeg. Missing assets are skipped."""
     from app.services.render.args import OverlaySpec
 
-    rows = list_overlays(db, project_id, reel_id)
-    rows.sort(key=lambda item: (item.z_index, item.order, item.start_ms))
+    rows = list_overlays_for_render(db, reel_id)
     specs: list[OverlaySpec] = []
     for row in rows:
         kind = "image"
+        source_start = 0.0
+        window = overlay_source_window(row.style_json)
         if row.kind == ReelOverlayKind.text:
             temp_dir.mkdir(parents=True, exist_ok=True)
             path = temp_dir / f"overlay-{row.id}.png"
             render_title_card(row.text or "Texto", path)
+        elif row.asset_id is None and window is not None and row.kind == ReelOverlayKind.video:
+            project = db.get(Project, project_id)
+            if project is None or not project.video_filename:
+                continue
+            path = storage.resolve_inside_project(project_id, project.video_filename)
+            if not path.is_file():
+                continue
+            kind = "video"
+            source_start = window[0]
         elif row.asset_id is None:
             continue
         else:
@@ -233,6 +276,8 @@ def specs_for_render(
                 continue
             if row.kind == ReelOverlayKind.video:
                 kind = "video"
+            elif row.kind == ReelOverlayKind.audio:
+                kind = "audio"
         specs.append(
             OverlaySpec(
                 path=path,
@@ -243,6 +288,7 @@ def specs_for_render(
                 scale=row.scale,
                 opacity=row.opacity,
                 kind=kind,
+                source_start=source_start,
             )
         )
     return specs

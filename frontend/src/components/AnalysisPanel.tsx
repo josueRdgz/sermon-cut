@@ -1,12 +1,10 @@
 import { useCallback, useEffect, useState } from 'react';
 
 import {
-  acceptAnalysisCandidate,
   cancelAnalysisJob,
   getAnalysisJob,
   getAnalysisProviderStatus,
   getLatestAnalysis,
-  rejectAnalysisCandidate,
   startAnalysis,
 } from '../api/analysis';
 import { ApiError } from '../api/client';
@@ -14,9 +12,11 @@ import { getTranscript } from '../api/transcripts';
 import type { AnalysisCandidate, AnalysisJob, AnalysisProviderStatus } from '../types/analysis';
 import { ACTIVE_ANALYSIS_STATUSES } from '../types/analysis';
 import {
-  CHURCH_REELS_CONTEXT,
+  ANALYSIS_OUTPUT_PRESETS,
   EDITORIAL_PRESETS,
-  extraEditorialInstructions,
+  YOUTH_CONTEXT,
+  buildAnalysisInstructions,
+  type AnalysisOutputKind,
   type EditorialPresetId,
 } from '../utils/editorialPresets';
 import { formatDuration, formatTimecode } from '../utils/format';
@@ -25,7 +25,7 @@ import { ProgressBar } from './ProgressBar';
 interface AnalysisPanelProps {
   projectId: string;
   transcriptRevision?: number;
-  onCandidateAccepted?: (reelId: string) => void;
+  sourceKind?: 'full_service' | 'sermon_only';
 }
 
 const POLL_INTERVAL_MS = 1500;
@@ -53,19 +53,19 @@ function candidateDuration(candidate: AnalysisCandidate): number {
 export function AnalysisPanel({
   projectId,
   transcriptRevision = 0,
-  onCandidateAccepted,
+  sourceKind = 'sermon_only',
 }: AnalysisPanelProps) {
   const [provider, setProvider] = useState<AnalysisProviderStatus | null>(null);
   const [job, setJob] = useState<AnalysisJob | null>(null);
   const [hasTranscript, setHasTranscript] = useState(false);
+  const [outputKind, setOutputKind] = useState<AnalysisOutputKind>('shorts');
   const [maxReels, setMaxReels] = useState(5);
-  const [minDuration, setMinDuration] = useState(25);
-  const [maxDuration, setMaxDuration] = useState(45);
-  const [preset, setPreset] = useState<EditorialPresetId>('church');
-  const [instructions, setInstructions] = useState(CHURCH_REELS_CONTEXT);
+  const [minDuration, setMinDuration] = useState(ANALYSIS_OUTPUT_PRESETS.shorts.minDuration);
+  const [maxDuration, setMaxDuration] = useState(ANALYSIS_OUTPUT_PRESETS.shorts.maxDuration);
+  const [preset, setPreset] = useState<EditorialPresetId>('youth');
+  const [instructions, setInstructions] = useState(YOUTH_CONTEXT);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [actionId, setActionId] = useState<string | null>(null);
 
   useEffect(() => {
     getAnalysisProviderStatus()
@@ -132,7 +132,11 @@ export function AnalysisPanel({
         max_reels: maxReels,
         min_duration_seconds: minDuration,
         max_duration_seconds: maxDuration,
-        additional_instructions: extraEditorialInstructions(preset, instructions),
+        additional_instructions: buildAnalysisInstructions({
+          outputKind,
+          sourceKind,
+          styleText: instructions,
+        }),
       });
       setJob(started);
     } catch (err) {
@@ -140,7 +144,7 @@ export function AnalysisPanel({
     } finally {
       setBusy(false);
     }
-  }, [projectId, maxReels, minDuration, maxDuration, instructions, preset]);
+  }, [projectId, maxReels, minDuration, maxDuration, instructions, outputKind, sourceKind]);
 
   const handleCancel = useCallback(async () => {
     if (!job) return;
@@ -153,44 +157,6 @@ export function AnalysisPanel({
       setBusy(false);
     }
   }, [job]);
-
-  const refreshJob = useCallback(async () => {
-    if (!job) return;
-    setJob(await getAnalysisJob(job.id));
-  }, [job]);
-
-  const handleAccept = useCallback(
-    async (candidateId: string) => {
-      setActionId(candidateId);
-      setError(null);
-      try {
-        const result = await acceptAnalysisCandidate(projectId, candidateId);
-        await refreshJob();
-        onCandidateAccepted?.(result.reel_id);
-      } catch (err) {
-        setError(err instanceof Error ? err.message : 'No se pudo aceptar el candidato');
-      } finally {
-        setActionId(null);
-      }
-    },
-    [projectId, refreshJob, onCandidateAccepted],
-  );
-
-  const handleReject = useCallback(
-    async (candidateId: string) => {
-      setActionId(candidateId);
-      setError(null);
-      try {
-        await rejectAnalysisCandidate(projectId, candidateId);
-        await refreshJob();
-      } catch (err) {
-        setError(err instanceof Error ? err.message : 'No se pudo descartar el candidato');
-      } finally {
-        setActionId(null);
-      }
-    },
-    [projectId, refreshJob],
-  );
 
   const active = isActive(job);
   const percent = job ? Math.round(job.progress * 100) : 0;
@@ -209,47 +175,17 @@ export function AnalysisPanel({
       </div>
 
       <p className="muted">
-        Genera propuestas de Reels a partir de la transcripción sincronizada. Cada propuesta
-        requiere aprobación editorial antes de incorporarse al flujo de renderizado.
+        Aquí solo se analiza: nada entra al Reel hasta que lo elijas. Los candidatos aparecen
+        después en el editor, en Archivos, con duración y «Añadir al Reel». El paso anterior (
+        {sourceKind === 'full_service' ? 'culto completo' : 'solo predicación'}) ya le dice a la IA
+        qué fuente usar.
       </p>
-      <p className="muted">
-        Ritmo editorial: se prioriza un pasaje continuo y, por defecto, cada Reel tendrá como máximo
-        3 fragmentos de al menos 8 segundos cada uno.
-      </p>
-
-      {provider?.gemini_configured && (
-        <p className="error" role="note">
-          Aviso de privacidad: al usar Gemini, la transcripción se procesa en los servidores de
-          Google. Para material confidencial, utilice exclusivamente el motor local. Consulte
-          docs/PRIVACY.md.
-        </p>
-      )}
-
-      {provider && !provider.gemini_configured && (
-        <p className="error" role="note">
-          El análisis avanzado no está configurado. El sistema utilizará el motor local de
-          evaluación estructural. Para habilitar Gemini en la aplicación de escritorio, cree o edite
-          el archivo <code>~/Library/Application Support/app.sermoncut.desktop/.env</code> con
-          <code> SERMON_CUT_AI_PROVIDER=gemini</code>, <code>SERMON_CUT_GEMINI_API_KEY</code> y
-          opcionalmente <code>SERMON_CUT_GEMINI_MODEL</code>, con permisos 0600, y reinicia la
-          aplicación. En desarrollo puedes usar el <code>.env</code> de la raíz del repositorio. La
-          clave nunca se incluye en el DMG.
-        </p>
-      )}
 
       {provider && (
         <p className="muted">
-          Motor de análisis activo:{' '}
-          <strong>{provider.active === 'mock' ? 'local estructural' : provider.active}</strong>
-          {provider.gemini_configured
-            ? ` · Gemini configurado (${provider.gemini_model})`
-            : ' · Gemini no configurado'}
-          {!provider.gemini_sdk_installed && provider.gemini_configured
-            ? ' · SDK ausente: reinstala el sidecar o pip install -e ".[gemini]"'
-            : ''}
-          {provider.requested === 'gemini' && !provider.gemini_configured
-            ? ' · La configuración solicitó Gemini, pero falta la credencial.'
-            : ''}
+          Motor de análisis:{' '}
+          <strong>{provider.active === 'mock' ? 'local' : provider.active}</strong>
+          {provider.gemini_configured ? ` · ${provider.gemini_model}` : ''}
         </p>
       )}
 
@@ -259,8 +195,37 @@ export function AnalysisPanel({
 
       {hasTranscript && (
         <>
-          <div className="transcript-toolbar">
-            <label className="field field--inline">
+          <fieldset className="field" style={{ border: 'none', padding: 0, margin: 0 }}>
+            <span>Qué debe proponer la IA</span>
+            <div className="source-toggle" role="radiogroup" aria-label="Formato de análisis">
+              {(Object.keys(ANALYSIS_OUTPUT_PRESETS) as AnalysisOutputKind[]).map((kind) => {
+                const presetInfo = ANALYSIS_OUTPUT_PRESETS[kind];
+                return (
+                  <label className="source-toggle__option" key={kind}>
+                    <input
+                      type="radio"
+                      name="analysis-output"
+                      value={kind}
+                      checked={outputKind === kind}
+                      disabled={active || busy}
+                      onChange={() => {
+                        setOutputKind(kind);
+                        setMinDuration(presetInfo.minDuration);
+                        setMaxDuration(presetInfo.maxDuration);
+                      }}
+                    />
+                    <span>
+                      {presetInfo.label}
+                      <small>{presetInfo.hint}</small>
+                    </span>
+                  </label>
+                );
+              })}
+            </div>
+          </fieldset>
+
+          <div className="transcript-toolbar analysis-panel__params">
+            <label className="field">
               <span>Máx. candidatos</span>
               <input
                 type="number"
@@ -271,29 +236,33 @@ export function AnalysisPanel({
                 onChange={(e) => setMaxReels(Number(e.target.value))}
               />
             </label>
-            <label className="field field--inline">
+            <label className="field">
               <span>Duración mín.</span>
-              <input
-                type="number"
+              <div className="field__with-unit">
+                <input
+                  type="number"
                 min={5}
-                max={120}
-                value={minDuration}
-                disabled={active || busy}
-                onChange={(e) => setMinDuration(Number(e.target.value))}
-              />
-              <span className="muted">s</span>
+                max={600}
+                  value={minDuration}
+                  disabled={active || busy}
+                  onChange={(e) => setMinDuration(Number(e.target.value))}
+                />
+                <span className="muted">s</span>
+              </div>
             </label>
-            <label className="field field--inline">
+            <label className="field">
               <span>Duración máx.</span>
-              <input
-                type="number"
+              <div className="field__with-unit">
+                <input
+                  type="number"
                 min={10}
-                max={180}
-                value={maxDuration}
-                disabled={active || busy}
-                onChange={(e) => setMaxDuration(Number(e.target.value))}
-              />
-              <span className="muted">s</span>
+                max={900}
+                  value={maxDuration}
+                  disabled={active || busy}
+                  onChange={(e) => setMaxDuration(Number(e.target.value))}
+                />
+                <span className="muted">s</span>
+              </div>
             </label>
           </div>
 
@@ -319,15 +288,18 @@ export function AnalysisPanel({
           <label className="field">
             <span>Contexto para la IA</span>
             <textarea
-              rows={4}
+              rows={5}
               value={instructions}
               disabled={active || busy}
-              placeholder="Cómo deben sentirse los Reels: gancho, una idea, aplicación, tono de iglesia…"
+              placeholder="Puedes añadir o quitar instrucciones: tono, qué evitar, cómo cerrar…"
               onChange={(e) => {
                 setPreset('custom');
                 setInstructions(e.target.value);
               }}
             />
+            <small className="muted">
+              Cambia al elegir el estilo. Edítalo libremente; eso es lo que recibe el modelo.
+            </small>
           </label>
 
           <div className="button-stack">
@@ -371,9 +343,9 @@ export function AnalysisPanel({
 
           {candidates.length > 0 && (
             <div className="analysis-candidates">
-              <h3>Candidatos</h3>
+              <h3>Propuestas del análisis</h3>
               <p className="muted">
-                Revisa cada sugerencia. Aceptar crea un Reel en borrador; no inicia el render.
+                No se eligen aquí. Ábrelas en el editor, en Archivos, y añádelas al Reel.
               </p>
               <ol className="analysis-candidates__list">
                 {candidates.map((candidate) => (
@@ -382,39 +354,14 @@ export function AnalysisPanel({
                       <strong>
                         {candidate.rank + 1}. {candidate.title}
                       </strong>
-                      <span className={`badge badge--${candidate.status}`}>
-                        {candidate.status === 'pending'
-                          ? 'Pendiente'
-                          : candidate.status === 'accepted'
-                            ? 'Aceptado'
-                            : 'Descartado'}
-                      </span>
                     </div>
                     <p className="muted">
-                      Score {candidate.editorial_score.toFixed(1)} · confianza{' '}
-                      {Math.round(candidate.confidence * 100)}% ·{' '}
+                      Score {candidate.editorial_score.toFixed(1)} ·{' '}
                       {formatDuration(candidateDuration(candidate))} · {candidate.segments.length}{' '}
                       fragmento(s)
                     </p>
                     {candidate.hook && <p>{candidate.hook}</p>}
                     {candidate.summary && <p className="muted">{candidate.summary}</p>}
-                    {Object.keys(candidate.suggested_titles).length > 0 && (
-                      <div className="analysis-candidate__titles">
-                        <strong>Títulos estratégicos</strong>
-                        <ul>
-                          {Object.entries(candidate.suggested_titles).map(([category, title]) => (
-                            <li key={category}>
-                              <span className="muted">{titleCategory(category)}:</span> {title}
-                            </li>
-                          ))}
-                        </ul>
-                        {candidate.thumbnail_text && (
-                          <p className="muted">
-                            Miniatura: <strong>{candidate.thumbnail_text}</strong>
-                          </p>
-                        )}
-                      </div>
-                    )}
                     <ul className="analysis-candidate__segments">
                       {candidate.segments.map((segment, index) => (
                         <li key={`${candidate.id}-${index}`}>
@@ -422,41 +369,9 @@ export function AnalysisPanel({
                             {formatTimecode(segment.start)} – {formatTimecode(segment.end)}
                           </span>
                           <span>{segment.exact_text}</span>
-                          {segment.reason && <span className="muted"> · {segment.reason}</span>}
                         </li>
                       ))}
                     </ul>
-                    {candidate.warnings.length > 0 && (
-                      <ul className="analysis-candidate__warnings">
-                        {candidate.warnings.map((warning) => (
-                          <li key={warning} className="warning">
-                            {warning}
-                          </li>
-                        ))}
-                      </ul>
-                    )}
-                    {candidate.status === 'pending' && (
-                      <div className="button-stack">
-                        <button
-                          type="button"
-                          disabled={actionId === candidate.id}
-                          onClick={() => void handleAccept(candidate.id)}
-                        >
-                          {actionId === candidate.id ? 'Aceptando…' : 'Aceptar'}
-                        </button>
-                        <button
-                          type="button"
-                          className="button--ghost"
-                          disabled={actionId === candidate.id}
-                          onClick={() => void handleReject(candidate.id)}
-                        >
-                          Descartar
-                        </button>
-                      </div>
-                    )}
-                    {candidate.status === 'accepted' && candidate.accepted_reel_id && (
-                      <p className="muted">Reel creado: {candidate.accepted_reel_id}</p>
-                    )}
                   </li>
                 ))}
               </ol>
@@ -468,15 +383,4 @@ export function AnalysisPanel({
       {error && <p className="error">{error}</p>}
     </section>
   );
-}
-
-function titleCategory(value: string): string {
-  const labels: Record<string, string> = {
-    recommended: 'Recomendado',
-    direct: 'Más directo',
-    emotional: 'Más emocional',
-    biblical: 'Más bíblico',
-    search_focused: 'Más orientado a búsquedas',
-  };
-  return labels[value] ?? value;
 }

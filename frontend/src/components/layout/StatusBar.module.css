@@ -21,3 +21,19 @@
   background: var(--border);
   flex-shrink: 0;
 }
+
+.credit {
+  margin: 0;
+  min-width: 0;
+  font-size: 0.72rem;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+@media (max-width: 1100px) {
+  .hideWhenNarrow {
+    display: none !important;
+  }
+}

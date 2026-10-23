@@ -6,7 +6,7 @@ from collections.abc import AsyncIterator
 from pathlib import Path
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, File, UploadFile
+from fastapi import APIRouter, Depends, File, Query, UploadFile
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 
@@ -21,6 +21,8 @@ from app.schemas.project import (
 )
 from app.services import projects as projects_service
 from app.services import storage
+from app.services.audio.peaks import extract_peaks
+from app.services.background_music import service as bgm_service
 from app.services.media_audio import preview_audio_path
 
 router = APIRouter(prefix="/projects", tags=["projects"])
@@ -220,3 +222,22 @@ def stream_project_cover(project_id: UUID, db: Session = Depends(get_db)) -> Fil
         filename=project.cover_filename,
         content_disposition_type="inline",
     )
+
+
+@router.get("/{project_id}/waveform")
+def get_project_waveform(
+    project_id: UUID,
+    source: str = Query(default="video"),
+    db: Session = Depends(get_db),
+) -> dict:
+    project = projects_service.get_project(db, project_id)
+    if source == "music":
+        row = bgm_service.get_settings_row(db, project_id)
+        if row is None or not row.music_filename:
+            return {"source": "music", "peaks": []}
+        path = storage.resolve_inside_project(project.id, row.music_filename)
+    else:
+        if not project.video_filename:
+            return {"source": "video", "peaks": []}
+        path = storage.resolve_inside_project(project.id, project.video_filename)
+    return {"source": source, "peaks": extract_peaks(path)}

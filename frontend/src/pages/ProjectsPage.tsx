@@ -2,20 +2,15 @@ import { Clapperboard, Plus } from 'lucide-react';
 import { useState } from 'react';
 
 import { ConfirmDialog } from '../components/ConfirmDialog';
-import { AppLayout } from '../components/layout/AppLayout';
-import { Sidebar } from '../components/layout/Sidebar';
-import { StatusBar } from '../components/layout/StatusBar';
-import { TopBar } from '../components/layout/TopBar';
+import { AppChrome } from '../components/layout/AppChrome';
 import { ProjectGrid } from '../components/ProjectGrid';
 import { EmptyState } from '../components/ui/EmptyState';
 import { PrimaryButton } from '../components/ui/PrimaryButton';
 import { SectionHeader } from '../components/ui/SectionHeader';
 import { useProjects } from '../hooks/useProjects';
-import { useSystemStatus } from '../hooks/useSystemStatus';
 import type { Project } from '../types/project';
 
 export function ProjectsPage() {
-  const system = useSystemStatus();
   const { projects, loading, error, remove } = useProjects();
   const [pendingDelete, setPendingDelete] = useState<Project | null>(null);
   const [deleting, setDeleting] = useState(false);
@@ -37,28 +32,7 @@ export function ProjectsPage() {
 
   return (
     <>
-      <AppLayout
-        header={
-          <TopBar
-            indicators={system.indicators}
-            actions={
-              <PrimaryButton to="/projects/new" size="sm" icon={Plus}>
-                Nuevo proyecto
-              </PrimaryButton>
-            }
-          />
-        }
-        sidebar={<Sidebar />}
-        footer={
-          <StatusBar
-            projectCount={projects.length}
-            storageUsed={system.storageUsed}
-            version={system.version}
-            overall={system.overall}
-            overallLabel={system.overallLabel}
-          />
-        }
-      >
+      <AppChrome projectCount={projects.length}>
         <SectionHeader
           title="Proyectos"
           subtitle="Predicaciones locales listas para convertir en Shorts y Reels."
@@ -83,7 +57,7 @@ export function ProjectsPage() {
         {projects.length > 0 ? <ProjectGrid projects={projects} onDelete={setPendingDelete} /> : null}
 
         {deleteError ? <p className="error">{deleteError}</p> : null}
-      </AppLayout>
+      </AppChrome>
 
       {pendingDelete ? (
         <ConfirmDialog

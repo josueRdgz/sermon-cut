@@ -98,6 +98,38 @@ def test_build_render_command_composites_video_broll(tmp_path: Path) -> None:
     assert "between(t,1,3.5)" in plan.filter_complex
 
 
+def test_build_render_command_seeks_sermon_source_overlay(tmp_path: Path) -> None:
+    source = tmp_path / "source.mp4"
+    source.write_bytes(b"\x00" * 64)
+    out = tmp_path / "out.mp4"
+    plan = build_render_command(
+        ffmpeg="ffmpeg",
+        source=source,
+        segments=[RenderSegmentSpec(0, 6, transition_type="hard_cut", transition_duration_ms=0)],
+        aspect_ratio="9:16",
+        layout="center_crop",
+        output_path=out,
+        has_audio=True,
+        normalize_loudness=False,
+        end_card=None,
+        overlays=[
+            OverlaySpec(
+                path=source,
+                start_seconds=1.0,
+                duration_seconds=2.0,
+                x=0.5,
+                y=0.5,
+                scale=1.0,
+                kind="video",
+                source_start=10.5,
+            )
+        ],
+    )
+    joined = " ".join(plan.args)
+    assert "-ss 10.5" in joined
+    assert "overlay=" in plan.filter_complex
+
+
 def test_render_title_card_writes_png(tmp_path: Path) -> None:
     dest = tmp_path / "title.png"
     render_title_card("Juan 3:16", dest, width=640, height=240)
@@ -108,3 +140,6 @@ def test_render_title_card_writes_png(tmp_path: Path) -> None:
 def test_transition_type_enum_includes_fade_flash() -> None:
     assert TransitionType.fade.value == "fade"
     assert TransitionType.flash.value == "flash"
+    assert TransitionType.wipe_down.value == "wipe_down"
+    assert TransitionType.slide_down.value == "slide_down"
+    assert TransitionType.light_change.value == "light_change"

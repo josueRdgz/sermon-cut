@@ -6,6 +6,11 @@ const XFADE_TRANSITIONS = new Set([
   'dip_to_black',
   'fade',
   'flash',
+  'light_change',
+  'wipe_down',
+  'wipe_left',
+  'slide_down',
+  'dissolve',
 ]);
 const MIN_XFADE_SLACK = 0.05;
 
@@ -16,6 +21,8 @@ export interface OutputPlacement {
   sourceEnd: number;
   outputStart: number;
   contentDuration: number;
+  /** Usable xfade after this clip; 0 for the last clip or a hard cut. */
+  overlapSeconds: number;
 }
 
 export interface OutputClock {
@@ -52,14 +59,16 @@ export function buildOutputClock(segments: ReelSegment[]): OutputClock {
   for (let index = 0; index < segments.length; index += 1) {
     const segment = segments[index];
     const duration = Math.max(0, segment.duration_seconds);
-    placements.push({
+    const placement: OutputPlacement = {
       id: segment.id,
       index,
       sourceStart: segment.source_start_seconds,
       sourceEnd: segment.source_end_seconds,
       outputStart: outputCursor,
       contentDuration: duration,
-    });
+      overlapSeconds: 0,
+    };
+    placements.push(placement);
 
     if (index === 0) {
       total = duration;
@@ -76,13 +85,14 @@ export function buildOutputClock(segments: ReelSegment[]): OutputClock {
 
     if (index + 1 < segments.length) {
       const next = segments[index + 1];
-      const usable = usableTransitionSeconds(
+      const overlap = usableTransitionSeconds(
         segment.transition_type,
         segment.transition_duration_ms,
         total,
         Math.max(0, next.duration_seconds),
       );
-      outputCursor = usable > 0 ? total - usable : total;
+      placement.overlapSeconds = overlap;
+      outputCursor = overlap > 0 ? total - overlap : total;
     }
   }
 

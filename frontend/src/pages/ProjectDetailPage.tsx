@@ -1,13 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import {
-  Clapperboard,
-  FileAudio,
-  FileText,
-  FolderOpen,
-  Mic,
-  Sparkles,
-  StretchHorizontal,
-} from 'lucide-react';
+import { Clapperboard, FileText, FolderOpen, Mic, Sparkles } from 'lucide-react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 
 import {
@@ -18,14 +10,12 @@ import {
   uploadProjectCover,
 } from '../api/projects';
 import { AnalysisPanel } from '../components/AnalysisPanel';
-import { AudioRepairPanel } from '../components/AudioRepairPanel';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { AppChrome } from '../components/layout/AppChrome';
 import { ReelEditor } from '../components/ReelEditor';
 import { SermonRangePanel } from '../components/SermonRangePanel';
 import { StatusRow } from '../components/StatusRow';
 import { TranscriptEditor } from '../components/TranscriptEditor';
-import { VideoHighlightsPanel } from '../components/VideoHighlightsPanel';
 import { useProjects } from '../hooks/useProjects';
 import type { Project } from '../types/project';
 import { formatDate, formatDuration, statusLabel } from '../utils/format';
@@ -36,12 +26,6 @@ const WORKSPACE_SECTIONS = [
     label: 'Proyecto',
     description: 'Archivo y datos',
     icon: FolderOpen,
-  },
-  {
-    id: 'audio',
-    label: 'Reparar audio',
-    description: 'Detectar microcortes',
-    icon: FileAudio,
   },
   {
     id: 'sermon',
@@ -67,12 +51,6 @@ const WORKSPACE_SECTIONS = [
     description: 'Editar y exportar',
     icon: Clapperboard,
   },
-  {
-    id: 'highlights',
-    label: 'Video Highlights',
-    description: 'Resumen horizontal',
-    icon: StretchHorizontal,
-  },
 ] as const;
 
 type WorkspaceSection = (typeof WORKSPACE_SECTIONS)[number]['id'];
@@ -96,7 +74,6 @@ export function ProjectDetailPage() {
   const [deletingVideo, setDeletingVideo] = useState(false);
   const [transcriptRevision, setTranscriptRevision] = useState(0);
   const [reelRevision, setReelRevision] = useState(0);
-  const [reelToFocus, setReelToFocus] = useState<string | null>(null);
   const [coverBusy, setCoverBusy] = useState(false);
   const [coverProgress, setCoverProgress] = useState(0);
   const [coverError, setCoverError] = useState<string | null>(null);
@@ -105,22 +82,8 @@ export function ProjectDetailPage() {
   const requestedWorkspaceSection: WorkspaceSection = isWorkspaceSection(requestedSection)
     ? requestedSection
     : 'project';
-  const sectionAllowed =
-    !project ||
-    !(
-      (project.content_mode === 'highlights' &&
-        (requestedWorkspaceSection === 'analysis' || requestedWorkspaceSection === 'editor')) ||
-      (project.content_mode === 'shorts' && requestedWorkspaceSection === 'highlights')
-    );
-  const activeSection: WorkspaceSection = sectionAllowed ? requestedWorkspaceSection : 'project';
-  const visibleSections = WORKSPACE_SECTIONS.filter((section) => {
-    if (!project) return section.id === 'project';
-    if (section.id === 'analysis' || section.id === 'editor') {
-      return project.content_mode !== 'highlights';
-    }
-    if (section.id === 'highlights') return project.content_mode !== 'shorts';
-    return true;
-  });
+  const activeSection: WorkspaceSection = requestedWorkspaceSection;
+  const visibleSections = WORKSPACE_SECTIONS;
 
   const activateSection = useCallback(
     (section: WorkspaceSection) => {
@@ -143,15 +106,6 @@ export function ProjectDetailPage() {
     setTranscriptRevision((revision) => revision + 1);
     setReelRevision((revision) => revision + 1);
   }, []);
-
-  const handleCandidateAccepted = useCallback(
-    (reelId: string) => {
-      setReelToFocus(reelId);
-      setReelRevision((revision) => revision + 1);
-      activateSection('editor');
-    },
-    [activateSection],
-  );
 
   useEffect(() => {
     if (!projectId) return;
@@ -247,7 +201,6 @@ export function ProjectDetailPage() {
   return (
     <AppChrome
       flush={isEditor}
-      hideFooter={isEditor}
       projectCount={projects.length}
       workspace={{
         items: visibleSections.map((section) => ({
@@ -260,10 +213,12 @@ export function ProjectDetailPage() {
           if (isWorkspaceSection(id)) activateSection(id);
         },
       }}
-      actions={
-        <span className="workspace-top-title" title={project.title}>
-          {project.title}
-        </span>
+      context={
+        isEditor ? undefined : (
+          <span className="workspace-top-title" title={project.title}>
+            {project.title}
+          </span>
+        )
       }
     >
     <div
@@ -295,16 +250,6 @@ export function ProjectDetailPage() {
             label="Estado"
             value={statusLabel(project.status)}
             ok={project.status !== 'failed'}
-          />
-          <StatusRow
-            label="Tipo de contenido"
-            value={
-              project.content_mode === 'both'
-                ? 'Shorts y Video Highlights'
-                : project.content_mode === 'highlights'
-                  ? 'Video Highlights'
-                  : 'Shorts'
-            }
           />
           <StatusRow
             label="Grabación"
@@ -392,38 +337,12 @@ export function ProjectDetailPage() {
       </div>
 
       <div
-        id="workspace-panel-audio"
-        role="tabpanel"
-        aria-labelledby="workspace-tab-audio"
-        hidden={activeSection !== 'audio'}
-      >
-        <AudioRepairPanel projectId={project.id} hasVideo={project.has_video} />
-      </div>
-
-      <div
         id="workspace-panel-sermon"
         role="tabpanel"
         aria-labelledby="workspace-tab-sermon"
         hidden={activeSection !== 'sermon'}
       >
         <SermonRangePanel project={project} onUpdated={handleSermonUpdated} />
-      </div>
-
-      <div
-        id="workspace-panel-highlights"
-        role="tabpanel"
-        aria-labelledby="workspace-tab-highlights"
-        hidden={activeSection !== 'highlights'}
-      >
-        <VideoHighlightsPanel
-          projectId={project.id}
-          hasVideo={project.has_video}
-          hasCover={project.has_cover}
-          videoDuration={project.duration_seconds}
-          transcriptRevision={transcriptRevision}
-          churchName={project.church_name}
-          onCoverUpdated={handleCoverUpdated}
-        />
       </div>
 
       <div
@@ -450,7 +369,7 @@ export function ProjectDetailPage() {
         <AnalysisPanel
           projectId={project.id}
           transcriptRevision={transcriptRevision}
-          onCandidateAccepted={handleCandidateAccepted}
+          sourceKind={project.source_kind}
         />
       </div>
 
@@ -468,7 +387,6 @@ export function ProjectDetailPage() {
           videoDuration={project.duration_seconds}
           mediaRevision={project.updated_at}
           refreshToken={reelRevision}
-          focusReelId={reelToFocus}
           onCoverUpdated={handleCoverUpdated}
         />
       </div>

@@ -28,6 +28,7 @@ class BackgroundMusicSpec:
     true_peak_db: float
     lra: float = 11.0
     source_duration_seconds: float | None = None
+    volume_keyframes: tuple[tuple[float, float], ...] = ()
 
 
 # Prudent spoken-word defaults (voice stays clearly above the bed).
@@ -108,6 +109,7 @@ def build_music_prep_filter(
     fade_out_seconds: float,
     timeline_seconds: float,
     source_duration_seconds: float | None = None,
+    volume_keyframes: tuple[tuple[float, float], ...] = (),
 ) -> str:
     """Trim / fade / pad one music input to the target timeline length."""
     timeline = max(0.05, timeline_seconds)
@@ -138,6 +140,15 @@ def build_music_prep_filter(
 
     vol = max(0.0, min(1.0, volume))
     parts.append(f"volume={_fmt(vol)}")
+    if volume_keyframes:
+        from app.services.audio.volume_envelope import ffmpeg_volume_filter
+
+        envelope = ffmpeg_volume_filter(
+            [{"t_ms": t_ms, "gain": gain} for t_ms, gain in volume_keyframes],
+            timeline,
+        )
+        if envelope:
+            parts.append(envelope)
     parts.append(
         "aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo"
     )
@@ -205,6 +216,7 @@ def build_background_music_graph(
             fade_out_seconds=spec.fade_out_seconds,
             timeline_seconds=main_duration,
             source_duration_seconds=spec.source_duration_seconds,
+            volume_keyframes=spec.volume_keyframes,
         )
     )
     lines.extend(

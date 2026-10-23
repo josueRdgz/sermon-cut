@@ -6,11 +6,12 @@ import styles from './Modal.module.css';
 interface ModalProps {
   title: string;
   icon?: LucideIcon;
+  size?: 'md' | 'lg';
   onClose: () => void;
   children: ReactNode;
 }
 
-export function Modal({ title, icon: Icon, onClose, children }: ModalProps) {
+export function Modal({ title, icon: Icon, size = 'md', onClose, children }: ModalProps) {
   const titleId = useId();
   const closeRef = useRef<HTMLButtonElement>(null);
 
@@ -29,7 +30,7 @@ export function Modal({ title, icon: Icon, onClose, children }: ModalProps) {
   return (
     <div className={styles.backdrop} role="presentation" onClick={onClose}>
       <div
-        className={styles.modal}
+        className={`${styles.modal}${size === 'lg' ? ` ${styles.lg}` : ''}`}
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}

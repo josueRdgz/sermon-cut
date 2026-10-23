@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Captions, Download, Image, Music, Scissors, Square } from 'lucide-react';
+import { createPortal } from 'react-dom';
+import { Blend, Captions, Image, Music, Scissors, Square } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 
-import { ApiError, API_BASE_URL } from '../api/client';
+import { listAnalysisCandidates } from '../api/analysis';
+import { ApiError } from '../api/client';
 import { listAssets } from '../api/assets';
 import {
   createOverlay,
@@ -12,18 +14,18 @@ import {
 } from '../api/overlays';
 import {
   addReelSegment,
-  assembledPreviewUrl,
   createReel,
   createReelFromTranscript,
   deleteReel,
   listReels,
-  prepareAssembledPreview,
   removeReelSegment,
   reorderReelSegments,
-  updateReel,
+  joinReelSegment,
+  splitReelSegment,
   updateReelSegment,
 } from '../api/reels';
 import { getTranscript } from '../api/transcripts';
+import type { AnalysisCandidate } from '../types/analysis';
 import type { ProjectAsset } from '../types/asset';
 import type { ReelOverlay } from '../types/overlay';
 import type { Project } from '../types/project';
@@ -31,12 +33,18 @@ import type { AspectRatio, Reel, ReelSegment, TransitionType } from '../types/re
 import type { TranscriptSegment } from '../types/transcript';
 import { formatDuration, formatTimecode } from '../utils/format';
 import { buildOutputClock, outputTimeAtSource, outputTimeForSource, sourceWindowsContiguous } from '../utils/reelOutputClock';
-import { clampRippleTrim } from '../utils/reelTrim';
+import { previewXfadeStyle, xfadeAudioWeights } from '../utils/previewTransitions';
+import { interpolateGain, scaleEnvelopeToGain, type VolumeKeyframe } from '../utils/volumeEnvelope';
+import { canJoinSourceWindows, clampRippleTrim, splitTooCloseToEdge } from '../utils/reelTrim';
 import { buildSourceGaps } from '../utils/reelTimelineStrip';
+import { isNleHotkeyTarget, isReelEditorHotkeysActive } from '../utils/nleHotkeys';
+import { isNleCompact, NLE_COMPACT_MQ, TIMELINE_MAX, TIMELINE_MIN } from '../utils/nleLayout';
+import { TRANSITION_MIME, TRANSITION_OPTIONS } from './nle/clipConstants';
 import { useNleLayout } from '../utils/useNleLayout';
+import { TOPBAR_CONTEXT_ID } from './layout/TopBar';
+import { AudioRepairPanel } from './AudioRepairPanel';
 import { ConfirmDialog } from './ConfirmDialog';
 import { CutSuggestionsPanel } from './CutSuggestionsPanel';
-import { BackgroundMusicPanel } from './BackgroundMusicPanel';
 import { EndCardPanel } from './EndCardPanel';
 import { FramingPanel } from './FramingPanel';
 import { MediaBinPanel } from './MediaBinPanel';
@@ -55,6 +63,7 @@ import { ReelTimelineStrip, type TimelineTrackKind } from './ReelTimelineStrip';
 import { SubtitlePanel } from './SubtitlePanel';
 import type { CutSuggestion, CutSuggestionsReport } from '../types/cutSuggestions';
 import { acceptCutSuggestion, rejectCutSuggestion } from '../api/cutSuggestions';
+import { getProjectWaveform } from '../api/projects';
 import {
   getBackgroundMusic,
   saveBackgroundMusic,
@@ -158,17 +167,17 @@ interface ReelEditorProps {
 
 const ASPECT_OPTIONS: AspectRatio[] = ['9:16', '1:1', '16:9'];
 const REEL_TOOLS: {
-  id: 'cuts' | 'framing' | 'subtitles' | 'audio' | 'end-card' | 'export';
+  id: 'cuts' | 'framing' | 'transitions' | 'subtitles' | 'audio' | 'end-card';
   label: string;
   description: string;
   icon: LucideIcon;
 }[] = [
-  { id: 'cuts', label: 'Cortes', description: 'Fragmentos y transiciones', icon: Scissors },
-  { id: 'framing', label: 'Encuadre', description: 'Formato vertical', icon: Square },
-  { id: 'subtitles', label: 'Subtítulos', description: 'Texto sobre imagen', icon: Captions },
-  { id: 'audio', label: 'Audio', description: 'Sincronía y música', icon: Music },
-  { id: 'end-card', label: 'Pantalla final', description: 'Imagen y llamado', icon: Image },
-  { id: 'export', label: 'Exportar', description: 'Generar MP4', icon: Download },
+  { id: 'cuts', label: 'Cortes', description: 'Recortar y añadir fragmentos', icon: Scissors },
+  { id: 'framing', label: 'Encuadre', description: 'Short o pantalla completa', icon: Square },
+  { id: 'transitions', label: 'Transiciones', description: 'Efectos entre clips', icon: Blend },
+  { id: 'subtitles', label: 'Subtítulos', description: 'Texto, emojis y estilo', icon: Captions },
+  { id: 'audio', label: 'Audio', description: 'Reparar, sincronía y volumen', icon: Music },
+  { id: 'end-card', label: 'Pantalla final', description: 'Vista final y exportar', icon: Image },
 ];
 
 type ReelTool = (typeof REEL_TOOLS)[number]['id'];
@@ -257,6 +266,9 @@ export function ReelEditor({
   const [previewOutputTime, setPreviewOutputTime] = useState(0);
   const [previewMuted, setPreviewMuted] = useState(false);
   const [previewVolume, setPreviewVolume] = useState(1);
+  const [xfadeUi, setXfadeUi] = useState<{ type: TransitionType; outLane: 0 | 1 } | null>(
+    null,
+  );
   const [activeTool, setActiveTool] = useState<ReelTool>('cuts');
   const [audioOffsetMs, setAudioOffsetMs] = useState(0);
   const [audioOffsetSaving, setAudioOffsetSaving] = useState(false);
@@ -264,24 +276,49 @@ export function ReelEditor({
   const [cutReport, setCutReport] = useState<CutSuggestionsReport | null>(null);
   const [cutBusy, setCutBusy] = useState(false);
   const [transcriptDrafts, setTranscriptDrafts] = useState<Record<string, string>>({});
-  const [transcriptSavingId, setTranscriptSavingId] = useState<string | null>(null);
+  const [, setTranscriptSavingId] = useState<string | null>(null);
   const [showAddFragment, setShowAddFragment] = useState(false);
   const [addFragmentStart, setAddFragmentStart] = useState(0);
   const [addFragmentEnd, setAddFragmentEnd] = useState(5);
   const [backgroundMusic, setBackgroundMusic] = useState<BackgroundMusicSettings | null>(null);
   const [musicVolumeSaving, setMusicVolumeSaving] = useState(false);
   const [musicVolumeDraft, setMusicVolumeDraft] = useState<number | null>(null);
+  const [videoPeaks, setVideoPeaks] = useState<number[]>([]);
+  const [musicPeaks, setMusicPeaks] = useState<number[]>([]);
   const [assets, setAssets] = useState<ProjectAsset[]>([]);
   const [overlays, setOverlays] = useState<ReelOverlay[]>([]);
   const [selectedOverlayId, setSelectedOverlayId] = useState<string | null>(null);
   const [selectedGapKey, setSelectedGapKey] = useState<string | null>(null);
   const [timelineZoom, setTimelineZoom] = useState(80);
-  const [assembledPreviewSrc, setAssembledPreviewSrc] = useState<string | null>(null);
-  const [assembledBusy, setAssembledBusy] = useState(false);
-  const [previewMode, setPreviewMode] = useState<'logical' | 'assembled'>('logical');
+  const [analysisCandidates, setAnalysisCandidates] = useState<AnalysisCandidate[]>([]);
+  const [addedCandidateIds, setAddedCandidateIds] = useState<string[]>([]);
   const [binCollapsed, setBinCollapsed] = useState(false);
   const [inspectorCollapsed, setInspectorCollapsed] = useState(false);
+  const [chromeSlot, setChromeSlot] = useState<HTMLElement | null>(null);
   const { layout, patchLayout } = useNleLayout();
+
+  useEffect(() => {
+    setChromeSlot(document.getElementById(TOPBAR_CONTEXT_ID));
+  }, []);
+
+  function setBinCollapsedExclusive(collapsed: boolean) {
+    setBinCollapsed(collapsed);
+    if (!collapsed && isNleCompact()) setInspectorCollapsed(true);
+  }
+
+  function toggleInspectorExclusive() {
+    setInspectorCollapsed((current) => {
+      const next = !current;
+      if (!next && isNleCompact()) setBinCollapsed(true);
+      return next;
+    });
+  }
+
+  function openInspectorExclusive() {
+    setInspectorCollapsed(false);
+    if (isNleCompact()) setBinCollapsed(true);
+  }
+  const nleMainRef = useRef<HTMLDivElement>(null);
   const musicVolumeSaveTimerRef = useRef<number | null>(null);
   const segmentPersistTimerRef = useRef<number | null>(null);
   const overlayPersistTimerRef = useRef<number | null>(null);
@@ -292,9 +329,14 @@ export function ReelEditor({
   const previewIndexRef = useRef(0);
   const previewingRef = useRef(false);
   const previewOutputTimeRef = useRef(0);
+  const clipEnvelopeRef = useRef<{ keys?: VolumeKeyframe[]; outputStart: number }>({
+    outputStart: 0,
+  });
   const lastPreviewReelIdRef = useRef<string | null>(null);
   const focusedReelRef = useRef<string | null>(null);
   const audioOffsetRef = useRef(0);
+  const audioOffsetMsRef = useRef(0);
+  const editingSegmentIdRef = useRef<string | null>(null);
   const pendingAudioTimeRef = useRef<number | null>(null);
   const pendingVideoTimeRef = useRef<number | null>(null);
   const pendingPreviewSeekRef = useRef<PreviewSeekTarget | null>(null);
@@ -310,6 +352,14 @@ export function ReelEditor({
   const orderedSegmentsRef = useRef<ReelSegment[]>([]);
   const previewMutedRef = useRef(false);
   const previewVolumeRef = useRef(1);
+  const previewRafRef = useRef<number | null>(null);
+  const xfadeRef = useRef<{
+    type: TransitionType;
+    outLane: 0 | 1;
+    fromIndex: number;
+    toIndex: number;
+    duration: number;
+  } | null>(null);
 
   function programVideo(): HTMLVideoElement | null {
     return (programLaneRef.current === 0 ? videoARef : videoBRef).current;
@@ -366,6 +416,18 @@ export function ReelEditor({
   }, [reload, refreshToken]);
 
   useEffect(() => {
+    function collapseIfBothOpen() {
+      if (isNleCompact() && !binCollapsed && !inspectorCollapsed) {
+        setInspectorCollapsed(true);
+      }
+    }
+    collapseIfBothOpen();
+    const mq = window.matchMedia(NLE_COMPACT_MQ);
+    mq.addEventListener('change', collapseIfBothOpen);
+    return () => mq.removeEventListener('change', collapseIfBothOpen);
+  }, [binCollapsed, inspectorCollapsed]);
+
+  useEffect(() => {
     if (
       !focusReelId ||
       focusedReelRef.current === focusReelId ||
@@ -385,22 +447,29 @@ export function ReelEditor({
   }, [activeReel?.id]); // eslint-disable-line react-hooks/exhaustive-deps -- only sync on reel switch
 
   useEffect(() => {
-    const savedOffset = activeReel?.audio_offset_ms ?? 0;
+    const segments = activeReel?.segments ?? [];
+    const selected =
+      segments.find((item) => item.id === editingSegmentId) ??
+      [...segments].sort((a, b) => a.order - b.order)[0];
+    const savedOffset = selected?.audio_offset_ms ?? 0;
     audioOffsetRef.current = savedOffset;
     setAudioOffsetMs(savedOffset);
-  }, [activeReel?.id]); // eslint-disable-line react-hooks/exhaustive-deps -- initialize on switch
+  }, [activeReel?.id, editingSegmentId]); // eslint-disable-line react-hooks/exhaustive-deps -- initialize on switch
 
   useEffect(() => {
-    if (!activeReel || audioOffsetMs === (activeReel.audio_offset_ms ?? 0)) return;
+    if (!activeReel || !editingSegmentId) return;
+    const segment = activeReel.segments.find((item) => item.id === editingSegmentId);
+    if (!segment || audioOffsetMs === (segment.audio_offset_ms ?? 0)) return;
     const reelId = activeReel.id;
+    const segmentId = editingSegmentId;
     const offset = audioOffsetMs;
     let cancelled = false;
     const timer = window.setTimeout(() => {
       setAudioOffsetSaving(true);
-      updateReel(projectId, reelId, { audio_offset_ms: offset })
+      updateReelSegment(projectId, reelId, segmentId, { audio_offset_ms: offset })
         .then((updated) => {
           if (cancelled) return;
-          setReels((items) => items.map((item) => (item.id === updated.id ? updated : item)));
+          replaceReel(updated);
         })
         .catch((err: unknown) => {
           if (!cancelled) {
@@ -417,7 +486,7 @@ export function ReelEditor({
       cancelled = true;
       window.clearTimeout(timer);
     };
-  }, [activeReel, audioOffsetMs, projectId]);
+  }, [activeReel, audioOffsetMs, editingSegmentId, projectId]);
 
   function replaceReel(updated: Reel) {
     reloadEpochRef.current += 1;
@@ -530,6 +599,39 @@ export function ReelEditor({
     }
   }
 
+  async function handleAddAnalysisCandidate(candidate: AnalysisCandidate) {
+    setBusy(true);
+    setError(null);
+    try {
+      let reel = activeReel;
+      if (!reel) {
+        reel = await createReel(projectId, {
+          title: candidate.title || titleDraft.trim() || 'Nuevo Reel',
+          aspect_ratio: aspect,
+          segments: [],
+        });
+      }
+      let updated = reel;
+      for (const fragment of candidate.segments) {
+        updated = await addReelSegment(projectId, updated.id, {
+          source_start_seconds: fragment.start,
+          source_end_seconds: fragment.end,
+          transcript_text: fragment.exact_text || null,
+          transition_type: 'hard_cut',
+          transition_duration_ms: 0,
+        });
+      }
+      replaceReel(updated);
+      setAddedCandidateIds((current) =>
+        current.includes(candidate.id) ? current : [...current, candidate.id],
+      );
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'No se pudo añadir el corte al Reel');
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function handleAddManualFragment() {
     if (!activeReel) return;
     const start = round3(addFragmentStart);
@@ -577,20 +679,12 @@ export function ReelEditor({
     setError(null);
   }
 
-  async function handleSaveTitle() {
-    if (!activeReel) return;
-    setBusy(true);
-    try {
-      const updated = await updateReel(projectId, activeReel.id, {
-        title: titleDraft.trim() || activeReel.title,
-        aspect_ratio: aspect,
-      });
-      replaceReel(updated);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'No se pudo guardar');
-    } finally {
-      setBusy(false);
+  function toggleAddFragmentForm() {
+    if (showAddFragment) {
+      setShowAddFragment(false);
+      return;
     }
+    openAddFragmentForm();
   }
 
   async function handleDeleteReel() {
@@ -677,12 +771,20 @@ export function ReelEditor({
   }
 
   async function handleRemoveSegment(segmentId: string) {
-    if (!activeReel) return;
+    await handleRemoveSegments([segmentId]);
+  }
+
+  async function handleRemoveSegments(segmentIds: string[]) {
+    if (!activeReel || segmentIds.length === 0) return;
+    const unique = [...new Set(segmentIds)];
     setBusy(true);
     try {
-      const updated = await removeReelSegment(projectId, activeReel.id, segmentId);
+      let updated = activeReel;
+      for (const id of unique) {
+        updated = await removeReelSegment(projectId, updated.id, id);
+      }
       replaceReel(updated);
-      if (editingSegmentId === segmentId) setEditingSegmentId(null);
+      if (editingSegmentId && unique.includes(editingSegmentId)) setEditingSegmentId(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'No se pudo eliminar el fragmento');
     } finally {
@@ -762,7 +864,12 @@ export function ReelEditor({
     if (backgroundMusic && pendingMusicVolume != null) {
       await savePreviewMusicVolume(pendingMusicVolume);
     }
-    if (activeReel && audioOffsetMs !== (activeReel.audio_offset_ms ?? 0)) {
+    const selectedForExport = activeReel?.segments.find((item) => item.id === editingSegmentId);
+    if (
+      activeReel &&
+      selectedForExport &&
+      audioOffsetMs !== (selectedForExport.audio_offset_ms ?? 0)
+    ) {
       await saveAudioOffset();
     }
     await flushCaptionDraftsForExport();
@@ -935,29 +1042,45 @@ export function ReelEditor({
     });
   }
 
-  function handleMoveCaption(id: string, inMs: number, outMs: number) {
-    if (!activeReel) return;
-    const nextIn = Math.max(0, inMs);
-    const nextOut = Math.max(nextIn + 200, outMs);
+  function handleMoveCaption(id: string, inMs: number, outMs: number, persist = true) {
+    handleMoveCaptions([{ id, inMs, outMs }], persist);
+  }
+
+  function handleMoveCaptions(
+    items: { id: string; inMs: number; outMs: number }[],
+    persist = true,
+  ) {
+    if (!activeReel || items.length === 0) return;
+    const byId = new Map(items.map((item) => [item.id, item]));
     setReels((prev) =>
       prev.map((reel) => {
         if (reel.id !== activeReel.id) return reel;
         return {
           ...reel,
-          segments: reel.segments.map((segment) =>
-            segment.id === id
-              ? { ...segment, caption_in_ms: nextIn, caption_out_ms: nextOut }
-              : segment,
-          ),
+          segments: reel.segments.map((segment) => {
+            const next = byId.get(segment.id);
+            if (!next) return segment;
+            const nextIn = Math.max(0, next.inMs);
+            return {
+              ...segment,
+              caption_in_ms: nextIn,
+              caption_out_ms: Math.max(nextIn + 200, next.outMs),
+            };
+          }),
         };
       }),
     );
+    if (!persist) return;
     debounceSegmentPersist(async () => {
       try {
-        const updated = await updateReelSegment(projectId, activeReel.id, id, {
-          caption_in_ms: nextIn,
-          caption_out_ms: nextOut,
-        });
+        let updated = activeReel;
+        for (const item of items) {
+          const nextIn = Math.max(0, item.inMs);
+          updated = await updateReelSegment(projectId, activeReel.id, item.id, {
+            caption_in_ms: nextIn,
+            caption_out_ms: Math.max(nextIn + 200, item.outMs),
+          });
+        }
         replaceReel(updated);
       } catch (err) {
         setError(err instanceof Error ? err.message : 'No se pudo mover el subtítulo');
@@ -973,16 +1096,32 @@ export function ReelEditor({
   }
 
   function handleMoveOverlay(id: string, startMs: number) {
-    if (!activeReel) return;
+    handleMoveOverlays([{ id, startMs, lane: overlays.find((item) => item.id === id)?.z_index ?? 0 }]);
+  }
+
+  function handleMoveOverlays(
+    items: { id: string; startMs: number; lane: number }[],
+    persist = true,
+  ) {
+    if (!activeReel || items.length === 0) return;
+    const byId = new Map(items.map((item) => [item.id, item]));
     setOverlays((prev) =>
-      prev.map((overlay) => (overlay.id === id ? { ...overlay, start_ms: startMs } : overlay)),
+      prev.map((overlay) => {
+        const next = byId.get(overlay.id);
+        if (!next) return overlay;
+        return { ...overlay, start_ms: next.startMs, z_index: next.lane };
+      }),
     );
+    if (!persist) return;
     debounceOverlayPersist(async () => {
       try {
-        const updated = await updateOverlay(projectId, activeReel.id, id, {
-          start_ms: startMs,
-        });
-        setOverlays((prev) => prev.map((item) => (item.id === updated.id ? updated : item)));
+        for (const item of items) {
+          const updated = await updateOverlay(projectId, activeReel.id, item.id, {
+            start_ms: item.startMs,
+            z_index: item.lane,
+          });
+          setOverlays((prev) => prev.map((entry) => (entry.id === updated.id ? updated : entry)));
+        }
       } catch (err) {
         setError(err instanceof Error ? err.message : 'No se pudo mover el overlay');
         void reloadOverlays(activeReel.id);
@@ -990,32 +1129,129 @@ export function ReelEditor({
     });
   }
 
-  async function handleDropAsset(assetId: string, outputSeconds: number) {
+  async function handleDropAsset(assetId: string, outputSeconds: number, lane = 0) {
     if (!activeReel) return;
     const asset = assets.find((item) => item.id === assetId);
-    const isVideo = asset?.kind === 'video';
+    const kind =
+      asset?.kind === 'audio' ? 'audio' : asset?.kind === 'video' ? 'video' : 'image';
     setBusy(true);
     setError(null);
     try {
       const created = await createOverlay(projectId, activeReel.id, {
-        kind: isVideo ? 'video' : 'image',
+        kind,
         asset_id: assetId,
         start_ms: Math.max(0, Math.round(outputSeconds * 1000)),
-        duration_ms: isVideo
-          ? Math.max(500, asset?.duration_ms ?? 3000)
-          : 3000,
+        duration_ms:
+          kind === 'image'
+            ? 3000
+            : Math.max(500, Math.min(600_000, asset?.duration_ms ?? 3000)),
+        z_index: Math.max(0, lane),
       });
       setOverlays((prev) => [...prev, created].sort((a, b) => a.start_ms - b.start_ms));
       setSelectedOverlayId(created.id);
-      setActiveTool('cuts');
+      openInspectorExclusive();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'No se pudo crear el overlay');
+      setError(err instanceof Error ? err.message : 'No se pudo colocar el archivo en la línea de tiempo');
     } finally {
       setBusy(false);
     }
   }
 
-  async function handleAddTextOverlay(outputSeconds: number) {
+  async function splitAtPlayhead(atOutput?: number) {
+    if (!activeReel) return;
+    const output = atOutput ?? previewOutputTimeRef.current;
+    const target = resolvePreviewSeek(orderedSegmentsRef.current, output);
+    if (!target) {
+      setError('Coloca el cursor sobre un clip para partirlo.');
+      return;
+    }
+    const segment = orderedSegmentsRef.current[target.segmentIndex];
+    if (!segment) {
+      setError('Coloca el cursor sobre un clip para partirlo.');
+      return;
+    }
+    if (
+      splitTooCloseToEdge(segment.source_start_seconds, target.sourceTime, segment.source_end_seconds)
+    ) {
+      setError('Demasiado cerca del borde; mueve al menos 0,2 s hacia el centro del clip.');
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    try {
+      const updated = await splitReelSegment(
+        projectId,
+        activeReel.id,
+        segment.id,
+        round3(target.sourceTime),
+      );
+      replaceReel(updated);
+      seekPreview(output);
+    } catch (err) {
+      if (err instanceof ApiError && err.code === 'split_out_of_range') {
+        setError('Demasiado cerca del borde; mueve al menos 0,2 s hacia el centro del clip.');
+      } else {
+        setError(err instanceof Error ? err.message : 'No se pudo partir el clip');
+      }
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function joinAtCut(segmentId: string) {
+    if (!activeReel) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const updated = await joinReelSegment(projectId, activeReel.id, segmentId);
+      replaceReel(updated);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'No se pudo unir el corte');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function handleVolumeKeyframes(segmentId: string, points: VolumeKeyframe[]) {
+    if (!activeReel) return;
+    setReels((prev) =>
+      prev.map((reel) =>
+        reel.id === activeReel.id
+          ? {
+              ...reel,
+              segments: reel.segments.map((segment) =>
+                segment.id === segmentId ? { ...segment, volume_keyframes: points } : segment,
+              ),
+            }
+          : reel,
+      ),
+    );
+    debounceSegmentPersist(async () => {
+      try {
+        const updated = await updateReelSegment(projectId, activeReel.id, segmentId, {
+          volume_keyframes: points,
+        });
+        replaceReel(updated);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'No se pudo guardar el volumen');
+      }
+    });
+  }
+
+  function handleMusicVolumeKeyframes(points: VolumeKeyframe[]) {
+    if (!backgroundMusic) return;
+    const next = { ...backgroundMusic, volume_keyframes: points };
+    setBackgroundMusic(next);
+    debounceSegmentPersist(async () => {
+      try {
+        setBackgroundMusic(await saveBackgroundMusic(projectId, { volume_keyframes: points }));
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'No se pudo guardar el volumen de la música');
+      }
+    });
+  }
+
+  async function handleAddTextOverlay(outputSeconds: number, lane = 0) {
     if (!activeReel) return;
     setBusy(true);
     setError(null);
@@ -1025,10 +1261,11 @@ export function ReelEditor({
         text: 'Texto',
         start_ms: Math.max(0, Math.round(outputSeconds * 1000)),
         duration_ms: 3000,
+        z_index: Math.max(0, lane),
       });
       setOverlays((prev) => [...prev, created].sort((a, b) => a.start_ms - b.start_ms));
       setSelectedOverlayId(created.id);
-      setActiveTool('cuts');
+      openInspectorExclusive();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'No se pudo crear el texto');
     } finally {
@@ -1046,15 +1283,22 @@ export function ReelEditor({
       opacity?: number;
       x?: number;
       y?: number;
+      z_index?: number;
     },
   ) {
     if (!activeReel) return;
+    const nextPatch = {
+      ...patch,
+      ...(patch.scale != null
+        ? { scale: Math.max(0.08, Math.min(2, patch.scale)) }
+        : {}),
+    };
     setOverlays((prev) =>
-      prev.map((item) => (item.id === overlay.id ? { ...item, ...patch } : item)),
+      prev.map((item) => (item.id === overlay.id ? { ...item, ...nextPatch } : item)),
     );
     debounceOverlayPersist(async () => {
       try {
-        const updated = await updateOverlay(projectId, activeReel.id, overlay.id, patch);
+        const updated = await updateOverlay(projectId, activeReel.id, overlay.id, nextPatch);
         setOverlays((prev) => prev.map((item) => (item.id === updated.id ? updated : item)));
       } catch (err) {
         setError(err instanceof Error ? err.message : 'No se pudo actualizar el overlay');
@@ -1077,35 +1321,30 @@ export function ReelEditor({
     }
   }
 
-  async function switchPreviewMode(mode: 'logical' | 'assembled') {
-    if (!activeReel) return;
-    if (mode === 'logical') {
-      stopPreview();
-      setPreviewMode('logical');
-      return;
-    }
-    setAssembledBusy(true);
-    setError(null);
-    stopPreview();
-    try {
-      await flushPendingEditsForExport();
-      await prepareAssembledPreview(projectId, activeReel.id);
-      setAssembledPreviewSrc(
-        `${API_BASE_URL}${assembledPreviewUrl(projectId, activeReel.id)}?t=${Date.now()}`,
-      );
-      setPreviewMode('assembled');
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'No se pudo preparar el preview ensamblado');
-      setPreviewMode('logical');
-    } finally {
-      setAssembledBusy(false);
-    }
+  function syncPlayingAudioOffset() {
+    const playing = orderedSegmentsRef.current[previewIndexRef.current];
+    if (!playing) return;
+    audioOffsetRef.current =
+      playing.id === editingSegmentIdRef.current
+        ? audioOffsetMsRef.current
+        : (playing.audio_offset_ms ?? 0);
   }
 
   function usesSeparateAudio(): boolean {
     // Offset needs a second clock. Otherwise keep A/V locked in one element so
     // hard cuts do not desync or leave silence while the second element seeks.
+    syncPlayingAudioOffset();
     return Math.abs(audioOffsetRef.current) >= 1;
+  }
+
+  function separateAudioReady(): boolean {
+    const audio = audioRef.current;
+    return Boolean(
+      usesSeparateAudio() &&
+        audio &&
+        !audio.error &&
+        audio.readyState >= HTMLMediaElement.HAVE_METADATA,
+    );
   }
 
   function musicPreviewActive(settings: BackgroundMusicSettings | null = backgroundMusic): boolean {
@@ -1121,7 +1360,10 @@ export function ReelEditor({
     const music = musicRef.current;
     if (!music) return;
     const muted = previewMutedRef.current;
-    const bed = musicPreviewActive(settings) ? Math.max(0, Math.min(1, settings?.volume ?? 0)) : 0;
+    const envelope = interpolateGain(settings?.volume_keyframes, previewOutputTime * 1000);
+    const bed = musicPreviewActive(settings)
+      ? Math.max(0, Math.min(1, (settings?.volume ?? 0) * envelope))
+      : 0;
     music.muted = muted || bed <= 0;
     music.volume = muted ? 0 : bed;
   }
@@ -1192,30 +1434,197 @@ export function ReelEditor({
     await ensureMusicAtOutput(outputSeconds, { force: true, play: true });
   }
 
+  function clampMediaVolume(value: number): number {
+    return Math.max(0, Math.min(1, value));
+  }
+
+  function clipGainAt(index: number, outputTime: number, ordered: ReelSegment[]): number {
+    const segment = ordered[index];
+    const placement = buildOutputClock(ordered).placements[index];
+    if (!segment || !placement) return 1;
+    const localMs = Math.max(0, (outputTime - placement.outputStart) * 1000);
+    return interpolateGain(segment.volume_keyframes, localMs);
+  }
+
+  function xfadeProgress(sourceTime: number, ordered: ReelSegment[]): number {
+    const xfade = xfadeRef.current;
+    const current = ordered[xfade?.fromIndex ?? previewIndexRef.current];
+    if (!xfade || !current || xfade.duration <= 0) return 0;
+    const remaining = current.source_end_seconds - sourceTime;
+    return Math.max(0, Math.min(1, 1 - remaining / xfade.duration));
+  }
+
+  function applyXfadeVars(type: TransitionType | string, progress: number) {
+    const stage = videoARef.current?.parentElement ?? videoBRef.current?.parentElement;
+    if (!stage) return;
+    const style = previewXfadeStyle(type, progress);
+    stage.style.setProperty('--xfade-out', String(style.outOpacity));
+    stage.style.setProperty('--xfade-in', String(style.inOpacity));
+    stage.style.setProperty('--xfade-veil', String(style.veilOpacity));
+    stage.style.setProperty('--xfade-veil-color', style.veilColor);
+    stage.style.setProperty('--xfade-clip', style.inClipPath);
+    stage.style.setProperty('--xfade-move', style.inTransform);
+  }
+
+  function clearXfadeVars() {
+    const stage = videoARef.current?.parentElement ?? videoBRef.current?.parentElement;
+    if (!stage) return;
+    for (const name of [
+      '--xfade-out',
+      '--xfade-in',
+      '--xfade-veil',
+      '--xfade-veil-color',
+      '--xfade-clip',
+      '--xfade-move',
+    ]) {
+      stage.style.removeProperty(name);
+    }
+  }
+
+  function cancelXfade() {
+    if (!xfadeRef.current) return;
+    xfadeRef.current = null;
+    setXfadeUi(null);
+    clearXfadeVars();
+  }
+
   function applyPreviewGain() {
+    const ordered = orderedSegmentsRef.current;
+    const index = previewIndexRef.current;
     const video = programVideo();
     const standby = standbyVideo();
     const audio = audioRef.current;
-    const separate = usesSeparateAudio();
+    const xfade = xfadeRef.current;
+    const sourceTime = video?.currentTime ?? 0;
+    const outputTime = outputTimeForSource(buildOutputClock(ordered), index, sourceTime);
+    previewOutputTimeRef.current = outputTime;
     const muted = previewMutedRef.current;
     const volume = previewVolumeRef.current;
+    const progress = xfade ? xfadeProgress(sourceTime, ordered) : 0;
+    const mix = xfade ? xfadeAudioWeights(progress) : { out: 1, in: 0 };
+    const outGain = clipGainAt(index, outputTime, ordered);
+    const inGain = xfade ? clipGainAt(xfade.toIndex, outputTime, ordered) : 1;
+    const outVol = muted ? 0 : volume * outGain * mix.out;
+    const inVol = xfade && !muted ? volume * inGain * mix.in : 0;
+    const separate = separateAudioReady() && !xfade;
+    if (xfade) applyXfadeVars(xfade.type, progress);
     if (video) {
-      video.muted = separate ? true : muted;
-      video.volume = separate ? 1 : muted ? 0 : volume;
+      video.muted = separate ? true : muted || outVol <= 0.0005;
+      video.volume = separate ? 1 : clampMediaVolume(outVol);
     }
     if (standby) {
-      standby.muted = true;
-      standby.volume = 0;
+      standby.muted = Boolean(separate || muted || inVol <= 0.0005);
+      standby.volume = separate ? 0 : clampMediaVolume(inVol);
     }
     if (audio) {
       audio.muted = separate ? muted : true;
-      audio.volume = separate ? (muted ? 0 : volume) : 0;
-      if (!separate) {
+      audio.volume = separate ? (muted ? 0 : clampMediaVolume(volume * outGain)) : 0;
+      if (!separate && !xfade) {
         audio.pause();
         audio.playbackRate = 1;
       }
     }
     applyMusicGain();
+  }
+
+  function stopPreviewTick() {
+    if (previewRafRef.current != null) {
+      window.cancelAnimationFrame(previewRafRef.current);
+      previewRafRef.current = null;
+    }
+  }
+
+  function ensurePreviewTick() {
+    if (previewRafRef.current != null) return;
+    const tick = () => {
+      previewRafRef.current = window.requestAnimationFrame(tick);
+      runPreviewTick();
+    };
+    previewRafRef.current = window.requestAnimationFrame(tick);
+  }
+
+  function startIncomingClip(next: ReelSegment) {
+    const standby = standbyVideo();
+    if (!standby) return;
+    if (Math.abs(standby.currentTime - next.source_start_seconds) > 0.35) {
+      setMediaTime(standby, next.source_start_seconds);
+    }
+    void standby.play().catch(() => undefined);
+  }
+
+  function completeXfade() {
+    const xfade = xfadeRef.current;
+    if (!xfade) return;
+    const outgoing = xfade.outLane === 0 ? videoARef.current : videoBRef.current;
+    outgoing?.pause();
+    if (outgoing) {
+      outgoing.muted = true;
+      outgoing.volume = 0;
+    }
+    const nextLane: 0 | 1 = xfade.outLane === 0 ? 1 : 0;
+    programLaneRef.current = nextLane;
+    setProgramLane(nextLane);
+    previewIndexRef.current = xfade.toIndex;
+    setPreviewIndex(xfade.toIndex);
+    xfadeRef.current = null;
+    setXfadeUi(null);
+    clearXfadeVars();
+    const incoming = nextLane === 0 ? videoARef.current : videoBRef.current;
+    if (incoming) {
+      syncPlayingAudioOffset();
+      if (separateAudioReady()) {
+        const audio = audioRef.current;
+        if (audio) {
+          setMediaTime(
+            audio,
+            audioTimeForVideo(incoming.currentTime, audioOffsetRef.current),
+            true,
+          );
+          void audio.play().catch(() => undefined);
+        }
+      }
+    }
+    applyPreviewGain();
+    scheduleCutAdvance();
+    prefetchStandby();
+  }
+
+  function runPreviewTick() {
+    if (!previewingRef.current || jumpingRef.current || scrubbingRef.current) {
+      applyPreviewGain();
+      return;
+    }
+    const video = programVideo();
+    const ordered = orderedSegmentsRef.current;
+    const index = previewIndexRef.current;
+    const current = ordered[index];
+    if (!video || !current) return;
+    applyPreviewGain();
+    const next = ordered[index + 1];
+    const overlap = buildOutputClock(ordered).placements[index]?.overlapSeconds ?? 0;
+    const remaining = current.source_end_seconds - video.currentTime;
+    if (overlap > 0 && next && remaining <= overlap + 0.02) {
+      if (!xfadeRef.current) {
+        const outLane = programLaneRef.current;
+        const type = current.transition_type;
+        xfadeRef.current = {
+          type,
+          outLane,
+          fromIndex: index,
+          toIndex: index + 1,
+          duration: overlap,
+        };
+        setXfadeUi({ type, outLane });
+        startIncomingClip(next);
+      }
+      if (remaining <= 0.04) completeXfade();
+      return;
+    }
+    if (xfadeRef.current && remaining > overlap + 0.08) {
+      cancelXfade();
+      standbyVideo()?.pause();
+      applyPreviewGain();
+    }
   }
 
   function stopPreview() {
@@ -1224,6 +1633,8 @@ export function ReelEditor({
     resumeAfterScrubRef.current = false;
     jumpingRef.current = false;
     pendingPreviewSeekRef.current = null;
+    stopPreviewTick();
+    cancelXfade();
     clearCutTimer();
     if (seekAnimationFrameRef.current != null) {
       window.cancelAnimationFrame(seekAnimationFrameRef.current);
@@ -1251,6 +1662,7 @@ export function ReelEditor({
   }
 
   function prefetchStandby() {
+    if (xfadeRef.current) return;
     const next = orderedSegmentsRef.current[previewIndexRef.current + 1];
     const standby = standbyVideo();
     if (!standby) return;
@@ -1270,7 +1682,10 @@ export function ReelEditor({
     const current = orderedSegmentsRef.current[previewIndexRef.current];
     if (!video || !current) return;
     const remainingMs = (current.source_end_seconds - video.currentTime) * 1000;
-    if (remainingMs < 800) prefetchStandby();
+    const overlapMs =
+      (buildOutputClock(orderedSegmentsRef.current).placements[previewIndexRef.current]
+        ?.overlapSeconds ?? 0) * 1000;
+    if (remainingMs < Math.max(800, overlapMs + 250)) prefetchStandby();
     cutTimerRef.current = window.setTimeout(() => {
       cutTimerRef.current = null;
       advanceToNextCut();
@@ -1279,12 +1694,23 @@ export function ReelEditor({
 
   function advanceToNextCut() {
     if (jumpingRef.current || !previewingRef.current || scrubbingRef.current) return;
+    if (xfadeRef.current) {
+      completeXfade();
+      return;
+    }
     const ordered = orderedSegmentsRef.current;
     const index = previewIndexRef.current;
     const current = ordered[index];
     const video = programVideo();
     if (!current || !video) {
       stopPreview();
+      return;
+    }
+    const overlap =
+      buildOutputClock(ordered).placements[index]?.overlapSeconds ?? 0;
+    const remaining = current.source_end_seconds - video.currentTime;
+    if (overlap > 0 && remaining <= overlap + 0.08) {
+      runPreviewTick();
       return;
     }
     if (video.currentTime < current.source_end_seconds - 0.08) {
@@ -1313,7 +1739,7 @@ export function ReelEditor({
   }
 
   function syncAudioToVideo(videoTime: number, force = false) {
-    if (!usesSeparateAudio()) return;
+    if (!separateAudioReady()) return;
     const audio = audioRef.current;
     if (!audio) return;
     const target = audioTimeForVideo(videoTime, audioOffsetRef.current);
@@ -1336,6 +1762,7 @@ export function ReelEditor({
     if (!video) return;
     const token = ++jumpTokenRef.current;
     jumpingRef.current = true;
+    cancelXfade();
     const audio = audioRef.current;
     const keepPlaying = Boolean(resume && previewingRef.current && !scrubbingRef.current);
     pendingVideoTimeRef.current = sourceTimeSeconds;
@@ -1360,7 +1787,7 @@ export function ReelEditor({
         audio.playbackRate = 1;
       }
       const seeks = [waitForSeek(video, sourceTimeSeconds)];
-      if (usesSeparateAudio() && audio) {
+      if (separateAudioReady() && audio) {
         seeks.push(
           waitForSeek(audio, audioTimeForVideo(sourceTimeSeconds, audioOffsetRef.current)),
         );
@@ -1388,6 +1815,7 @@ export function ReelEditor({
       programLaneRef.current = nextLane;
       setProgramLane(nextLane);
       applyPreviewGain();
+      ensurePreviewTick();
       try {
         if (standby.paused) await standby.play();
       } catch (err: unknown) {
@@ -1409,7 +1837,7 @@ export function ReelEditor({
     }
 
     setMediaTime(video, sourceTimeSeconds, true);
-    if (usesSeparateAudio() && audio) {
+    if (separateAudioReady() && audio) {
       setMediaTime(audio, audioTimeForVideo(sourceTimeSeconds, audioOffsetRef.current), true);
     }
     pendingVideoTimeRef.current = null;
@@ -1418,7 +1846,7 @@ export function ReelEditor({
     applyPreviewGain();
     try {
       if (video.paused) {
-        if (usesSeparateAudio() && audio) {
+        if (separateAudioReady() && audio) {
           await Promise.all([video.play(), audio.play()]);
         } else {
           await video.play();
@@ -1433,13 +1861,19 @@ export function ReelEditor({
     if (token !== jumpTokenRef.current) return;
     scheduleCutAdvance();
     prefetchStandby();
+    ensurePreviewTick();
     await finishMusic();
   }
 
   function applyAudioOffset(offsetMs: number) {
-    audioOffsetRef.current = offsetMs;
     setAudioOffsetMs(offsetMs);
+    audioOffsetMsRef.current = offsetMs;
+    const playing = orderedSegmentsRef.current[previewIndexRef.current];
+    if (!playing || playing.id === editingSegmentIdRef.current) {
+      audioOffsetRef.current = offsetMs;
+    }
     applyPreviewGain();
+    if (!playing || playing.id !== editingSegmentIdRef.current) return;
     if (audioOffsetSeekTimerRef.current != null) return;
     audioOffsetSeekTimerRef.current = window.setTimeout(() => {
       audioOffsetSeekTimerRef.current = null;
@@ -1467,14 +1901,17 @@ export function ReelEditor({
   }
 
   async function saveAudioOffset(offsetMs = audioOffsetMs) {
-    if (!activeReel) return;
+    if (!activeReel || !editingSegmentIdRef.current) return;
     setAudioOffsetSaving(true);
     setError(null);
     try {
-      const updated = await updateReel(projectId, activeReel.id, {
-        audio_offset_ms: offsetMs,
-      });
-      setReels((items) => items.map((item) => (item.id === updated.id ? updated : item)));
+      const updated = await updateReelSegment(
+        projectId,
+        activeReel.id,
+        editingSegmentIdRef.current,
+        { audio_offset_ms: offsetMs },
+      );
+      replaceReel(updated);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'No se pudo guardar la sincronía de audio');
     } finally {
@@ -1506,20 +1943,6 @@ export function ReelEditor({
   }
 
   function seekPreview(outputSeconds: number) {
-    if (previewMode === 'assembled') {
-      const total = buildOutputClock(orderedSegments).totalDuration;
-      const clamped = Math.max(0, Math.min(total, outputSeconds));
-      setPreviewOutputTime(clamped);
-      const assembled = assembledVideoRef.current;
-      if (assembled && assembled.readyState >= HTMLMediaElement.HAVE_METADATA) {
-        try {
-          assembled.currentTime = clamped;
-        } catch {
-          // ignore seek race while loading
-        }
-      }
-      return;
-    }
     const target = resolvePreviewSeek(orderedSegments, outputSeconds);
     if (!target || !programVideo()) return;
     previewIndexRef.current = target.segmentIndex;
@@ -1527,6 +1950,7 @@ export function ReelEditor({
     setPreviewOutputTime(target.outputTime);
     setSourceTime(target.sourceTime);
     pendingPreviewSeekRef.current = target;
+    cancelXfade();
     if (scrubbingRef.current) {
       // Keep the picture responsive while dragging, but do not make the second
       // media element seek on every pointer event.
@@ -1540,11 +1964,8 @@ export function ReelEditor({
     if (scrubbingRef.current) return;
     scrubbingRef.current = true;
     resumeAfterScrubRef.current = previewingRef.current;
+    cancelXfade();
     clearCutTimer();
-    if (previewMode === 'assembled') {
-      assembledVideoRef.current?.pause();
-      return;
-    }
     videoARef.current?.pause();
     videoBRef.current?.pause();
     if (audioRef.current) {
@@ -1560,14 +1981,6 @@ export function ReelEditor({
     if (seekAnimationFrameRef.current != null) {
       window.cancelAnimationFrame(seekAnimationFrameRef.current);
       seekAnimationFrameRef.current = null;
-    }
-    if (previewMode === 'assembled') {
-      const shouldResume = resumeAfterScrubRef.current && previewingRef.current;
-      resumeAfterScrubRef.current = false;
-      if (shouldResume) {
-        void assembledVideoRef.current?.play().catch(() => undefined);
-      }
-      return;
     }
     const target = pendingPreviewSeekRef.current;
     const shouldResume = resumeAfterScrubRef.current && previewingRef.current;
@@ -1603,23 +2016,27 @@ export function ReelEditor({
     applyPreviewGain();
     previewingRef.current = true;
     setPreviewing(true);
-    const waitForMetadata = (media: HTMLMediaElement) =>
-      media.readyState >= HTMLMediaElement.HAVE_METADATA
-        ? Promise.resolve()
-        : new Promise<void>((resolve, reject) => {
-            const onReady = () => {
-              media.removeEventListener('error', onError);
-              resolve();
-            };
-            const onError = () => {
-              media.removeEventListener('loadedmetadata', onReady);
-              reject(new Error('No se pudo cargar el medio para el preview'));
-            };
-            media.addEventListener('loadedmetadata', onReady, { once: true });
-            media.addEventListener('error', onError, { once: true });
-          });
+    ensurePreviewTick();
+    const waitForMetadata = (media: HTMLMediaElement) => {
+      if (media.error) {
+        return Promise.reject(new Error('No se pudo cargar el medio para el preview'));
+      }
+      if (media.readyState >= HTMLMediaElement.HAVE_METADATA) return Promise.resolve();
+      return new Promise<void>((resolve, reject) => {
+        const onReady = () => {
+          media.removeEventListener('error', onError);
+          resolve();
+        };
+        const onError = () => {
+          media.removeEventListener('loadedmetadata', onReady);
+          reject(new Error('No se pudo cargar el medio para el preview'));
+        };
+        media.addEventListener('loadedmetadata', onReady, { once: true });
+        media.addEventListener('error', onError, { once: true });
+      });
+    };
     const mediaReady =
-      usesSeparateAudio() && audio
+      usesSeparateAudio() && audio && !audio.error
         ? Promise.all([waitForMetadata(video), waitForMetadata(audio)])
         : waitForMetadata(video);
     void mediaReady
@@ -1627,7 +2044,11 @@ export function ReelEditor({
         if (!previewingRef.current || scrubbingRef.current) return;
         await jumpPreviewToSource(target.sourceTime, true);
       })
-      .catch((err: unknown) => {
+      .catch(async (err: unknown) => {
+        if (previewingRef.current && video.readyState >= HTMLMediaElement.HAVE_METADATA) {
+          await jumpPreviewToSource(target.sourceTime, true);
+          return;
+        }
         previewingRef.current = false;
         setPreviewing(false);
         video.pause();
@@ -1650,39 +2071,73 @@ export function ReelEditor({
   function changePreviewVolume(value: number) {
     const nextVolume = Math.max(0, Math.min(value, 1));
     const nextMuted = nextVolume === 0;
-    setPreviewVolume(nextVolume);
     setPreviewMuted(nextMuted);
     previewMutedRef.current = nextMuted;
-    previewVolumeRef.current = nextVolume;
+    previewVolumeRef.current = 1;
+    setPreviewVolume(1);
+    const ordered = orderedSegmentsRef.current;
+    const index = previewIndexRef.current;
+    const segment = ordered[index] ?? ordered[0];
+    if (segment) {
+      const clock = buildOutputClock(ordered);
+      const placement = clock.placements[index] ?? clock.placements[0];
+      const localMs = Math.max(
+        0,
+        (previewOutputTimeRef.current - (placement?.outputStart ?? 0)) * 1000,
+      );
+      handleVolumeKeyframes(segment.id, scaleEnvelopeToGain(segment.volume_keyframes, localMs, nextVolume));
+    }
     applyPreviewGain();
   }
 
   function changeMusicVolume(value: number) {
-    if (!backgroundMusic) return;
     const clamped = Math.max(0, Math.min(value, 1));
-    setMusicVolumeDraft(clamped);
-    // Unmute so the user hears the bed while dragging the slider.
     if (previewMutedRef.current && clamped > 0) {
       setPreviewMuted(false);
       previewMutedRef.current = false;
     }
-    const next = { ...backgroundMusic, volume: clamped };
+    const output = previewOutputTimeRef.current;
+    const overlay =
+      overlays.find((item) => item.id === selectedOverlayId && item.kind === 'audio') ??
+      overlays.find((item) => {
+        if (item.kind !== 'audio') return false;
+        const start = item.start_ms / 1000;
+        return output >= start && output < start + Math.max(0.2, item.duration_ms / 1000);
+      }) ??
+      null;
+    if (overlay) {
+      setMusicVolumeDraft(clamped);
+      void handleOverlayField(overlay, { opacity: clamped });
+      return;
+    }
+    if (!backgroundMusic) return;
+    const tMs = previewOutputTimeRef.current * 1000;
+    const keys = scaleEnvelopeToGain(backgroundMusic.volume_keyframes, tMs, clamped);
+    const next = { ...backgroundMusic, volume: 1, volume_keyframes: keys };
     setBackgroundMusic(next);
+    setMusicVolumeDraft(clamped);
     applyMusicGain(next);
     if (musicVolumeSaveTimerRef.current != null) {
       window.clearTimeout(musicVolumeSaveTimerRef.current);
     }
     musicVolumeSaveTimerRef.current = window.setTimeout(() => {
       musicVolumeSaveTimerRef.current = null;
-      void savePreviewMusicVolume(clamped);
+      void savePreviewMusicVolume(clamped, keys);
     }, 350);
   }
 
-  async function savePreviewMusicVolume(volume: number) {
+  async function savePreviewMusicVolume(volume: number, keyframes?: VolumeKeyframe[]) {
     const clamped = Math.max(0, Math.min(volume, 1));
     setMusicVolumeSaving(true);
     try {
-      const next = await saveBackgroundMusic(projectId, { volume: clamped });
+      const next = await saveBackgroundMusic(projectId, {
+        volume: 1,
+        volume_keyframes: keyframes ?? scaleEnvelopeToGain(
+          backgroundMusic?.volume_keyframes,
+          previewOutputTimeRef.current * 1000,
+          clamped,
+        ),
+      });
       setBackgroundMusic(next);
       setMusicVolumeDraft(null);
       applyMusicGain(next);
@@ -1701,7 +2156,7 @@ export function ReelEditor({
 
   useEffect(() => {
     applyMusicGain(backgroundMusic);
-  }, [backgroundMusic]);
+  }, [backgroundMusic, previewOutputTime]);
 
   useEffect(() => {
     let cancelled = false;
@@ -1716,6 +2171,38 @@ export function ReelEditor({
       cancelled = true;
     };
   }, [projectId]);
+
+  useEffect(() => {
+    let cancelled = false;
+    getProjectWaveform(projectId, 'video')
+      .then((data) => {
+        if (!cancelled) setVideoPeaks(data.peaks);
+      })
+      .catch(() => {
+        if (!cancelled) setVideoPeaks([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [projectId]);
+
+  useEffect(() => {
+    if (!backgroundMusic?.music_filename) {
+      setMusicPeaks([]);
+      return;
+    }
+    let cancelled = false;
+    getProjectWaveform(projectId, 'music')
+      .then((data) => {
+        if (!cancelled) setMusicPeaks(data.peaks);
+      })
+      .catch(() => {
+        if (!cancelled) setMusicPeaks([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [projectId, backgroundMusic?.music_filename]);
 
   useEffect(() => {
     const videos = [videoARef.current, videoBRef.current].filter(
@@ -1743,9 +2230,12 @@ export function ReelEditor({
         video.currentTime,
       );
       setPreviewOutputTime(Math.max(0, outputNow));
-      if (usesSeparateAudio()) syncAudioToVideo(video.currentTime);
+      applyPreviewGain();
+      if (!xfadeRef.current && usesSeparateAudio()) syncAudioToVideo(video.currentTime);
       syncMusicToOutput(outputNow);
-      if (video.currentTime >= current.source_end_seconds - 0.04) {
+      if (xfadeRef.current) {
+        if (video.currentTime >= current.source_end_seconds - 0.04) completeXfade();
+      } else if (video.currentTime >= current.source_end_seconds - 0.04) {
         advanceToNextCut();
       } else if (current.source_end_seconds - video.currentTime < 0.8) {
         prefetchStandby();
@@ -1796,9 +2286,22 @@ export function ReelEditor({
     [activeReel],
   );
   orderedSegmentsRef.current = orderedSegments;
+  editingSegmentIdRef.current = editingSegmentId;
+  audioOffsetMsRef.current = audioOffsetMs;
   const outputClock = useMemo(() => buildOutputClock(orderedSegments), [orderedSegments]);
   const selectedOverlay =
     overlays.find((item) => item.id === selectedOverlayId) ?? null;
+  const audioOverlay =
+    selectedOverlay?.kind === 'audio'
+      ? selectedOverlay
+      : overlays.find((item) => {
+          if (item.kind !== 'audio') return false;
+          const start = item.start_ms / 1000;
+          return (
+            previewOutputTime >= start &&
+            previewOutputTime < start + Math.max(0.2, item.duration_ms / 1000)
+          );
+        }) ?? null;
   const previewIdentity = previewTimelineIdentity(activeReel?.id, orderedSegments);
 
   useEffect(() => {
@@ -1881,8 +2384,6 @@ export function ReelEditor({
     } else if (previewingRef.current) {
       scheduleCutAdvance();
     }
-    setPreviewMode((mode) => (mode === 'assembled' ? 'logical' : mode));
-    setAssembledPreviewSrc((src) => (src ? null : src));
   }, [previewIdentity]); // eslint-disable-line react-hooks/exhaustive-deps -- keep playhead on trim; only reset when the Reel changes
 
   useEffect(() => {
@@ -1892,16 +2393,18 @@ export function ReelEditor({
   }, [projectId]);
 
   useEffect(() => {
+    void listAnalysisCandidates(projectId)
+      .then((response) => setAnalysisCandidates(response.items))
+      .catch(() => setAnalysisCandidates([]));
+  }, [projectId, refreshToken]);
+
+  useEffect(() => {
     if (!activeReel?.id) {
       setOverlays([]);
       setSelectedOverlayId(null);
-      setAssembledPreviewSrc(null);
-      setPreviewMode('logical');
       return;
     }
     void reloadOverlays(activeReel.id);
-    setAssembledPreviewSrc(null);
-    setPreviewMode('logical');
     // eslint-disable-next-line react-hooks/exhaustive-deps -- reload when reel id changes
   }, [activeReel?.id, projectId]);
 
@@ -1950,12 +2453,28 @@ export function ReelEditor({
     : -1;
   const selectedClipPlacement =
     selectedClipIndex >= 0 ? outputClock.placements[selectedClipIndex] : undefined;
-  const selectedClipCaptionBaseline = selectedSegment
-    ? fragmentCaptionBaseline(selectedSegment, timedTranscript)
-    : '';
-  const selectedClipCaptionDraft = selectedSegment
-    ? (transcriptDrafts[selectedSegment.id] ?? selectedClipCaptionBaseline)
-    : '';
+  const playingSegment = orderedSegments[previewIndex] ?? selectedSegment;
+  const playingPlacement = outputClock.placements[previewIndex] ?? selectedClipPlacement;
+  const previewAudioOffsetMs =
+    playingSegment?.id === selectedSegment?.id
+      ? audioOffsetMs
+      : (playingSegment?.audio_offset_ms ?? 0);
+  clipEnvelopeRef.current = {
+    keys: playingSegment?.volume_keyframes,
+    outputStart: playingPlacement?.outputStart ?? 0,
+  };
+  const voiceHeard = previewMuted
+    ? 0
+    : interpolateGain(
+        playingSegment?.volume_keyframes,
+        Math.max(0, (previewOutputTime - (playingPlacement?.outputStart ?? 0)) * 1000),
+      );
+  const musicHeard = previewMuted
+    ? 0
+    : audioOverlay
+      ? audioOverlay.opacity
+      : (backgroundMusic?.volume ?? 0) *
+        interpolateGain(backgroundMusic?.volume_keyframes, previewOutputTime * 1000);
 
   const captionLabels = useMemo(() => {
     const labels: Record<string, string> = {};
@@ -1966,18 +2485,15 @@ export function ReelEditor({
     return labels;
   }, [orderedSegments, timedTranscript, transcriptDrafts]);
 
-  function selectTimelineSegment(segmentId: string, track: TimelineTrackKind) {
+  function selectTimelineSegment(segmentId: string, _track: TimelineTrackKind) {
     setEditingSegmentId(segmentId);
     setSelectedOverlayId(null);
     setSelectedGapKey(null);
-    if (track === 'captions') setActiveTool('subtitles');
-    else if (track === 'video') setActiveTool('cuts');
   }
 
   function selectTimelineOverlay(overlayId: string) {
     setSelectedOverlayId(overlayId);
     setSelectedGapKey(null);
-    setActiveTool('cuts');
   }
 
   const selectedGap = selectedGapKey
@@ -2025,31 +2541,10 @@ export function ReelEditor({
     if (gap) {
       setSelectedGapKey(`${gap.beforeSegmentId}|${gap.afterSegmentId}`);
       setSelectedOverlayId(null);
-      setActiveTool('cuts');
     }
   }
 
   function togglePlayFromTransport() {
-    if (previewMode === 'assembled') {
-      const video = assembledVideoRef.current;
-      if (!video) return;
-      if (previewing) {
-        video.pause();
-        previewingRef.current = false;
-        setPreviewing(false);
-      } else {
-        previewingRef.current = true;
-        setPreviewing(true);
-        void video.play().catch((err: unknown) => {
-          previewingRef.current = false;
-          setPreviewing(false);
-          setError(
-            err instanceof Error ? err.message : 'El navegador bloqueó la reproducción',
-          );
-        });
-      }
-      return;
-    }
     if (previewing) stopPreview();
     else startPreview();
   }
@@ -2074,11 +2569,10 @@ export function ReelEditor({
   useEffect(() => {
     if (!activeReel) return;
     function onKey(event: KeyboardEvent) {
-      const target = event.target as HTMLElement | null;
-      if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) {
-        return;
-      }
+      if (event.metaKey || event.ctrlKey || event.altKey) return;
+      if (!isReelEditorHotkeysActive() || !isNleHotkeyTarget(event.target)) return;
       const key = event.key.toLowerCase();
+      if (event.repeat && (key === 'c' || key === 'u' || key === 'i' || key === 'o')) return;
       if (event.code === 'Space' || key === 'k') {
         event.preventDefault();
         togglePlayFromTransport();
@@ -2102,6 +2596,41 @@ export function ReelEditor({
       if (key === 'o') {
         event.preventDefault();
         markOutPoint();
+        return;
+      }
+      if (key === 'c') {
+        event.preventDefault();
+        void splitAtPlayhead();
+        return;
+      }
+      if (key === 'u') {
+        event.preventDefault();
+        const ordered = orderedSegmentsRef.current;
+        const output = previewOutputTimeRef.current;
+        const clock = buildOutputClock(ordered);
+        let joinId: string | null = null;
+        for (let index = 0; index < ordered.length - 1; index += 1) {
+          const placement = clock.placements[index];
+          const next = clock.placements[index + 1];
+          if (!placement || !next) continue;
+          const visualEnd = placement.outputStart + placement.contentDuration;
+          if (
+            Math.abs(output - next.outputStart) <= 0.75 ||
+            Math.abs(output - visualEnd) <= 0.75
+          ) {
+            if (
+              canJoinSourceWindows(
+                ordered[index].source_end_seconds,
+                ordered[index + 1].source_start_seconds,
+              )
+            ) {
+              joinId = ordered[index].id;
+              break;
+            }
+          }
+        }
+        if (joinId) void joinAtCut(joinId);
+        else setError('Unir (U) solo funciona en el corte que partiste tú. Coloca el cursor en esa unión.');
       }
     }
     window.addEventListener('keydown', onKey);
@@ -2231,51 +2760,52 @@ export function ReelEditor({
 
       {activeReel && (
         <>
+          {(() => {
+            const reelBar = (
+              <div className={`reel-nle__reel-bar${chromeSlot ? ' reel-nle__reel-bar--chrome' : ''}`}>
+                <div className="reel-nle__reel-title">
+                  <strong>
+                    {reels.findIndex((reel) => reel.id === activeReel.id) + 1}. {activeReel.title}
+                  </strong>
+                </div>
+                <div className="reel-nle__reel-actions">
+                  {reels.length > 1 && (
+                    <label className="reel-nle__reel-picker">
+                      <span className="visually-hidden">Cambiar Reel</span>
+                      <select
+                        aria-label="Reel en edición"
+                        value={activeReel.id}
+                        onChange={(event) => {
+                          const reel = reels.find((item) => item.id === event.target.value);
+                          if (!reel) return;
+                          stopPreview();
+                          setEditingSegmentId(null);
+                          setActiveReelId(reel.id);
+                          setAspect(reel.aspect_ratio);
+                        }}
+                      >
+                        {reels.map((reel, index) => (
+                          <option key={reel.id} value={reel.id}>
+                            {index + 1}. {reel.title}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  )}
+                  <button
+                    type="button"
+                    className="button button--inline button--danger"
+                    onClick={() => setConfirmDeleteReel(true)}
+                    disabled={busy}
+                  >
+                    Eliminar
+                  </button>
+                </div>
+              </div>
+            );
+            return chromeSlot ? createPortal(reelBar, chromeSlot) : reelBar;
+          })()}
           <div className="reel-nle__top">
-            <div className="reel-nle__reel-bar">
-              <div className="reel-nle__reel-title">
-                <strong>
-                  {reels.findIndex((reel) => reel.id === activeReel.id) + 1}. {activeReel.title}
-                </strong>
-                <span className={`badge badge--${activeReel.status}`}>{activeReel.status}</span>
-                <span className="muted">
-                  {formatDuration(activeReel.content_duration_seconds)} · {activeReel.aspect_ratio}
-                </span>
-              </div>
-              <div className="reel-nle__reel-actions">
-                {reels.length > 1 && (
-                  <label className="reel-nle__reel-picker">
-                    <span className="visually-hidden">Cambiar Reel</span>
-                    <select
-                      aria-label="Reel en edición"
-                      value={activeReel.id}
-                      onChange={(event) => {
-                        const reel = reels.find((item) => item.id === event.target.value);
-                        if (!reel) return;
-                        stopPreview();
-                        setEditingSegmentId(null);
-                        setActiveReelId(reel.id);
-                        setAspect(reel.aspect_ratio);
-                      }}
-                    >
-                      {reels.map((reel, index) => (
-                        <option key={reel.id} value={reel.id}>
-                          {index + 1}. {reel.title}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                )}
-                <button
-                  type="button"
-                  className="button button--inline button--danger"
-                  onClick={() => setConfirmDeleteReel(true)}
-                  disabled={busy}
-                >
-                  Eliminar
-                </button>
-              </div>
-            </div>
             <nav className="reel-nle__tools" aria-label="Herramientas del editor">
               <div className="reel-nle__tools-track" role="tablist">
                 {REEL_TOOLS.map((tool) => {
@@ -2294,6 +2824,7 @@ export function ReelEditor({
                     }`}
                     onClick={() => {
                       setActiveTool(tool.id);
+                      openInspectorExclusive();
                     }}
                   >
                     <Icon size={14} strokeWidth={2} aria-hidden />
@@ -2306,17 +2837,17 @@ export function ReelEditor({
             {error && <p className="error editor-sticky-notice">{error}</p>}
           </div>
 
-          <div className={`reel-nle__main reel-nle__main--${activeTool}`}>
+          <div ref={nleMainRef} className={`reel-nle__main reel-nle__main--${activeTool}`}>
             <div
               className={`reel-nle__workspace${binCollapsed ? ' reel-nle__workspace--bin-collapsed' : ''}${
                 inspectorCollapsed ? ' reel-nle__workspace--inspector-collapsed' : ''
               }${layout.inspectorWide && !inspectorCollapsed ? ' reel-nle__workspace--inspector-wide' : ''}`}
               style={{
-                ['--nle-bin' as string]: binCollapsed ? 'auto' : `${layout.binPx}px`,
+                ['--nle-bin' as string]: binCollapsed ? '2.4rem' : `${layout.binPx}px`,
                 ['--nle-inspector' as string]: inspectorCollapsed
-                  ? '2.15rem'
+                  ? '2.4rem'
                   : layout.inspectorWide
-                    ? 'minmax(420px, 44%)'
+                    ? `${Math.min(layout.inspectorPx + 60, 420)}px`
                     : `${layout.inspectorPx}px`,
               }}
             >
@@ -2325,8 +2856,16 @@ export function ReelEditor({
                 assets={assets}
                 onAssetsChange={setAssets}
                 onAddTextAtPlayhead={() => void handleAddTextOverlay(previewOutputTime)}
+                onAddAtPlayhead={(assetId) => void handleDropAsset(assetId, previewOutputTime)}
                 collapsed={binCollapsed}
-                onCollapsedChange={setBinCollapsed}
+                onCollapsedChange={setBinCollapsedExclusive}
+                analysisCandidates={analysisCandidates.map((candidate) =>
+                  addedCandidateIds.includes(candidate.id)
+                    ? { ...candidate, status: 'accepted' }
+                    : candidate,
+                )}
+                onAddCandidate={(candidate) => void handleAddAnalysisCandidate(candidate)}
+                candidatesBusy={busy}
               />
               <NleSplitter
                 label="Ancho del baúl"
@@ -2360,28 +2899,40 @@ export function ReelEditor({
                   activeProgramLane={programLane}
                   audioRef={audioRef}
                   musicRef={musicRef}
-                  assembledSrc={assembledPreviewSrc}
-                  previewMode={previewMode}
+                  assembledSrc={null}
+                  previewMode="logical"
                   overlays={overlays}
                   outputTime={previewOutputTime}
                   previewing={previewing}
+                  previewMuted={previewMuted}
                   musicFilename={backgroundMusic?.music_filename ?? null}
                   musicActive={musicPreviewActive()}
                   selectedOverlayId={selectedOverlayId}
                   framingMode={activeReel.framing_mode}
-                  cropX={selectedSegment?.manual_crop_x}
-                  cropY={selectedSegment?.manual_crop_y}
+                  cropX={playingSegment?.manual_crop_x}
+                  cropY={playingSegment?.manual_crop_y}
                   onSelectOverlay={selectTimelineOverlay}
                   onMoveOverlay={(overlayId, x, y) => {
                     const overlay = overlays.find((item) => item.id === overlayId);
                     if (overlay) void handleOverlayField(overlay, { x, y });
                   }}
-                  onAssembledTime={(seconds) => {
-                    if (previewMode !== 'assembled' || scrubbingRef.current) return;
-                    setPreviewOutputTime(seconds);
-                    syncMusicToOutput(seconds);
+                  onScaleOverlay={(overlayId, scale) => {
+                    const overlay = overlays.find((item) => item.id === overlayId);
+                    if (overlay) void handleOverlayField(overlay, { scale });
                   }}
-                  separateAudio={Math.abs(audioOffsetMs) >= 1}
+                  onAssembledTime={() => undefined}
+                  separateAudio={Math.abs(previewAudioOffsetMs) >= 1}
+                  xfade={xfadeUi}
+                  incomingCropX={
+                    xfadeUi
+                      ? orderedSegments[previewIndex + 1]?.manual_crop_x
+                      : null
+                  }
+                  incomingCropY={
+                    xfadeUi
+                      ? orderedSegments[previewIndex + 1]?.manual_crop_y
+                      : null
+                  }
                 />
                 </div>
               ) : (
@@ -2399,16 +2950,13 @@ export function ReelEditor({
                   totalDuration={outputClock.totalDuration}
                   previewing={previewing}
                   previewMuted={previewMuted}
-                  assembledBusy={assembledBusy}
-                  previewMode={previewMode}
-                  voiceVolume={previewVolume}
-                  musicVolume={musicVolumeDraft ?? backgroundMusic?.volume ?? 0}
-                  musicVolumeSaving={musicVolumeSaving}
-                  musicSliderDisabled={
-                    !backgroundMusic?.music_filename ||
-                    backgroundMusic.preset === 'none' ||
-                    !backgroundMusic.enabled
+                  voiceVolume={voiceHeard}
+                  musicVolume={
+                    musicVolumeDraft ??
+                    (audioOverlay ? audioOverlay.opacity : musicHeard)
                   }
+                  musicVolumeSaving={musicVolumeSaving}
+                  musicSliderDisabled={!audioOverlay && !backgroundMusic?.music_filename}
                   dualMonitors={layout.dualMonitors}
                   onTogglePlay={togglePlayFromTransport}
                   onSeek={seekPreview}
@@ -2418,13 +2966,17 @@ export function ReelEditor({
                   onVoiceVolume={changePreviewVolume}
                   onMusicVolume={changeMusicVolume}
                   onMusicVolumeCommit={(value) => {
+                    if (audioOverlay) {
+                      void handleOverlayField(audioOverlay, { opacity: value });
+                      setMusicVolumeDraft(null);
+                      return;
+                    }
                     if (musicVolumeSaveTimerRef.current != null) {
                       window.clearTimeout(musicVolumeSaveTimerRef.current);
                       musicVolumeSaveTimerRef.current = null;
                     }
                     void savePreviewMusicVolume(value);
                   }}
-                  onPreviewMode={(mode) => void switchPreviewMode(mode)}
                   onDualMonitors={(enabled) => patchLayout({ dualMonitors: enabled })}
                 />
               )}
@@ -2441,15 +2993,16 @@ export function ReelEditor({
                 type="button"
                 className="reel-nle__inspector-toggle"
                 aria-expanded={!inspectorCollapsed}
-                onClick={() => setInspectorCollapsed((current) => !current)}
+                aria-label={inspectorCollapsed ? 'Mostrar ajustes' : 'Ocultar ajustes'}
+                onClick={toggleInspectorExclusive}
               >
-                {inspectorCollapsed ? '▸' : '▾'} Inspector
+                {inspectorCollapsed ? '▸' : '▾'} Ajustes
               </button>
               {!inspectorCollapsed && (
                 <button
                   type="button"
                   className={`reel-nle__inspector-wide${layout.inspectorWide ? ' reel-nle__inspector-wide--active' : ''}`}
-                  title="Ampliar inspector (estilo Resolve)"
+                  title="Ampliar panel de ajustes"
                   aria-pressed={layout.inspectorWide}
                   onClick={() => patchLayout({ inspectorWide: !layout.inspectorWide })}
                 >
@@ -2466,18 +3019,16 @@ export function ReelEditor({
               >
                 <div className="reel-nle__inspector-section reel-nle__cuts-workspace">
                   <div className="reel-nle__cuts-toolbar">
-                    <h3 className="reel-nle__cuts-title">Edición de cortes</h3>
+                    <h3 className="reel-nle__cuts-title">Ajuste de cortes</h3>
                     <div className="button-stack">
                       <button
                         type="button"
                         className="button button--secondary"
-                        onClick={() => openAddFragmentForm()}
+                        aria-pressed={showAddFragment}
+                        onClick={() => toggleAddFragmentForm()}
                         disabled={busy}
                       >
-                        Añadir fragmento
-                      </button>
-                      <button type="button" onClick={() => void handleSaveTitle()} disabled={busy}>
-                        Metadatos
+                        {showAddFragment ? 'Ocultar fragmento' : 'Añadir fragmento'}
                       </button>
                     </div>
                   </div>
@@ -2532,37 +3083,15 @@ export function ReelEditor({
                       outputDuration={
                         selectedClipPlacement?.contentDuration ?? selectedSegment.duration_seconds
                       }
-                      captionDraft={selectedClipCaptionDraft}
-                      captionBaseline={selectedClipCaptionBaseline}
-                      captionSaving={transcriptSavingId === selectedSegment.id}
                       busy={busy}
                       cutSuggestions={cutReport?.suggestions ?? []}
                       cutBusy={cutBusy}
                       onMove={(direction) => void moveSegment(selectedSegment.id, direction)}
                       onRemove={() => void handleRemoveSegment(selectedSegment.id)}
-                      onCaptionChange={(value) =>
-                        setTranscriptDrafts((current) => ({
-                          ...current,
-                          [selectedSegment.id]: value,
-                        }))
-                      }
-                      onCaptionCommit={(value) => void saveFragmentCaption(selectedSegment, value)}
-                      onSaveCaption={() => void saveFragmentCaption(selectedSegment)}
-                      onClearCaption={() => void clearFragmentCaption(selectedSegment)}
-                      onOpenSubtitleStyle={() => setActiveTool('subtitles')}
                       onAdjustEdge={(edge, delta) => void adjustEdge(selectedSegment, edge, delta)}
                       onField={(patch) => void handleSegmentField(selectedSegment, patch)}
                       onAcceptCut={(suggestion) => void handleAcceptCut(suggestion)}
                       onRejectCut={(suggestion) => void handleRejectCut(suggestion)}
-                    />
-                  )}
-
-                  {selectedOverlay && (
-                    <OverlayInspector
-                      overlay={selectedOverlay}
-                      busy={busy}
-                      onChange={(patch) => void handleOverlayField(selectedOverlay, patch)}
-                      onDelete={() => void handleDeleteOverlay(selectedOverlay.id)}
                     />
                   )}
 
@@ -2680,6 +3209,38 @@ export function ReelEditor({
               </div>
 
               <div
+                id="reel-tool-panel-transitions"
+                role="tabpanel"
+                aria-labelledby="reel-tool-tab-transitions"
+                hidden={activeTool !== 'transitions'}
+              >
+                <div className="reel-editor__section-header">
+                  <h4>Transiciones</h4>
+                </div>
+                <p className="muted">
+                  Arrastra un efecto y suéltalo en el diamante entre dos clips.
+                </p>
+                <div className="reel-nle__fx-tray reel-nle__fx-tray--panel" aria-label="Transiciones">
+                  {TRANSITION_OPTIONS.filter((option) => option.value !== 'hard_cut').map((option) => (
+                    <button
+                      key={option.value}
+                      type="button"
+                      className="reel-nle__fx-chip"
+                      draggable
+                      title={`Arrastra «${option.label}» entre dos clips`}
+                      onDragStart={(event) => {
+                        event.dataTransfer.effectAllowed = 'copy';
+                        event.dataTransfer.setData(TRANSITION_MIME, option.value);
+                        event.dataTransfer.setData('text/plain', option.value);
+                      }}
+                    >
+                      {option.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div
                 id="reel-tool-panel-subtitles"
                 role="tabpanel"
                 aria-labelledby="reel-tool-tab-subtitles"
@@ -2693,7 +3254,7 @@ export function ReelEditor({
                   onReelUpdated={replaceReel}
                   hideStagePreview
                   mountPreviewOverlay={activeTool === 'subtitles'}
-                  interactivePreview={activeTool === 'subtitles' && previewMode === 'logical'}
+                  interactivePreview={activeTool === 'subtitles'}
                 />
               </div>
 
@@ -2706,7 +3267,7 @@ export function ReelEditor({
                 <div className="reel-audio-sync reel-audio-sync--inspector">
                   <div className="reel-audio-sync__header">
                     <label htmlFor={`audio-sync-${activeReel.id}`}>
-                      Sincronía voz:{' '}
+                      Sincronía voz de este corte:{' '}
                       <strong>
                         {audioOffsetMs === 0
                           ? '0 ms'
@@ -2720,7 +3281,9 @@ export function ReelEditor({
                         type="button"
                         className="button button--inline"
                         disabled={
-                          audioOffsetSaving || audioOffsetMs === (activeReel.audio_offset_ms ?? 0)
+                          audioOffsetSaving ||
+                          !selectedSegment ||
+                          audioOffsetMs === (selectedSegment.audio_offset_ms ?? 0)
                         }
                         onClick={() => void saveAudioOffset()}
                       >
@@ -2737,6 +3300,24 @@ export function ReelEditor({
                       >
                         0
                       </button>
+                      <button
+                        type="button"
+                        className="button button--inline"
+                        disabled={
+                          audioOffsetSaving ||
+                          selectedClipIndex <= 0 ||
+                          !orderedSegments[selectedClipIndex - 1]
+                        }
+                        onClick={() => {
+                          const previous = orderedSegments[selectedClipIndex - 1];
+                          if (!previous) return;
+                          const copied = previous.audio_offset_ms ?? 0;
+                          applyAudioOffset(copied);
+                          void saveAudioOffset(copied);
+                        }}
+                      >
+                        Como el anterior
+                      </button>
                     </div>
                   </div>
                   <input
@@ -2746,6 +3327,7 @@ export function ReelEditor({
                     max={1000}
                     step={10}
                     value={audioOffsetMs}
+                    disabled={!selectedSegment}
                     onChange={(event) => applyAudioOffset(Number(event.target.value))}
                     onPointerUp={commitAudioOffsetPreview}
                     onPointerCancel={commitAudioOffsetPreview}
@@ -2753,17 +3335,14 @@ export function ReelEditor({
                     onBlur={commitAudioOffsetPreview}
                   />
                   <p className="muted">
-                    Solo el audio del video; la música de fondo no se desplaza.
+                    Aplica solo al corte seleccionado. «Como el anterior» copia la sincronía del
+                    corte previo. La música importada en Archivos no se desplaza.
                   </p>
                 </div>
-                <BackgroundMusicPanel
-                  projectId={projectId}
-                  compact
-                  onSettingsChange={(settings) => {
-                    setBackgroundMusic(settings);
-                    applyMusicGain(settings);
-                  }}
-                />
+                <details className="reel-nle__details" open>
+                  <summary>Analizar y reparar audio</summary>
+                  <AudioRepairPanel projectId={projectId} hasVideo={hasVideo} />
+                </details>
               </div>
 
               <div
@@ -2778,14 +3357,6 @@ export function ReelEditor({
                   hasCover={hasCover}
                   onCoverUpdated={onCoverUpdated}
                 />
-              </div>
-
-              <div
-                id="reel-tool-panel-export"
-                role="tabpanel"
-                aria-labelledby="reel-tool-tab-export"
-                hidden={activeTool !== 'export'}
-              >
                 <RenderPanel
                   projectId={projectId}
                   reelId={activeReel.id}
@@ -2796,6 +3367,41 @@ export function ReelEditor({
                   onGoToCuts={() => setActiveTool('cuts')}
                 />
               </div>
+              {(selectedOverlay ||
+                (selectedSegment && activeTool !== 'cuts' && activeTool !== 'transitions')) && (
+                <div className="reel-nle__selection-dock">
+                  {selectedOverlay ? (
+                    <OverlayInspector
+                      overlay={selectedOverlay}
+                      busy={busy}
+                      compact
+                      onChange={(patch) => void handleOverlayField(selectedOverlay, patch)}
+                      onDelete={() => void handleDeleteOverlay(selectedOverlay.id)}
+                    />
+                  ) : selectedSegment && selectedClipIndex >= 0 ? (
+                    <ClipInspector
+                      compact
+                      segment={selectedSegment}
+                      index={selectedClipIndex}
+                      total={orderedSegments.length}
+                      nextSegment={orderedSegments[selectedClipIndex + 1] ?? null}
+                      outputStart={selectedClipPlacement?.outputStart ?? 0}
+                      outputDuration={
+                        selectedClipPlacement?.contentDuration ?? selectedSegment.duration_seconds
+                      }
+                      busy={busy}
+                      cutSuggestions={[]}
+                      cutBusy={false}
+                      onMove={(direction) => void moveSegment(selectedSegment.id, direction)}
+                      onRemove={() => void handleRemoveSegment(selectedSegment.id)}
+                      onAdjustEdge={(edge, delta) => void adjustEdge(selectedSegment, edge, delta)}
+                      onField={(patch) => void handleSegmentField(selectedSegment, patch)}
+                      onAcceptCut={() => undefined}
+                      onRejectCut={() => undefined}
+                    />
+                  ) : null}
+                </div>
+              )}
               </>
               )}
             </aside>
@@ -2803,10 +3409,20 @@ export function ReelEditor({
             <NleSplitter
               orientation="horizontal"
               label="Alto de la línea temporal"
-              onDrag={(delta) => patchLayout({ timelinePx: layout.timelinePx + delta })}
+              onDrag={(delta) => {
+                const mainH = nleMainRef.current?.clientHeight ?? 720;
+                const max = Math.max(TIMELINE_MIN, Math.min(TIMELINE_MAX, mainH - 180));
+                patchLayout({
+                  timelinePx: Math.min(max, Math.max(TIMELINE_MIN, layout.timelinePx - delta)),
+                });
+              }}
             />
-            <div className="reel-nle__timeline-slot" style={{ flexBasis: `${layout.timelinePx}px` }}>
+            <div
+              className="reel-nle__timeline-slot"
+              style={{ flexBasis: `${layout.timelinePx}px`, height: `${layout.timelinePx}px` }}
+            >
           <ReelTimelineStrip
+            reelId={activeReel.id}
             segments={orderedSegments}
             overlays={overlays}
             totalDuration={outputClock.totalDuration}
@@ -2831,7 +3447,6 @@ export function ReelEditor({
               setSelectedGapKey(key);
               if (key) {
                 setSelectedOverlayId(null);
-                setActiveTool('cuts');
               }
             }}
             onSelectOverlay={selectTimelineOverlay}
@@ -2839,10 +3454,29 @@ export function ReelEditor({
             onReorderSegments={handleReorderSegments}
             onTrimSegment={handleTrimSegment}
             onMoveCaption={handleMoveCaption}
+            onMoveCaptions={handleMoveCaptions}
             onApplyTransition={handleApplyTransition}
             onMoveOverlay={handleMoveOverlay}
-            onDropAsset={(assetId, outputSeconds) => void handleDropAsset(assetId, outputSeconds)}
-            onAddTextOverlay={(outputSeconds) => void handleAddTextOverlay(outputSeconds)}
+            onMoveOverlays={handleMoveOverlays}
+            onDropAsset={(assetId, outputSeconds, lane) =>
+              void handleDropAsset(assetId, outputSeconds, lane)
+            }
+            onAddTextOverlay={(outputSeconds, lane) => void handleAddTextOverlay(outputSeconds, lane)}
+            onSplitAtPlayhead={(output) => void splitAtPlayhead(output)}
+            onJoinAtCut={(segmentId) => void joinAtCut(segmentId)}
+            onDeleteOverlay={(overlayId) => void handleDeleteOverlay(overlayId)}
+            onDeleteSegments={(ids) => void handleRemoveSegments(ids)}
+            onMoveOverlayLane={(overlayId, lane) => {
+              const overlay = overlays.find((item) => item.id === overlayId);
+              if (!overlay) return;
+              void handleOverlayField(overlay, { z_index: lane });
+            }}
+            videoPeaks={videoPeaks}
+            musicPeaks={musicPeaks}
+            sourceDuration={videoDuration ?? 0}
+            onVolumeKeyframes={handleVolumeKeyframes}
+            onMusicVolumeKeyframes={handleMusicVolumeKeyframes}
+            musicKeyframes={backgroundMusic?.volume_keyframes}
           />
             </div>
           </div>

@@ -164,3 +164,30 @@ def test_image_overlay_rejects_missing_asset(
     )
     assert response.status_code == 400
     assert response.json()["code"] == "asset_required"
+
+
+def test_video_overlay_from_sermon_source_window(
+    client: TestClient, db_session_factory: sessionmaker
+) -> None:
+    project_id = _create_project(client, db_session_factory)
+    reel_id = _create_reel(client, project_id)
+    created = client.post(
+        f"/api/projects/{project_id}/reels/{reel_id}/overlays",
+        json={
+            "kind": "video",
+            "start_ms": 2000,
+            "duration_ms": 4000,
+            "x": 0.5,
+            "y": 0.5,
+            "scale": 1,
+            "z_index": 1,
+            "style_json": '{"source_start_seconds": 10.0, "source_end_seconds": 14.0}',
+        },
+    )
+    assert created.status_code == 201, created.text
+    body = created.json()
+    assert body["asset_id"] is None
+    assert body["kind"] == "video"
+    assert body["duration_ms"] == 4000
+    assert body["z_index"] == 1
+    assert "source_start_seconds" in body["style_json"]

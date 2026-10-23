@@ -37,6 +37,11 @@ class TransitionType(enum.StrEnum):
     dip_to_black = "dip_to_black"
     fade = "fade"
     flash = "flash"
+    light_change = "light_change"
+    wipe_down = "wipe_down"
+    wipe_left = "wipe_left"
+    slide_down = "slide_down"
+    dissolve = "dissolve"
 
 
 class SubtitleStyle(enum.StrEnum):
@@ -128,6 +133,9 @@ class Reel(Base):
     subtitle_opacity: Mapped[float] = mapped_column(Float, nullable=False, default=1.0)
     subtitle_margin_bottom: Mapped[int] = mapped_column(Integer, nullable=False, default=120)
     subtitle_bible_reference: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    subtitle_font_family: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    subtitle_x: Mapped[float | None] = mapped_column(Float, nullable=True)
+    subtitle_y: Mapped[float | None] = mapped_column(Float, nullable=True)
 
     aspect_ratio: Mapped[AspectRatio] = mapped_column(
         Enum(AspectRatio, name="aspect_ratio", native_enum=False, length=16),
@@ -212,5 +220,8 @@ class ReelSegment(Base):
     # Independent subtitle window on the output clock (ms). None = follow the video clip.
     caption_in_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
     caption_out_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    volume_keyframes_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Per-cut voice sync: positive delays audio, negative advances it.
+    audio_offset_ms: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
 
     reel: Mapped[Reel] = relationship(back_populates="segments")

@@ -22,6 +22,32 @@ def test_preview_audio_uses_cached_extract_from_current_video(
     assert result == cached
 
 
+def test_preview_audio_temp_file_keeps_m4a_suffix(tmp_path: Path, monkeypatch: object) -> None:
+    monkeypatch.setattr(paths, "PROJECTS_DIR", tmp_path)
+    project_id = uuid4()
+    project_dir = tmp_path / str(project_id)
+    project_dir.mkdir()
+    (project_dir / "video.mp4").write_bytes(b"video")
+    destinations: list[Path] = []
+
+    def fake_extract(
+        _ffmpeg: str, _source: Path, destination: Path, _log: Path, *, copy: bool  # noqa: ARG001
+    ) -> None:
+        destinations.append(destination)
+        destination.write_bytes(b"\x00" * 2048)
+
+    with (
+        patch("app.services.media_audio.locate_ffmpeg", return_value="ffmpeg"),
+        patch("app.services.media_audio._extract", side_effect=fake_extract),
+    ):
+        result = preview_audio_path(project_id, "video.mp4")
+
+    assert result.suffix == ".m4a"
+    assert destinations[0].suffix == ".m4a"
+    assert destinations[0].name.endswith(".m4a")
+    assert not destinations[0].name.startswith(".")
+
+
 def test_preview_audio_ignores_repair_wavs(tmp_path: Path, monkeypatch: object) -> None:
     monkeypatch.setattr(paths, "PROJECTS_DIR", tmp_path)
     project_id = uuid4()
