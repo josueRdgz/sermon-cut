@@ -1511,8 +1511,21 @@ a:hover {
   inset: 0;
 }
 
-.reel-player__stage .reel-player__video[hidden] {
-  display: none !important;
+.reel-player__stage .reel-player__video--idle {
+  visibility: hidden;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.reel-player__preview-audio {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: 0;
+  overflow: hidden;
+  opacity: 0;
+  pointer-events: none;
 }
 
 .reel-player__stage[data-xfade] .reel-player__video--out {

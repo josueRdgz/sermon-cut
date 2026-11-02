@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.4.15] — 2026-11-02
+
+### Fixed
+
+- El preview de un proyecto existente quedaba mudo: con desfase de audio el
+  video iba silenciado y el `<audio>` separado no se reanudaba. El tick ya no
+  adelanta cortes antes del seek, el audio se relanza si se pausa, y los
+  elementos de media del preview no usan `hidden` / `display: none`.
+
 ## [0.4.14] — 2026-11-02
 
 ### Changed

@@ -76,7 +76,7 @@ import {
   resolvePreviewSeek,
   type PreviewSeekTarget,
 } from '../utils/reelPreview';
-import { DEFAULT_VOICE_CENTER, VoiceCenterGraph, clampVoiceCenter } from '../utils/voiceCenter';
+import { DEFAULT_VOICE_CENTER, getVoiceCenterGraph, clampVoiceCenter } from '../utils/voiceCenter';
 
 function overlappingTranscriptSegments(
   segments: TranscriptSegment[],
@@ -327,7 +327,7 @@ export function ReelEditor({
   const overlayPersistTimerRef = useRef<number | null>(null);
   const voiceCenterTimerRef = useRef<number | null>(null);
   const voiceCenterRef = useRef(DEFAULT_VOICE_CENTER);
-  const voiceCenterGraphRef = useRef<VoiceCenterGraph | null>(null);
+  const voiceCenterGraphRef = useRef(getVoiceCenterGraph());
   const pendingSegmentWorkRef = useRef<(() => Promise<void>) | null>(null);
   const pendingOverlayWorkRef = useRef<(() => Promise<void>) | null>(null);
   const assembledVideoRef = useRef<HTMLVideoElement>(null);
@@ -1567,13 +1567,22 @@ export function ReelEditor({
       }
     }
     applyMusicGain();
-    if (!voiceCenterGraphRef.current) {
-      voiceCenterGraphRef.current = new VoiceCenterGraph();
-    }
-    const graph = voiceCenterGraphRef.current;
+    const graph = getVoiceCenterGraph();
+    voiceCenterGraphRef.current = graph;
     graph.setAmount(voiceCenterRef.current);
     if (voiceCenterRef.current >= 0.01 || graph.attached) {
       graph.attach([videoARef.current, videoBRef.current, audioRef.current]);
+    }
+  }
+
+  function ensureSeparateAudioPlaying() {
+    if (!previewingRef.current || scrubbingRef.current || inPadRef.current || xfadeRef.current) {
+      return;
+    }
+    const audio = audioRef.current;
+    if (!separateAudioReady() || !audio || previewMutedRef.current) return;
+    if (audio.paused) {
+      void audio.play().catch(() => undefined);
     }
   }
 
@@ -1630,11 +1639,11 @@ export function ReelEditor({
             audioTimeForVideo(incoming.currentTime, audioOffsetRef.current),
             true,
           );
-          void audio.play().catch(() => undefined);
         }
       }
     }
     applyPreviewGain();
+    ensureSeparateAudioPlaying();
     scheduleCutAdvance();
     prefetchStandby();
   }
@@ -1680,6 +1689,7 @@ export function ReelEditor({
     const current = ordered[index];
     if (!video || !current) return;
     applyPreviewGain();
+    ensureSeparateAudioPlaying();
     const next = ordered[index + 1];
     const overlap = buildOutputClock(ordered).placements[index]?.overlapSeconds ?? 0;
     const remaining = current.source_end_seconds - video.currentTime;
@@ -1927,6 +1937,8 @@ export function ReelEditor({
       pendingVideoTimeRef.current = null;
       jumpingRef.current = false;
       setSourceTime(sourceTimeSeconds);
+      applyPreviewGain();
+      ensureSeparateAudioPlaying();
       scheduleCutAdvance();
       prefetchStandby();
       await finishMusic();
@@ -1942,13 +1954,10 @@ export function ReelEditor({
     setSourceTime(sourceTimeSeconds);
     applyPreviewGain();
     try {
-      if (video.paused) {
-        if (separateAudioReady() && audio) {
-          await Promise.all([video.play(), audio.play()]);
-        } else {
-          await video.play();
-        }
-      }
+      const plays: Promise<unknown>[] = [];
+      if (video.paused) plays.push(video.play());
+      if (separateAudioReady() && audio && audio.paused) plays.push(audio.play());
+      if (plays.length) await Promise.all(plays);
     } catch (err: unknown) {
       if (token !== jumpTokenRef.current) return;
       stopPreview();
@@ -2151,9 +2160,9 @@ export function ReelEditor({
     // Prefer a single element (locked A/V). Separate audio only when the user
     // requested an explicit offset — dual seekers break hard cuts in WKWebView.
     applyPreviewGain();
+    getVoiceCenterGraph().resume();
     previewingRef.current = true;
     setPreviewing(true);
-    ensurePreviewTick();
     if (target.inPad) {
       inPadRef.current = true;
       setPreviewInPad(true);
@@ -2162,10 +2171,15 @@ export function ReelEditor({
       standbyVideo()?.pause();
       audio?.pause();
       void playMusicForOutput(target.outputTime);
+      ensurePreviewTick();
       return;
     }
+    jumpingRef.current = true;
     inPadRef.current = false;
     setPreviewInPad(false);
+    if (separateAudioReady() && audio && audio.paused && !previewMuted) {
+      void audio.play().catch(() => undefined);
+    }
     const waitForMetadata = (media: HTMLMediaElement) => {
       if (media.error) {
         return Promise.reject(new Error('No se pudo cargar el medio para el preview'));
@@ -2190,7 +2204,10 @@ export function ReelEditor({
         : waitForMetadata(video);
     void mediaReady
       .then(async () => {
-        if (!previewingRef.current || scrubbingRef.current) return;
+        if (!previewingRef.current || scrubbingRef.current) {
+          jumpingRef.current = false;
+          return;
+        }
         await jumpPreviewToSource(target.sourceTime, true);
       })
       .catch(async (err: unknown) => {
@@ -2198,6 +2215,7 @@ export function ReelEditor({
           await jumpPreviewToSource(target.sourceTime, true);
           return;
         }
+        jumpingRef.current = false;
         previewingRef.current = false;
         setPreviewing(false);
         video.pause();

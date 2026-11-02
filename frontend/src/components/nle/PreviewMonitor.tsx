@@ -100,9 +100,10 @@ export function PreviewMonitor({
     inPad || previewMode === 'assembled' || (!xfade && activeProgramLane !== lane);
   const laneClass = (lane: 0 | 1) => {
     const role = xfade ? (xfade.outLane === lane ? 'out' : 'in') : null;
+    const idle = hideLane(lane) ? ' reel-player__video--idle' : '';
     return `reel-player__video reel-player__video--${videoFit}${
       role ? ` reel-player__video--${role}` : ''
-    }`;
+    }${idle}`;
   };
 
   return (
@@ -127,7 +128,6 @@ export function PreviewMonitor({
             playsInline
             preload="auto"
             src={videoSrc}
-            hidden={hideLane(0)}
           >
             Tu navegador no soporta video HTML5.
           </video>
@@ -140,7 +140,6 @@ export function PreviewMonitor({
             playsInline
             preload="auto"
             src={videoSrc}
-            hidden={hideLane(1)}
           />
           {assembledSrc && (
             <video
@@ -178,13 +177,19 @@ export function PreviewMonitor({
           <div id="reel-subtitle-overlay" className="reel-player__subtitle-slot" />
         </div>
       </div>
-      <audio ref={audioRef} preload="auto" src={audioSrc} hidden aria-hidden="true" />
+      <audio
+        ref={audioRef}
+        className="reel-player__preview-audio"
+        preload="auto"
+        src={audioSrc}
+        aria-hidden="true"
+      />
       {musicActive && musicFilename && (
         <audio
           ref={musicRef}
+          className="reel-player__preview-audio"
           preload="auto"
           src={backgroundMusicAudioUrl(projectId, musicFilename)}
-          hidden
           aria-hidden="true"
         />
       )}

@@ -24,6 +24,14 @@ interface VoiceCenterTap {
   mixRight: GainNode;
 }
 
+let sharedGraph: VoiceCenterGraph | null = null;
+
+/** One graph for the editor lifetime so remounts do not recapture media elements. */
+export function getVoiceCenterGraph(): VoiceCenterGraph {
+  if (!sharedGraph) sharedGraph = new VoiceCenterGraph();
+  return sharedGraph;
+}
+
 /**
  * Routes sermon media through a stereo mix so a right-channel voice sits
  * closer to the center. ``element.volume`` / ``muted`` still apply.
@@ -42,13 +50,21 @@ export class VoiceCenterGraph {
     this.applyGains();
   }
 
+  resume() {
+    const ctx = this.context;
+    if (ctx && ctx.state === 'suspended') {
+      void ctx.resume().catch(() => undefined);
+    }
+  }
+
   attach(elements: Array<HTMLMediaElement | null | undefined>) {
     const live = elements.filter((item): item is HTMLMediaElement => Boolean(item));
     if (live.length === 0) return;
     const ctx = this.ensureContext();
     if (!ctx) return;
-    if (ctx.state === 'suspended') {
-      void ctx.resume().catch(() => undefined);
+    this.resume();
+    for (const [element] of this.taps) {
+      if (!element.isConnected) this.taps.delete(element);
     }
     for (const element of live) {
       if (this.taps.has(element)) continue;
