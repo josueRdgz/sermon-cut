@@ -19,6 +19,7 @@ from app.models.transcript import Transcript
 from app.schemas.project import ProjectCreate, ProjectResponse, ProjectUpdate
 from app.services import storage
 from app.services.ffprobe import probe_video
+from app.services.media_audio import clear_preview_audio_cache
 from app.services.sermon_range import extract_window, should_trim
 
 _DERIVED_MEDIA_AFTER_TRIM = (
@@ -338,6 +339,7 @@ def _invalidate_pipeline_after_trim(db: Session, project: Project) -> None:
     project_dir = storage.ensure_project_dir(project.id)
     for name in _DERIVED_MEDIA_AFTER_TRIM:
         (project_dir / name).unlink(missing_ok=True)
+    clear_preview_audio_cache(project_dir)
 
     transcript = db.scalars(select(Transcript).where(Transcript.project_id == project.id)).first()
     if transcript is not None:

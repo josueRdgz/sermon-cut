@@ -2,6 +2,8 @@
 
 WKWebView often stays silent on HEVC ``<video>`` and cannot use the same MP4 as
 an ``<audio>`` source. Preview therefore needs a dedicated AAC/WAV file.
+Voice-centering is applied here with FFmpeg: capturing the media element in
+Web Audio mutes WKWebView for the rest of the session.
 """
 
 from __future__ import annotations
@@ -13,13 +15,19 @@ from uuid import UUID
 
 from app.core.exceptions import AppError, NotFoundError
 from app.services import storage
+from app.services.audio.voice_center import build_voice_center_filter, clamp_voice_center
 from app.services.render.binary import locate_ffmpeg
 from app.services.render.runner import FFmpegError, run_ffmpeg
 
 _PREVIEW_NAME = "preview-audio.m4a"
 
 
-def preview_audio_path(project_id: UUID, video_filename: str) -> Path:
+def preview_audio_path(
+    project_id: UUID,
+    video_filename: str,
+    *,
+    voice_center: float = 0.0,
+) -> Path:
     """Return a playable audio file extracted from the current working video.
 
     Repair WAVs are never used here: they can be a different clock than the
@@ -32,6 +40,43 @@ def preview_audio_path(project_id: UUID, video_filename: str) -> Path:
     if not source.is_file():
         raise NotFoundError("Video file is missing on disk.", code="video_not_found")
 
+    base = _ensure_extract(project_dir, source)
+    pan = build_voice_center_filter(clamp_voice_center(voice_center))
+    if not pan:
+        return base
+
+    step = int(round(clamp_voice_center(voice_center) * 20))
+    cached = project_dir / f"preview-audio-vc{step:02d}.m4a"
+    if (
+        cached.is_file()
+        and cached.stat().st_size > 1024
+        and cached.stat().st_mtime >= base.stat().st_mtime
+    ):
+        return cached
+
+    ffmpeg = locate_ffmpeg() or shutil.which("ffmpeg")
+    if ffmpeg is None:
+        raise AppError("FFmpeg is not available.", code="ffmpeg_missing", status_code=503)
+
+    temp = cached.with_name(f"{cached.stem}.pan{cached.suffix}")
+    log_path = project_dir / "preview-audio-pan.log"
+    try:
+        _pan(ffmpeg, base, temp, log_path, pan)
+        temp.replace(cached)
+    except Exception:
+        temp.unlink(missing_ok=True)
+        raise
+    return cached
+
+
+def clear_preview_audio_cache(project_dir: Path) -> None:
+    """Drop extracted and voice-centered preview tracks after the source changes."""
+    (project_dir / _PREVIEW_NAME).unlink(missing_ok=True)
+    for path in project_dir.glob("preview-audio-vc*.m4a"):
+        path.unlink(missing_ok=True)
+
+
+def _ensure_extract(project_dir: Path, source: Path) -> Path:
     cached = project_dir / _PREVIEW_NAME
     if (
         cached.is_file()
@@ -40,6 +85,7 @@ def preview_audio_path(project_id: UUID, video_filename: str) -> Path:
     ):
         return cached
 
+    clear_preview_audio_cache(project_dir)
     ffmpeg = locate_ffmpeg() or shutil.which("ffmpeg")
     if ffmpeg is None:
         raise AppError("FFmpeg is not available.", code="ffmpeg_missing", status_code=503)
@@ -79,7 +125,38 @@ def _extract(ffmpeg: str, source: Path, destination: Path, log_path: Path, *, co
         cancel_event=threading.Event(),
         log_path=log_path,
     )
-    if result.cancelled:
+    _check_ffmpeg_audio(result, destination)
+
+
+def _pan(ffmpeg: str, source: Path, destination: Path, log_path: Path, pan: str) -> None:
+    result = run_ffmpeg(
+        [
+            ffmpeg,
+            "-y",
+            "-i",
+            str(source),
+            "-vn",
+            "-af",
+            pan,
+            "-c:a",
+            "aac",
+            "-b:a",
+            "192k",
+            "-f",
+            "ipod",
+            "-movflags",
+            "+faststart",
+            str(destination),
+        ],
+        cancel_event=threading.Event(),
+        log_path=log_path,
+    )
+    _check_ffmpeg_audio(result, destination)
+
+
+def _check_ffmpeg_audio(result: object, destination: Path) -> None:
+    cancelled = getattr(result, "cancelled", False)
+    if cancelled:
         raise AppError("Audio preview extraction was cancelled.", code="audio_preview_cancelled")
     if not destination.is_file() or destination.stat().st_size < 1024:
         raise AppError("FFmpeg produced an empty preview audio file.", code="audio_preview_empty")

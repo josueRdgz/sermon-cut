@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { clampVoiceCenter, getVoiceCenterGraph, mixVoiceCenterSample, voiceCenterGains } from './voiceCenter';
+import { clampVoiceCenter, mixVoiceCenterSample, voiceCenterGains } from './voiceCenter';
 
 describe('voiceCenterGains', () => {
   it('is a passthrough at 0', () => {
@@ -29,11 +29,5 @@ describe('mixVoiceCenterSample', () => {
     const mixed = mixVoiceCenterSample(0.2, 0.8, 0.35);
     expect(mixed.right).toBe(0.8);
     expect(mixed.left).toBeCloseTo(0.2 / 1.35 + (0.35 / 1.35) * 0.8, 5);
-  });
-});
-
-describe('getVoiceCenterGraph', () => {
-  it('reuses one graph so remounts do not recapture media elements', () => {
-    expect(getVoiceCenterGraph()).toBe(getVoiceCenterGraph());
   });
 });

@@ -1,6 +1,13 @@
 import { describe, expect, it } from 'vitest';
 
-import { normalizeKeyframes, removeKeyframe, scaleEnvelopeToGain, seedEndpoints } from './volumeEnvelope';
+import {
+  interpolateGain,
+  normalizeKeyframes,
+  removeKeyframe,
+  scaleEnvelopeToGain,
+  seedEndpoints,
+  upsertKeyframe,
+} from './volumeEnvelope';
 
 describe('volumeEnvelope', () => {
   it('removes a nearby keyframe and keeps the rest', () => {
@@ -48,5 +55,25 @@ describe('volumeEnvelope', () => {
     );
     expect(next[0].gain).toBeCloseTo(0.4);
     expect(next[1].gain).toBeCloseTo(0.2);
+  });
+
+  it('inserts an inflection point on the current curve', () => {
+    const next = upsertKeyframe(
+      [
+        { t_ms: 0, gain: 1 },
+        { t_ms: 1000, gain: 0 },
+      ],
+      500,
+      interpolateGain(
+        [
+          { t_ms: 0, gain: 1 },
+          { t_ms: 1000, gain: 0 },
+        ],
+        500,
+      ),
+    );
+    expect(next).toHaveLength(3);
+    expect(next[1].t_ms).toBe(500);
+    expect(next[1].gain).toBeCloseTo(0.5);
   });
 });

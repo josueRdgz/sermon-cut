@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.4.17] — 2026-11-02
+
+### Fixed
+
+- Centrar voz ya no usa Web Audio (eso silenciaba WKWebView). El preview pide
+  una pista AAC con el paneo de FFmpeg y el video sigue oyendo.
+
+### Added
+
+- Clic derecho sobre un clip de video: **Agregar punto de inflexión en audio**
+  en el lugar del clic.
+
 ## [0.4.16] — 2026-11-02
 
 ### Fixed

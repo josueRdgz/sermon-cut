@@ -31,8 +31,16 @@ export function projectVideoUrl(id: string, cacheKey?: string | number | null): 
   return withCacheKey(`${API_BASE_URL}/api/projects/${id}/media/video`, cacheKey);
 }
 
-export function projectAudioUrl(id: string, cacheKey?: string | number | null): string {
-  return withCacheKey(`${API_BASE_URL}/api/projects/${id}/media/audio`, cacheKey);
+export function projectAudioUrl(
+  id: string,
+  cacheKey?: string | number | null,
+  voiceCenter?: number | null,
+): string {
+  const url = withCacheKey(`${API_BASE_URL}/api/projects/${id}/media/audio`, cacheKey);
+  if (voiceCenter == null || !Number.isFinite(voiceCenter) || voiceCenter < 0.01) return url;
+  const amount = Math.max(0, Math.min(1, voiceCenter));
+  const sep = url.includes('?') ? '&' : '?';
+  return `${url}${sep}voice_center=${amount.toFixed(2)}`;
 }
 
 export function getProject(id: string): Promise<Project> {

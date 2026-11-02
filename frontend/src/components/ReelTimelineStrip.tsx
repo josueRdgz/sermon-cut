@@ -57,6 +57,7 @@ import {
 import { canJoinSourceWindows } from '../utils/reelTrim';
 import {
   envelopePolyline,
+  interpolateGain,
   normalizeKeyframes,
   peaksPath,
   removeKeyframe,
@@ -1179,6 +1180,7 @@ export function ReelTimelineStrip({
           if (leftJoinId) onJoinAtCut?.(leftJoinId);
         },
       },
+      ...extras,
       ...zoomMenuItems(),
     ];
     const fxTarget = leftJoinId ?? (clipId && clipId !== spans[spans.length - 1]?.id ? clipId : null);
@@ -1212,7 +1214,6 @@ export function ReelTimelineStrip({
         onSelect: () => onDeleteSegments(ids),
       });
     }
-    items.push(...extras);
     setMenu({ x: event.clientX, y: event.clientY, items });
   }
 
@@ -1491,7 +1492,27 @@ export function ReelTimelineStrip({
                         }}
                         onContextMenu={(event) => {
                           event.stopPropagation();
-                          openTimelineMenu(event, laneMenuExtras(lane, event.clientX));
+                          const clip = event.currentTarget as HTMLElement;
+                          const rect = clip.getBoundingClientRect();
+                          const ratio = Math.max(
+                            0,
+                            Math.min(1, (event.clientX - rect.left) / Math.max(1, rect.width)),
+                          );
+                          const tMs = Math.round(ratio * durationMs);
+                          const extras: NleMenuItem[] = [];
+                          if (onVolumeKeyframes) {
+                            extras.push({
+                              id: `add-audio-point-${segment.id}`,
+                              label: 'Agregar punto de inflexión en audio',
+                              onSelect: () =>
+                                onVolumeKeyframes(
+                                  segment.id,
+                                  upsertKeyframe(keys, tMs, interpolateGain(keys, tMs)),
+                                ),
+                            });
+                          }
+                          extras.push(...laneMenuExtras(lane, event.clientX));
+                          openTimelineMenu(event, extras);
                         }}
                       >
                         <div className="reel-nle__clip-video">
