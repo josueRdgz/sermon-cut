@@ -1,6 +1,7 @@
 import {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -12,6 +13,14 @@ import {
 import { overlayKindLabel, overlaySourceWindow, type ReelOverlay } from '../types/overlay';
 import type { ReelSegment, TransitionType } from '../types/reel';
 import { formatDuration, formatTimecode } from '../utils/format';
+import {
+  collectLaneOccupants,
+  laneConflict,
+  occupantId,
+  resolveExclusiveLane,
+  snapToFit,
+  type Occupant,
+} from '../utils/laneOccupancy';
 import {
   assignLanes,
   clampLane,
@@ -35,14 +44,13 @@ import {
   nleItemSelected,
   type NleItemRef,
 } from '../utils/nleSelection';
-import { transitionMarkerAt } from '../utils/reelOutputClock';
+import { clampPadBeforeMs, transitionMarkerAt } from '../utils/reelOutputClock';
 import {
   buildClipSpans,
   buildSourceGaps,
   outputTimeFromTrackRatio,
   playheadPercent,
   pxToTime,
-  reorderIdsOnDrop,
   shiftCaptionWindow,
   timeToPx,
 } from '../utils/reelTimelineStrip';
@@ -90,6 +98,7 @@ interface ReelTimelineStripProps {
   onSelectOverlay?: (overlayId: string) => void;
   onSelectMusic?: () => void;
   onReorderSegments?: (orderedIds: string[]) => void;
+  onMoveVideoPad?: (id: string, padBeforeMs: number, persist?: boolean) => void;
   onTrimSegment?: (
     id: string,
     patch: { source_start_seconds?: number; source_end_seconds?: number },
@@ -179,6 +188,7 @@ export function ReelTimelineStrip({
   onSelectOverlay,
   onSelectMusic,
   onReorderSegments,
+  onMoveVideoPad,
   onTrimSegment,
   onMoveCaption,
   onMoveCaptions,
@@ -225,6 +235,7 @@ export function ReelTimelineStrip({
     dy: number;
     lane: number;
   } | null>(null);
+  const [padDrafts, setPadDrafts] = useState<Record<string, number>>({});
   const [selection, setSelection] = useState<NleItemRef[]>([]);
   const selectionRef = useRef(selection);
   selectionRef.current = selection;
@@ -285,6 +296,73 @@ export function ReelTimelineStrip({
     [reelId],
   );
 
+  function occupancyMap(excludeIds: string[] = []) {
+    const skip = new Set(excludeIds);
+    const layoutNow = { ...laneLayoutRef.current, laneCount };
+    const clips = spans
+      .map((span) => {
+        const segment = segments[span.index];
+        if (!segment) return null;
+        const id = occupantId('segment', segment.id);
+        if (skip.has(id)) return null;
+        return {
+          id: segment.id,
+          lane: laneForSegment(layoutNow, segment.id),
+          start: span.start,
+          end: span.start + span.duration,
+        };
+      })
+      .filter((item): item is NonNullable<typeof item> => item != null);
+    const captionItems = spans
+      .map((span) => {
+        const segment = segments[span.index];
+        if (!segment) return null;
+        const id = occupantId('caption', segment.id);
+        if (skip.has(id)) return null;
+        const start =
+          segment.caption_in_ms != null ? segment.caption_in_ms / 1000 : span.start;
+        const end =
+          segment.caption_out_ms != null
+            ? segment.caption_out_ms / 1000
+            : span.start + span.duration;
+        return {
+          id: segment.id,
+          lane: laneForCaption(layoutNow, segment.id),
+          start,
+          end: Math.max(start + 0.2, end),
+        };
+      })
+      .filter((item): item is NonNullable<typeof item> => item != null);
+    const overlayItems = overlays
+      .map((overlay) => {
+        const id = occupantId('overlay', overlay.id);
+        if (skip.has(id)) return null;
+        const start = overlay.start_ms / 1000;
+        return {
+          id: overlay.id,
+          lane: clampLane(overlay.z_index, laneCount),
+          start,
+          end: start + Math.max(0.2, overlay.duration_ms / 1000),
+        };
+      })
+      .filter((item): item is NonNullable<typeof item> => item != null);
+    return collectLaneOccupants({
+      laneCount,
+      clips,
+      captions: captionItems,
+      overlays: overlayItems,
+      musicLane:
+        musicActive && !skip.has(occupantId('music', 'music'))
+          ? clampLane(layoutNow.musicLane, laneCount)
+          : null,
+      musicEnd: totalDuration,
+    });
+  }
+
+  function exclusiveLaneFor(candidate: Occupant, preferred: number, excludeIds: string[]) {
+    return resolveExclusiveLane(occupancyMap(excludeIds), candidate, laneCount, preferred);
+  }
+
   const laneCount = useMemo(() => {
     const fromOverlays = overlays.reduce((max, overlay) => Math.max(max, overlay.z_index + 1), 0);
     const fromCaptions = Math.max(0, ...Object.values(laneLayout.captionLanes).map((lane) => lane + 1));
@@ -302,25 +380,43 @@ export function ReelTimelineStrip({
     else setLocalZoom(clamped);
   }
 
-  const spans = useMemo(() => buildClipSpans(segments), [segments]);
+  const timelineSegments = useMemo(
+    () =>
+      Object.keys(padDrafts).length === 0
+        ? segments
+        : segments.map((segment) =>
+            padDrafts[segment.id] == null
+              ? segment
+              : { ...segment, pad_before_ms: padDrafts[segment.id] },
+          ),
+    [padDrafts, segments],
+  );
+  const spans = useMemo(() => buildClipSpans(timelineSegments), [timelineSegments]);
+  const boardDuration = useMemo(() => {
+    if (spans.length === 0) return totalDuration;
+    return spans.reduce((max, span) => Math.max(max, span.start + span.duration), 0);
+  }, [spans, totalDuration]);
+  const spansRef = useRef(spans);
+  spansRef.current = spans;
   const sourceGaps = useMemo(() => buildSourceGaps(segments), [segments]);
   const markers = useMemo(
     () => transitionMarkerAt(
       spans.map((span) => ({
         id: span.id,
         index: span.index,
-        sourceStart: segments[span.index]?.source_start_seconds ?? 0,
-        sourceEnd: segments[span.index]?.source_end_seconds ?? 0,
+        sourceStart: timelineSegments[span.index]?.source_start_seconds ?? 0,
+        sourceEnd: timelineSegments[span.index]?.source_end_seconds ?? 0,
         outputStart: span.start,
         contentDuration: span.duration,
+        padSeconds: 0,
         overlapSeconds: 0,
       })),
       segments,
     ),
-    [spans, segments],
+    [spans, timelineSegments],
   );
-  const timelineWidthPx = Math.max(timeToPx(totalDuration, pxPerSecond), 1);
-  const playhead = playheadPercent(outputTime, totalDuration);
+  const timelineWidthPx = Math.max(timeToPx(boardDuration, pxPerSecond), 1);
+  const playhead = playheadPercent(outputTime, boardDuration);
 
   useEffect(() => {
     const scroller = scrollRef.current;
@@ -334,6 +430,21 @@ export function ReelTimelineStrip({
     }
   }, [outputTime, pxPerSecond, totalDuration]);
 
+  useLayoutEffect(() => {
+    const board = boardRef.current;
+    if (!board) return;
+    const track = board.querySelector<HTMLElement>('.reel-nle__track--aroll');
+    if (!track) return;
+    const boardRect = board.getBoundingClientRect();
+    const trackRect = track.getBoundingClientRect();
+    const pad = 8;
+    if (trackRect.top < boardRect.top + pad) {
+      board.scrollTop += trackRect.top - boardRect.top - pad;
+    } else if (trackRect.bottom > boardRect.bottom - pad) {
+      board.scrollTop += trackRect.bottom - boardRect.bottom + pad;
+    }
+  }, [reelId]);
+
   function seekToClientX(clientX: number) {
     const surface = surfaceRef.current;
     if (!surface || totalDuration <= 0) return null;
@@ -344,6 +455,7 @@ export function ReelTimelineStrip({
 
   function beginScrub(event: PointerEvent<HTMLElement>) {
     if (event.button !== 0) return;
+    if ((event.target as HTMLElement).closest('.reel-nle__clip')) return;
     const surface = surfaceRef.current;
     if (!surface) return;
     event.preventDefault();
@@ -477,6 +589,33 @@ export function ReelTimelineStrip({
       } catch {
         // already released
       }
+      const exclude = last.map((entry) => occupantId('overlay', entry.id));
+      const byLane = occupancyMap(exclude);
+      last = last.map((entry) => {
+        const overlay = overlays.find((item) => item.id === entry.id);
+        const duration = Math.max(0.2, (overlay?.duration_ms ?? 3000) / 1000);
+        const candidate: Occupant = {
+          id: occupantId('overlay', entry.id),
+          kind: 'overlay',
+          start: entry.startMs / 1000,
+          end: entry.startMs / 1000 + duration,
+        };
+        if (!laneConflict(byLane.get(entry.lane) ?? [], candidate)) {
+          byLane.set(entry.lane, [...(byLane.get(entry.lane) ?? []), candidate]);
+          return entry;
+        }
+        const fitted = snapToFit(byLane.get(entry.lane) ?? [], candidate, totalDuration);
+        if (fitted && !laneConflict(byLane.get(entry.lane) ?? [], fitted)) {
+          byLane.set(entry.lane, [...(byLane.get(entry.lane) ?? []), fitted]);
+          return { ...entry, startMs: Math.round(fitted.start * 1000) };
+        }
+        const free = resolveExclusiveLane(byLane, candidate, laneCount, entry.lane);
+        if (free == null) {
+          return origins.find((origin) => origin.id === entry.id) ?? entry;
+        }
+        byLane.set(free, [...(byLane.get(free) ?? []), candidate]);
+        return { ...entry, lane: free };
+      });
       if (onMoveOverlays) onMoveOverlays(last, true);
       else {
         last.forEach((entry) => {
@@ -489,12 +628,24 @@ export function ReelTimelineStrip({
       setOverlayDrafts({});
       window.removeEventListener('pointermove', onMove, true);
       window.removeEventListener('pointerup', onUp, true);
-      window.removeEventListener('pointercancel', onUp, true);
+      window.removeEventListener('pointercancel', onCancel, true);
+    };
+    const onCancel = (cancelEvent: globalThis.PointerEvent) => {
+      if (cancelEvent.pointerId !== pointerId) return;
+      window.removeEventListener('pointermove', onMove, true);
+      window.removeEventListener('pointerup', onUp, true);
+      window.removeEventListener('pointercancel', onCancel, true);
+      try {
+        target.releasePointerCapture(pointerId);
+      } catch {
+        // already released
+      }
+      setOverlayDrafts({});
     };
 
     window.addEventListener('pointermove', onMove, true);
     window.addEventListener('pointerup', onUp, true);
-    window.addEventListener('pointercancel', onUp, true);
+    window.addEventListener('pointercancel', onCancel, true);
   }
 
   function beginSegmentDrag(event: PointerEvent<HTMLElement>, segment: ReelSegment) {
@@ -502,16 +653,20 @@ export function ReelTimelineStrip({
     event.preventDefault();
     event.stopPropagation();
     const item: NleItemRef = { kind: 'segment', id: segment.id };
-    if (!nleItemSelected(selectionRef.current, item) || !modifierSelect(event)) {
-      commitSelection(item, modifierSelect(event));
-    } else {
-      onSelectSegment(segment.id, 'video');
-    }
     const groupIds = selectedIds('segment', segment.id);
     const originLane = laneForSegment(layoutWithCount, segment.id);
+    const originSpans = spansRef.current;
+    const leadSpan = [...originSpans]
+      .filter((span) => groupIds.includes(span.id))
+      .sort((left, right) => left.start - right.start)[0];
+    const leadId = leadSpan?.id ?? segment.id;
+    const originPad = clampPadBeforeMs(
+      segments.find((entry) => entry.id === leadId)?.pad_before_ms ?? 0,
+    );
     const pointerId = event.pointerId;
     const startY = event.clientY;
     const startX = event.clientX;
+    const startScroll = scrollRef.current?.scrollLeft ?? 0;
     const target = event.currentTarget;
     try {
       target.setPointerCapture(pointerId);
@@ -519,62 +674,108 @@ export function ReelTimelineStrip({
       // already captured
     }
     let lastLane = originLane;
+    let lastPad = originPad;
+    let finished = false;
+    let moved = false;
 
-    const onMove = (moveEvent: globalThis.PointerEvent) => {
-      if (moveEvent.pointerId !== pointerId) return;
-      moveEvent.preventDefault();
-      autoScrollBoard(moveEvent.clientY);
-      const hover = laneFromClientY(moveEvent.clientY);
+    const applyPointer = (clientX: number, clientY: number) => {
+      autoScrollTimeline(clientX, clientY);
+      const scrollNow = scrollRef.current?.scrollLeft ?? 0;
+      const dx = clientX - startX + (scrollNow - startScroll);
+      const dy = clientY - startY;
+      if (Math.abs(dx) >= 3 || Math.abs(dy) >= 3) moved = true;
+      const hover = laneFromClientY(clientY);
       if (hover != null) lastLane = hover;
+      lastPad = clampPadBeforeMs(originPad + pxToTime(dx, pxPerSecond) * 1000);
+      setPadDrafts({ [leadId]: lastPad });
       setSegmentDraft({
         ids: groupIds,
-        dx: moveEvent.clientX - startX,
-        dy: moveEvent.clientY - startY,
+        dx,
+        dy,
         lane: lastLane,
       });
     };
 
-    const onUp = (upEvent: globalThis.PointerEvent) => {
-      if (upEvent.pointerId !== pointerId) return;
+    const onMove = (moveEvent: globalThis.PointerEvent) => {
+      if (moveEvent.pointerId !== pointerId) return;
+      moveEvent.preventDefault();
+      applyPointer(moveEvent.clientX, moveEvent.clientY);
+    };
+    const finish = (clientX: number, clientY: number, commit: boolean) => {
+      if (finished) return;
+      finished = true;
       window.removeEventListener('pointermove', onMove, true);
       window.removeEventListener('pointerup', onUp, true);
-      window.removeEventListener('pointercancel', onUp, true);
+      window.removeEventListener('pointercancel', onCancel, true);
       try {
         target.releasePointerCapture(pointerId);
       } catch {
         // already released
       }
-      setSegmentDraft(null);
-      const dropLane = laneFromClientY(upEvent.clientY) ?? lastLane;
-      const dy = upEvent.clientY - startY;
-      const dx = upEvent.clientX - startX;
-      if (dropLane != null && Math.abs(dy) > 10 && dropLane !== originLane) {
-        persistLanes(
-          assignLanes({ ...laneLayoutRef.current, laneCount }, groupIds, dropLane, 'segmentLanes'),
-        );
+      if (!commit) {
+        setPadDrafts({});
+        setSegmentDraft(null);
         return;
       }
-      if (Math.abs(dx) < 4) return;
-      const surface = surfaceRef.current;
-      if (!surface || !onReorderSegments) return;
-      const output = timeFromClientX(upEvent.clientX, surface, totalDuration, pxPerSecond);
-      const targetId = segmentAtOutput(spans, output);
-      if (!targetId) return;
-      const targetSpan = spans.find((span) => span.id === targetId);
-      const mid = (targetSpan?.start ?? 0) + (targetSpan?.duration ?? 0) / 2;
-      const next = reorderIdsOnDrop(
-        segments.map((entry) => entry.id),
-        groupIds,
-        targetId,
-        output >= mid,
-      );
-      if (next) onReorderSegments(next);
+      applyPointer(clientX, clientY);
+      const dx = clientX - startX + ((scrollRef.current?.scrollLeft ?? 0) - startScroll);
+      const dy = clientY - startY;
+      if (!moved) {
+        if (!nleItemSelected(selectionRef.current, item) || !modifierSelect(event)) {
+          commitSelection(item, modifierSelect(event));
+        } else {
+          onSelectSegment(segment.id, 'video');
+        }
+        setPadDrafts({});
+        setSegmentDraft(null);
+        return;
+      }
+      if (
+        lastLane != null &&
+        lastLane !== originLane &&
+        Math.abs(dy) > 24 &&
+        Math.abs(dy) >= Math.abs(dx) * 0.4
+      ) {
+        const exclude = groupIds.map((id) => occupantId('segment', id));
+        const occupants = occupancyMap(exclude).get(lastLane) ?? [];
+        const blocked = groupIds.some((id) => {
+          const span = originSpans.find((entry) => entry.id === id);
+          if (!span) return false;
+          return Boolean(
+            laneConflict(occupants, {
+              id: occupantId('segment', id),
+              kind: 'segment',
+              start: span.start,
+              end: span.start + span.duration,
+            }),
+          );
+        });
+        if (!blocked) {
+          persistLanes(
+            assignLanes({ ...laneLayoutRef.current, laneCount }, groupIds, lastLane, 'segmentLanes'),
+          );
+        }
+      }
+      if (onMoveVideoPad && lastPad !== originPad) {
+        onMoveVideoPad(leadId, lastPad, true);
+      }
+      setPadDrafts({});
+      setSegmentDraft(null);
+    };
+    const onUp = (upEvent: globalThis.PointerEvent) => {
+      if (upEvent.pointerId !== pointerId) return;
+      finish(upEvent.clientX, upEvent.clientY, true);
+    };
+    const onCancel = (cancelEvent: globalThis.PointerEvent) => {
+      if (cancelEvent.pointerId !== pointerId) return;
+      finish(cancelEvent.clientX, cancelEvent.clientY, false);
     };
 
+    setPadDrafts({ [leadId]: originPad });
     setSegmentDraft({ ids: groupIds, dx: 0, dy: 0, lane: originLane });
     window.addEventListener('pointermove', onMove, true);
     window.addEventListener('pointerup', onUp, true);
-    window.addEventListener('pointercancel', onUp, true);
+    window.addEventListener('pointercancel', onCancel, true);
   }
 
   function beginCaptionDrag(
@@ -605,9 +806,8 @@ export function ReelTimelineStrip({
     const layoutNow = { ...laneLayoutRef.current, laneCount };
     const groupIds = edge === 'move' ? selectedIds('caption', segment.id) : [segment.id];
     const origins = groupIds.map((id) => {
-      const index = segments.findIndex((entry) => entry.id === id);
-      const span = spans[index];
-      const entry = segments[index];
+      const span = spans.find((entry) => entry.id === id);
+      const entry = timelineSegments.find((item) => item.id === id);
       const start = span?.start ?? spanStart;
       const duration = span?.duration ?? spanDuration;
       return {
@@ -660,8 +860,34 @@ export function ReelTimelineStrip({
       const layout = laneLayoutRef.current;
       const nextLanes = { ...layout.captionLanes };
       let lanesChanged = false;
+      const exclude = last.map((entry) => occupantId('caption', entry.id));
+      const byLane = occupancyMap(exclude);
       last.forEach((entry, index) => {
-        const nextLane = entry.dropLane ?? entry.lane;
+        const preferred = entry.dropLane ?? entry.lane;
+        const candidate: Occupant = {
+          id: occupantId('caption', entry.id),
+          kind: 'caption',
+          start: entry.inMs / 1000,
+          end: entry.outMs / 1000,
+        };
+        const preferredOccupants = byLane.get(preferred) ?? [];
+        let nextLane = preferred;
+        if (!laneConflict(preferredOccupants, candidate)) {
+          byLane.set(preferred, [...preferredOccupants, candidate]);
+        } else {
+          const fitted = snapToFit(preferredOccupants, candidate, totalDuration);
+          if (fitted) {
+            entry.inMs = Math.round(fitted.start * 1000);
+            entry.outMs = Math.round(fitted.end * 1000);
+            byLane.set(preferred, [...preferredOccupants, fitted]);
+          } else {
+            nextLane =
+              resolveExclusiveLane(byLane, candidate, laneCount, preferred) ??
+              origins[index]?.lane ??
+              preferred;
+            byLane.set(nextLane, [...(byLane.get(nextLane) ?? []), candidate]);
+          }
+        }
         entry.lane = nextLane;
         if (nextLane !== origins[index]?.lane) {
           nextLanes[entry.id] = nextLane;
@@ -675,17 +901,36 @@ export function ReelTimelineStrip({
           captionLanes: nextLanes,
         });
       }
-      if (onMoveCaptions) onMoveCaptions(last, true);
-      else last.forEach((entry) => onMoveCaption(entry.id, entry.inMs, entry.outMs, true));
+      const timesChanged = last.some((entry, index) => {
+        const origin = origins[index];
+        return !origin || entry.inMs !== origin.inMs || entry.outMs !== origin.outMs;
+      });
+      if (timesChanged) {
+        if (onMoveCaptions) onMoveCaptions(last, true);
+        else last.forEach((entry) => onMoveCaption(entry.id, entry.inMs, entry.outMs, true));
+      }
       setCaptionDrafts({});
       window.removeEventListener('pointermove', onMove, true);
       window.removeEventListener('pointerup', onUp, true);
-      window.removeEventListener('pointercancel', onUp, true);
+      window.removeEventListener('pointercancel', onCancel, true);
+    };
+    const onCancel = (cancelEvent: globalThis.PointerEvent) => {
+      if (cancelEvent.pointerId !== pointerId) return;
+      window.removeEventListener('pointermove', onMove, true);
+      window.removeEventListener('pointerup', onUp, true);
+      window.removeEventListener('pointercancel', onCancel, true);
+      try {
+        target.releasePointerCapture(pointerId);
+      } catch {
+        // already released
+      }
+      setCaptionDrafts({});
     };
 
     window.addEventListener('pointermove', onMove, true);
     window.addEventListener('pointerup', onUp, true);
-    window.addEventListener('pointercancel', onUp, true);
+    window.addEventListener('pointercancel', onCancel, true);
+    apply(event.clientX, event.clientY);
   }
 
   function beginVolumeDrag(
@@ -863,6 +1108,16 @@ export function ReelTimelineStrip({
     else if (clientY > rect.bottom - margin) board.scrollTop += 18;
   }
 
+  function autoScrollTimeline(clientX: number, clientY: number) {
+    autoScrollBoard(clientY);
+    const scroller = scrollRef.current;
+    if (!scroller) return;
+    const rect = scroller.getBoundingClientRect();
+    const margin = 48;
+    if (clientX < rect.left + margin) scroller.scrollLeft -= 28;
+    else if (clientX > rect.right - margin) scroller.scrollLeft += 28;
+  }
+
   function transitionMenuItems(segmentId: string): NleMenuItem[] {
     return TRANSITION_OPTIONS.map((option) => ({
       id: `fx-${option.value}`,
@@ -984,6 +1239,25 @@ export function ReelTimelineStrip({
     onReorderSegments(next);
   }
 
+  const dropBlockedLane = (() => {
+    if (!segmentDraft || Math.abs(segmentDraft.dy) <= 24) return null;
+    const exclude = segmentDraft.ids.map((id) => occupantId('segment', id));
+    const occupants = occupancyMap(exclude).get(segmentDraft.lane) ?? [];
+    const blocked = segmentDraft.ids.some((id) => {
+      const span = spans.find((item) => item.id === id);
+      if (!span) return false;
+      return Boolean(
+        laneConflict(occupants, {
+          id: occupantId('segment', id),
+          kind: 'segment',
+          start: span.start,
+          end: span.start + span.duration,
+        }),
+      );
+    });
+    return blocked ? segmentDraft.lane : null;
+  })();
+
   if (segments.length === 0 || totalDuration <= 0) {
     return (
       <div className="reel-nle__strip reel-nle__strip--empty" aria-label="Línea temporal del Reel">
@@ -1005,7 +1279,7 @@ export function ReelTimelineStrip({
     <div
       className={`reel-nle__strip${dragging ? ' reel-nle__strip--dragging' : ''}${
         dragOver ? ' reel-nle__strip--drag-over' : ''
-      }${segmentDraft || Object.keys(captionDrafts).length > 0 ? ' reel-nle__strip--lane-drag' : ''}`}
+      }`}
       aria-label="Línea temporal del Reel"
     >
       <button
@@ -1061,7 +1335,7 @@ export function ReelTimelineStrip({
                   className="reel-nle__ruler-mark"
                   style={{ left: `${mark * 100}%` }}
                 >
-                  {formatDuration(totalDuration * mark)}
+                  {formatDuration(boardDuration * mark)}
                 </span>
               ))}
             </div>
@@ -1087,12 +1361,17 @@ export function ReelTimelineStrip({
                 return clampLane(z, laneCount) === lane;
               });
               const laneCaptions = spans.filter((span) => {
-                const draft = captionDrafts[segments[span.index].id];
+                const segment = timelineSegments[span.index];
+                if (!segment) return false;
+                const draft = captionDrafts[segment.id];
                 if (draft) return draft.lane === lane;
-                return laneForCaption(layoutWithCount, segments[span.index].id) === lane;
+                return laneForCaption(layoutWithCount, segment.id) === lane;
               });
               const laneVideos = spans.filter((span) => {
-                return laneForSegment(layoutWithCount, segments[span.index].id) === lane;
+                const segment = timelineSegments[span.index];
+                return Boolean(
+                  segment && laneForSegment(layoutWithCount, segment.id) === lane,
+                );
               });
               const showMusic = musicActive && clampLane(laneLayout.musicLane, laneCount) === lane;
               const dropHover = segmentDraft != null && segmentDraft.lane === lane;
@@ -1107,7 +1386,11 @@ export function ReelTimelineStrip({
                   key={`lane-${lane}`}
                   data-lane={lane}
                   className={`reel-nle__track${hasVideo ? ' reel-nle__track--aroll' : ' reel-nle__track--free'}${
-                    dropHover ? ' reel-nle__track--drop' : ''
+                    dropHover
+                      ? dropBlockedLane === lane
+                        ? ' reel-nle__track--drop-blocked'
+                        : ' reel-nle__track--drop'
+                      : ''
                   }`}
                   aria-label={`Franja ${lane + 1}`}
                   onDoubleClick={(event) => {
@@ -1141,11 +1424,13 @@ export function ReelTimelineStrip({
                     </span>
                   ) : null}
                   {laneVideos.map((span) => {
-                    const segment = segments[span.index];
+                    const segment = timelineSegments[span.index];
+                    if (!segment) return null;
                     const selected =
                       nleItemSelected(selection, { kind: 'segment', id: segment.id }) ||
                       segment.id === selectedSegmentId;
                     const dragging = Boolean(segmentDraft?.ids.includes(segment.id));
+                    const visualSpan = span;
                     const clipPeaks =
                       sourceDuration > 0
                         ? slicePeaks(
@@ -1167,26 +1452,41 @@ export function ReelTimelineStrip({
                           reorderOverId === segment.id ? ' reel-nle__clip--drop-target' : ''
                         }`}
                         style={{
-                          left: `calc(${span.leftRatio * 100}% + 3px)`,
-                          width: `calc(${Math.max(span.widthRatio * 100, 0.8)}% - 6px)`,
+                          left: `calc(${visualSpan.leftRatio * 100}% + 3px)`,
+                          width: `calc(${Math.max(visualSpan.widthRatio * 100, 0.8)}% - 6px)`,
                           transform: dragging && segmentDraft
-                            ? `translate(${segmentDraft.dx}px, ${segmentDraft.dy}px)`
+                            ? `translate(0px, ${segmentDraft.dy}px)`
                             : undefined,
-                          zIndex: dragging ? 12 : undefined,
+                          zIndex: dragging ? 20 : undefined,
                           willChange: dragging ? 'transform' : undefined,
                         }}
                         title={`Fragmento ${span.index + 1} · ${formatTimecode(segment.source_start_seconds)}–${formatTimecode(segment.source_end_seconds)}`}
+                        draggable={false}
+                        onDragStart={(event) => event.preventDefault()}
                         onDragOver={(event) => handleClipDragOver(event, segment.id)}
                         onDrop={(event) => handleClipDrop(event, segment.id)}
                         onPointerDown={(event) => {
+                          event.stopPropagation();
                           if (
                             (event.target as HTMLElement).closest(
-                              '.reel-nle__trim, .reel-nle__reorder, .reel-nle__envelope, .reel-nle__envelope-dot',
+                              '.reel-nle__trim, .reel-nle__reorder, .reel-nle__envelope-dot',
                             )
                           )
                             return;
-                          event.stopPropagation();
                           onSelectGap?.(null);
+                          if ((event.altKey || event.metaKey) && onVolumeKeyframes) {
+                            const wave = (event.currentTarget as HTMLElement).querySelector(
+                              '.reel-nle__clip-wave',
+                            );
+                            beginVolumeDrag(
+                              event,
+                              durationMs,
+                              keys,
+                              (points) => onVolumeKeyframes(segment.id, points),
+                              wave instanceof HTMLElement ? wave : undefined,
+                            );
+                            return;
+                          }
                           beginSegmentDrag(event, segment);
                         }}
                         onContextMenu={(event) => {
@@ -1210,13 +1510,8 @@ export function ReelTimelineStrip({
                           {onVolumeKeyframes && (
                             <div
                               className="reel-nle__envelope"
-                              role="slider"
+                              role="img"
                               aria-label="Volumen del video"
-                              onPointerDown={(event) =>
-                                beginVolumeDrag(event, durationMs, keys, (points) =>
-                                  onVolumeKeyframes(segment.id, points),
-                                )
-                              }
                             >
                               <svg viewBox="0 0 100 36" preserveAspectRatio="none" aria-hidden>
                                 <polyline points={envelopePolyline(keys, durationMs)} />
@@ -1230,6 +1525,7 @@ export function ReelTimelineStrip({
                                     top: `${(1 - point.gain) * 100}%`,
                                   }}
                                   onPointerDown={(dotEvent) => {
+                                    dotEvent.stopPropagation();
                                     const envelope = (dotEvent.currentTarget as HTMLElement).closest(
                                       '.reel-nle__envelope',
                                     );
@@ -1311,10 +1607,10 @@ export function ReelTimelineStrip({
                         </button>
                       );
                     })}
-                  {spans
+                      {spans
                     .filter((span) => laneVideos.some((entry) => entry.id === span.id))
                     .map((span) => {
-                        const segment = segments[span.index];
+                        const segment = timelineSegments[span.index];
                         const nextSpan = spans[span.index + 1];
                         if (!segment || !nextSpan || (!onApplyTransition && !onJoinAtCut)) return null;
                         const joinLeft = nextSpan.leftRatio * 100;
@@ -1459,9 +1755,9 @@ export function ReelTimelineStrip({
                     const draft = overlayDrafts[overlay.id];
                     const startSec = (draft?.startMs ?? overlay.start_ms) / 1000;
                     const durSec = Math.max(0.2, overlay.duration_ms / 1000);
-                    const left = totalDuration > 0 ? (startSec / totalDuration) * 100 : 0;
+                    const left = boardDuration > 0 ? (startSec / boardDuration) * 100 : 0;
                     const width =
-                      totalDuration > 0 ? Math.max((durSec / totalDuration) * 100, 0.8) : 0.8;
+                      boardDuration > 0 ? Math.max((durSec / boardDuration) * 100, 0.8) : 0.8;
                     const selected =
                       nleItemSelected(selection, { kind: 'overlay', id: overlay.id }) ||
                       overlay.id === selectedOverlayId;
@@ -1516,7 +1812,8 @@ export function ReelTimelineStrip({
                     );
                   })}
                   {laneCaptions.map((span) => {
-                    const segment = segments[span.index];
+                    const segment = timelineSegments[span.index];
+                    if (!segment) return null;
                     const selected =
                       nleItemSelected(selection, { kind: 'caption', id: segment.id }) ||
                       segment.id === selectedSegmentId;
@@ -1535,9 +1832,9 @@ export function ReelTimelineStrip({
                           ? segment.caption_out_ms / 1000
                           : span.start + span.duration;
                     const durSec = Math.max(0.2, endSec - startSec);
-                    const leftPct = totalDuration > 0 ? (startSec / totalDuration) * 100 : 0;
+                    const leftPct = boardDuration > 0 ? (startSec / boardDuration) * 100 : 0;
                     const widthPct =
-                      totalDuration > 0 ? Math.max((durSec / totalDuration) * 100, 0.4) : 0.4;
+                      boardDuration > 0 ? Math.max((durSec / boardDuration) * 100, 0.4) : 0.4;
                     const captionName = label || `Subtítulos · fragmento ${span.index + 1}`;
                     return (
                       <div
@@ -1551,15 +1848,16 @@ export function ReelTimelineStrip({
                         }}
                         title={captionName}
                         aria-label={captionName}
+                        onPointerDown={(event) => {
+                          if ((event.target as HTMLElement).closest('.reel-nle__trim')) return;
+                          event.stopPropagation();
+                          onSelectSegment(segment.id, 'captions');
+                          beginCaptionDrag(event, segment, span.start, span.duration, 'move');
+                        }}
                         onContextMenu={(event) => openTimelineMenu(event)}
                       >
                         <span
                           className="reel-nle__clip-label"
-                          onPointerDown={(event) => {
-                            event.stopPropagation();
-                            onSelectSegment(segment.id, 'captions');
-                            beginCaptionDrag(event, segment, span.start, span.duration, 'move');
-                          }}
                           onContextMenu={(event) => openTimelineMenu(event)}
                         >
                           {label ? label.slice(0, 28) : '—'}
@@ -1599,21 +1897,40 @@ export function ReelTimelineStrip({
                       style={{ left: '0%', width: '100%' }}
                       title={musicLabel}
                       onPointerDown={(event) => {
-                        if ((event.target as HTMLElement).closest('.reel-nle__envelope')) return;
+                        if ((event.target as HTMLElement).closest('.reel-nle__envelope-dot')) return;
                         event.stopPropagation();
                         commitSelection({ kind: 'music', id: 'music' }, modifierSelect(event));
+                        if ((event.altKey || event.metaKey) && onMusicVolumeKeyframes) {
+                          const keys = normalizeKeyframes(musicKeyframes);
+                          beginVolumeDrag(
+                            event,
+                            Math.max(200, totalDuration * 1000),
+                            keys,
+                            onMusicVolumeKeyframes,
+                          );
+                          return;
+                        }
                         beginScrub(event);
                       }}
                       onPointerMove={(event) => {
                         if (event.buttons !== 1) return;
                         const nextLane = laneFromClientY(event.clientY);
-                        if (nextLane != null && nextLane !== lane) {
-                          persistLanes({
-                            ...laneLayout,
-                            laneCount,
-                            musicLane: nextLane,
-                          });
-                        }
+                        if (nextLane == null || nextLane === lane) return;
+                        const candidate: Occupant = {
+                          id: occupantId('music', 'music'),
+                          kind: 'music',
+                          start: 0,
+                          end: totalDuration,
+                        };
+                        const free = exclusiveLaneFor(candidate, nextLane, [
+                          occupantId('music', 'music'),
+                        ]);
+                        if (free == null || free === lane) return;
+                        persistLanes({
+                          ...laneLayoutRef.current,
+                          laneCount,
+                          musicLane: free,
+                        });
                       }}
                     >
                       {musicPeaks.length > 0 && (
@@ -1625,12 +1942,8 @@ export function ReelTimelineStrip({
                       {onMusicVolumeKeyframes && (
                         <div
                           className="reel-nle__envelope"
-                          role="slider"
+                          role="img"
                           aria-label="Volumen de la música"
-                          onPointerDown={(event) => {
-                            const keys = normalizeKeyframes(musicKeyframes);
-                            beginVolumeDrag(event, Math.max(200, totalDuration * 1000), keys, onMusicVolumeKeyframes);
-                          }}
                         >
                           <svg viewBox="0 0 100 36" preserveAspectRatio="none" aria-hidden>
                             <polyline
@@ -1649,6 +1962,19 @@ export function ReelTimelineStrip({
                                 style={{
                                   left: `${(point.t_ms / durationMs) * 100}%`,
                                   top: `${(1 - point.gain) * 100}%`,
+                                }}
+                                onPointerDown={(dotEvent) => {
+                                  const envelope = (dotEvent.currentTarget as HTMLElement).closest(
+                                    '.reel-nle__envelope',
+                                  );
+                                  beginVolumeDrag(
+                                    dotEvent,
+                                    durationMs,
+                                    normalizeKeyframes(musicKeyframes),
+                                    onMusicVolumeKeyframes,
+                                    envelope instanceof HTMLElement ? envelope : undefined,
+                                    point.t_ms,
+                                  );
                                 }}
                                 onContextMenu={(event) => {
                                   event.preventDefault();

@@ -217,6 +217,18 @@ def test_single_segment_needs_no_join() -> None:
     assert plan.expected_duration_seconds == pytest.approx(4.0)
 
 
+def test_leading_black_pad_extends_output_and_uses_tpad() -> None:
+    plan = _build(
+        segments=[
+            RenderSegmentSpec(10.0, 15.0, pad_before_ms=2000),
+            RenderSegmentSpec(40.0, 50.0, pad_before_ms=500),
+        ]
+    )
+    assert "tpad=start_duration=2:start_mode=add:color=black" in plan.filter_complex
+    assert "adelay=2000:all=1" in plan.filter_complex
+    assert plan.expected_duration_seconds == pytest.approx(5 + 2 + 10 + 0.5)
+
+
 def test_crossfade_keeps_audio_and_video_in_sync() -> None:
     plan = _build(
         segments=[

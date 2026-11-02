@@ -30,6 +30,13 @@ describe('volumeEnvelope', () => {
     ]);
   });
 
+  it('keeps leftover keyframes inside the clip duration', () => {
+    expect(seedEndpoints([{ t_ms: 0, gain: 1 }, { t_ms: 9000, gain: 0.2 }], 2000)).toEqual([
+      { t_ms: 0, gain: 1 },
+      { t_ms: 2000, gain: 0.2 },
+    ]);
+  });
+
   it('scales the envelope so the playhead gain matches the slider', () => {
     const next = scaleEnvelopeToGain(
       [

@@ -21,8 +21,21 @@ export interface OutputPlacement {
   sourceEnd: number;
   outputStart: number;
   contentDuration: number;
+  /** Silent black before this clip's picture on the output clock. */
+  padSeconds: number;
   /** Usable xfade after this clip; 0 for the last clip or a hard cut. */
   overlapSeconds: number;
+}
+
+export const MAX_PAD_BEFORE_MS = 120_000;
+
+export function clampPadBeforeMs(value: number): number {
+  if (!Number.isFinite(value)) return 0;
+  return Math.max(0, Math.min(MAX_PAD_BEFORE_MS, Math.round(value)));
+}
+
+export function padBeforeSeconds(segment: { pad_before_ms?: number | null }): number {
+  return clampPadBeforeMs(segment.pad_before_ms ?? 0) / 1000;
 }
 
 export interface OutputClock {
@@ -53,35 +66,38 @@ export function buildOutputClock(segments: ReelSegment[]): OutputClock {
   }
 
   const placements: OutputPlacement[] = [];
-  let outputCursor = 0;
   let total = 0;
 
   for (let index = 0; index < segments.length; index += 1) {
     const segment = segments[index];
     const duration = Math.max(0, segment.duration_seconds);
-    const placement: OutputPlacement = {
-      id: segment.id,
-      index,
-      sourceStart: segment.source_start_seconds,
-      sourceEnd: segment.source_end_seconds,
-      outputStart: outputCursor,
-      contentDuration: duration,
-      overlapSeconds: 0,
-    };
-    placements.push(placement);
-
+    const pad = padBeforeSeconds(segment);
+    const streamDuration = pad + duration;
+    let streamStart = 0;
     if (index === 0) {
-      total = duration;
+      total = streamDuration;
     } else {
       const previous = segments[index - 1];
       const usable = usableTransitionSeconds(
         previous.transition_type,
         previous.transition_duration_ms,
         total,
-        duration,
+        streamDuration,
       );
-      total += duration - usable;
+      streamStart = usable > 0 ? total - usable : total;
+      total = streamStart + streamDuration;
     }
+    const placement: OutputPlacement = {
+      id: segment.id,
+      index,
+      sourceStart: segment.source_start_seconds,
+      sourceEnd: segment.source_end_seconds,
+      outputStart: streamStart + pad,
+      contentDuration: duration,
+      padSeconds: pad,
+      overlapSeconds: 0,
+    };
+    placements.push(placement);
 
     if (index + 1 < segments.length) {
       const next = segments[index + 1];
@@ -89,10 +105,9 @@ export function buildOutputClock(segments: ReelSegment[]): OutputClock {
         segment.transition_type,
         segment.transition_duration_ms,
         total,
-        Math.max(0, next.duration_seconds),
+        padBeforeSeconds(next) + Math.max(0, next.duration_seconds),
       );
       placement.overlapSeconds = overlap;
-      outputCursor = overlap > 0 ? total - overlap : total;
     }
   }
 

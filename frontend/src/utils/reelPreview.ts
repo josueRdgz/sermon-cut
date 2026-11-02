@@ -5,6 +5,7 @@ export interface PreviewSeekTarget {
   outputTime: number;
   segmentIndex: number;
   sourceTime: number;
+  inPad: boolean;
 }
 
 function segmentSignature(segments: ReelSegment[]): string {
@@ -16,6 +17,7 @@ function segmentSignature(segments: ReelSegment[]): string {
     Math.round(segment.source_end_seconds * 1000) / 1000,
     segment.transition_type,
     segment.transition_duration_ms,
+    Math.round(segment.pad_before_ms ?? 0),
   ]);
   return JSON.stringify(payload);
 }
@@ -46,8 +48,29 @@ export function resolvePreviewSeek(
   for (let index = 0; index < placements.length; index += 1) {
     const placement = placements[index];
     const next = placements[index + 1];
+    const padStart = Math.max(0, placement.outputStart - placement.padSeconds);
+    if (outputTime < placement.outputStart) {
+      if (outputTime >= padStart) {
+        return {
+          outputTime,
+          segmentIndex: index,
+          sourceTime: placement.sourceStart,
+          inPad: true,
+        };
+      }
+      continue;
+    }
     if (next && outputTime >= next.outputStart) {
       continue;
+    }
+    const contentEnd = placement.outputStart + placement.contentDuration;
+    if (next && outputTime >= contentEnd && outputTime < next.outputStart) {
+      return {
+        outputTime,
+        segmentIndex: next.index,
+        sourceTime: next.sourceStart,
+        inPad: true,
+      };
     }
     const localTime = Math.max(
       0,
@@ -57,6 +80,7 @@ export function resolvePreviewSeek(
       outputTime,
       segmentIndex: index,
       sourceTime: placement.sourceStart + localTime,
+      inPad: false,
     };
   }
 
@@ -65,6 +89,7 @@ export function resolvePreviewSeek(
     outputTime,
     segmentIndex: placements.length - 1,
     sourceTime: last.sourceEnd,
+    inPad: false,
   };
 }
 

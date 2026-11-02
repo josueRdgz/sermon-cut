@@ -32,11 +32,13 @@ describe('resolvePreviewSeek', () => {
       outputTime: 2.5,
       segmentIndex: 0,
       sourceTime: 12.5,
+      inPad: false,
     });
     expect(resolvePreviewSeek(segments, 8)).toEqual({
       outputTime: 8,
       segmentIndex: 1,
       sourceTime: 43,
+      inPad: false,
     });
   });
 
@@ -45,6 +47,7 @@ describe('resolvePreviewSeek', () => {
       outputTime: 5,
       segmentIndex: 1,
       sourceTime: 40,
+      inPad: false,
     });
   });
 
@@ -55,6 +58,7 @@ describe('resolvePreviewSeek', () => {
       outputTime: 12,
       segmentIndex: 1,
       sourceTime: 47,
+      inPad: false,
     });
     expect(resolvePreviewSeek([], 1)).toBeNull();
   });
@@ -69,14 +73,32 @@ describe('resolvePreviewSeek', () => {
       outputTime: 4.4,
       segmentIndex: 0,
       sourceTime: 4.4,
+      inPad: false,
     });
     expect(resolvePreviewSeek(xfade, 4.5)).toEqual({
       outputTime: 4.5,
       segmentIndex: 1,
       sourceTime: 10,
+      inPad: false,
     });
     expect(resolvePreviewSeek(xfade, 5)?.segmentIndex).toBe(1);
     expect(resolvePreviewSeek(xfade, 5)?.sourceTime).toBeCloseTo(10.5, 5);
+  });
+
+  it('treats time before a clip as a black pad, not a source seek', () => {
+    const padded = [
+      { ...segment('a', 0, 10, 15), pad_before_ms: 2000 },
+      { ...segment('b', 1, 40, 47), pad_before_ms: 500 },
+    ];
+    expect(resolvePreviewSeek(padded, 1)).toEqual({
+      outputTime: 1,
+      segmentIndex: 0,
+      sourceTime: 10,
+      inPad: true,
+    });
+    expect(resolvePreviewSeek(padded, 2)?.inPad).toBe(false);
+    expect(resolvePreviewSeek(padded, 7.2)?.inPad).toBe(true);
+    expect(resolvePreviewSeek(padded, 7.5)?.inPad).toBe(false);
   });
 });
 

@@ -390,7 +390,7 @@ def test_split_and_join_segment(client: TestClient, project_with_duration: str) 
     segment_id = created.json()["segments"][0]["id"]
     timed = client.patch(
         f"/api/projects/{project_id}/reels/{reel_id}/segments/{segment_id}",
-        json={"caption_in_ms": 500, "caption_out_ms": 9000, "audio_offset_ms": 180},
+        json={"caption_in_ms": 500, "caption_out_ms": 9000, "audio_offset_ms": 180, "pad_before_ms": 1500},
     )
     assert timed.status_code == 200, timed.text
     split = client.post(
@@ -405,7 +405,9 @@ def test_split_and_join_segment(client: TestClient, project_with_duration: str) 
     assert parts[0]["caption_in_ms"] == 500
     assert parts[0]["caption_out_ms"] == 9000
     assert parts[0]["audio_offset_ms"] == 180
+    assert parts[0]["pad_before_ms"] == 1500
     assert parts[1]["audio_offset_ms"] == 180
+    assert parts[1]["pad_before_ms"] == 0
     assert parts[1]["caption_in_ms"] is None
     assert parts[1]["caption_out_ms"] is None
     joined = client.post(

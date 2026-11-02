@@ -264,6 +264,7 @@ export function ReelEditor({
   const [editingSegmentId, setEditingSegmentId] = useState<string | null>(null);
   const [confirmDeleteReel, setConfirmDeleteReel] = useState(false);
   const [previewing, setPreviewing] = useState(false);
+  const [previewInPad, setPreviewInPad] = useState(false);
   const [previewIndex, setPreviewIndex] = useState(0);
   const [previewOutputTime, setPreviewOutputTime] = useState(0);
   const [previewMuted, setPreviewMuted] = useState(false);
@@ -358,6 +359,8 @@ export function ReelEditor({
   const previewMutedRef = useRef(false);
   const previewVolumeRef = useRef(1);
   const previewRafRef = useRef<number | null>(null);
+  const inPadRef = useRef(false);
+  const padWallRef = useRef(0);
   const xfadeRef = useRef<{
     type: TransitionType;
     outLane: 0 | 1;
@@ -976,6 +979,35 @@ export function ReelEditor({
     }
   }
 
+  function handleMoveVideoPad(id: string, padBeforeMs: number, persist = true) {
+    if (!activeReel) return;
+    const nextPad = Math.max(0, Math.min(120_000, Math.round(padBeforeMs)));
+    setReels((prev) =>
+      prev.map((reel) => {
+        if (reel.id !== activeReel.id) return reel;
+        return {
+          ...reel,
+          segments: reel.segments.map((segment) =>
+            segment.id === id ? { ...segment, pad_before_ms: nextPad } : segment,
+          ),
+        };
+      }),
+    );
+    if (!persist) return;
+    debounceSegmentPersist(async () => {
+      try {
+        const updated = await updateReelSegment(projectId, activeReel.id, id, {
+          pad_before_ms: nextPad,
+        });
+        replaceReel(updated);
+      } catch (err) {
+        if (err instanceof ApiError && err.code === 'request_cancelled') return;
+        setError(err instanceof Error ? err.message : 'No se pudo mover el video');
+        void reload();
+      }
+    });
+  }
+
   function handleReorderSegments(orderedIds: string[]) {
     if (!activeReel) return;
     setReels((prev) =>
@@ -1167,7 +1199,7 @@ export function ReelEditor({
     if (!activeReel) return;
     const output = atOutput ?? previewOutputTimeRef.current;
     const target = resolvePreviewSeek(orderedSegmentsRef.current, output);
-    if (!target) {
+    if (!target || target.inPad) {
       setError('Coloca el cursor sobre un clip para partirlo.');
       return;
     }
@@ -1502,8 +1534,12 @@ export function ReelEditor({
     const audio = audioRef.current;
     const xfade = xfadeRef.current;
     const sourceTime = video?.currentTime ?? 0;
-    const outputTime = outputTimeForSource(buildOutputClock(ordered), index, sourceTime);
-    previewOutputTimeRef.current = outputTime;
+    const outputTime = inPadRef.current
+      ? previewOutputTimeRef.current
+      : outputTimeForSource(buildOutputClock(ordered), index, sourceTime);
+    if (!inPadRef.current) {
+      previewOutputTimeRef.current = outputTime;
+    }
     const muted = previewMutedRef.current;
     const volume = previewVolumeRef.current;
     const progress = xfade ? xfadeProgress(sourceTime, ordered) : 0;
@@ -1608,6 +1644,36 @@ export function ReelEditor({
       applyPreviewGain();
       return;
     }
+    if (inPadRef.current) {
+      const now = performance.now();
+      const last = padWallRef.current || now;
+      padWallRef.current = now;
+      const dt = Math.min(0.08, Math.max(0, (now - last) / 1000));
+      const ordered = orderedSegmentsRef.current;
+      const clock = buildOutputClock(ordered);
+      const nextOut = Math.min(clock.totalDuration, previewOutputTimeRef.current + dt);
+      previewOutputTimeRef.current = nextOut;
+      setPreviewOutputTime(nextOut);
+      syncMusicToOutput(nextOut);
+      if (nextOut >= clock.totalDuration - 0.02) {
+        stopPreview();
+        return;
+      }
+      const target = resolvePreviewSeek(ordered, nextOut);
+      if (!target) {
+        stopPreview();
+        return;
+      }
+      if (!target.inPad) {
+        inPadRef.current = false;
+        setPreviewInPad(false);
+        previewIndexRef.current = target.segmentIndex;
+        setPreviewIndex(target.segmentIndex);
+        setSourceTime(target.sourceTime);
+        void jumpPreviewToSource(target.sourceTime, true);
+      }
+      return;
+    }
     const video = programVideo();
     const ordered = orderedSegmentsRef.current;
     const index = previewIndexRef.current;
@@ -1664,6 +1730,8 @@ export function ReelEditor({
       audioOffsetSeekTimerRef.current = null;
     }
     setPreviewing(false);
+    inPadRef.current = false;
+    setPreviewInPad(false);
     videoARef.current?.pause();
     videoBRef.current?.pause();
     assembledVideoRef.current?.pause();
@@ -1734,6 +1802,21 @@ export function ReelEditor({
     const next = ordered[index + 1];
     if (!next) {
       stopPreview();
+      return;
+    }
+    const nextPlacement = buildOutputClock(ordered).placements[index + 1];
+    if (nextPlacement && nextPlacement.padSeconds > 0.02) {
+      previewIndexRef.current = index + 1;
+      setPreviewIndex(index + 1);
+      video.pause();
+      standbyVideo()?.pause();
+      if (audioRef.current) {
+        audioRef.current.pause();
+        audioRef.current.playbackRate = 1;
+      }
+      inPadRef.current = true;
+      setPreviewInPad(true);
+      padWallRef.current = performance.now();
       return;
     }
     previewIndexRef.current = index + 1;
@@ -1956,6 +2039,14 @@ export function ReelEditor({
   function applyPreviewSeek(target: PreviewSeekTarget, approximate: boolean) {
     const video = programVideo();
     if (!video) return;
+    inPadRef.current = Boolean(target.inPad);
+    setPreviewInPad(Boolean(target.inPad));
+    if (target.inPad) {
+      video.pause();
+      standbyVideo()?.pause();
+      audioRef.current?.pause();
+      return;
+    }
     pendingVideoTimeRef.current = target.sourceTime;
     if (approximate) {
       if (setMediaTime(video, target.sourceTime, true)) {
@@ -2020,7 +2111,19 @@ export function ReelEditor({
     const shouldResume = resumeAfterScrubRef.current && previewingRef.current;
     resumeAfterScrubRef.current = false;
     if (target) {
-      void jumpPreviewToSource(target.sourceTime, shouldResume);
+      if (target.inPad) {
+        inPadRef.current = true;
+        setPreviewInPad(true);
+        programVideo()?.pause();
+        if (shouldResume) {
+          padWallRef.current = performance.now();
+          ensurePreviewTick();
+        }
+      } else {
+        inPadRef.current = false;
+        setPreviewInPad(false);
+        void jumpPreviewToSource(target.sourceTime, shouldResume);
+      }
     }
     pendingPreviewSeekRef.current = null;
   }
@@ -2051,6 +2154,18 @@ export function ReelEditor({
     previewingRef.current = true;
     setPreviewing(true);
     ensurePreviewTick();
+    if (target.inPad) {
+      inPadRef.current = true;
+      setPreviewInPad(true);
+      padWallRef.current = performance.now();
+      video.pause();
+      standbyVideo()?.pause();
+      audio?.pause();
+      void playMusicForOutput(target.outputTime);
+      return;
+    }
+    inPadRef.current = false;
+    setPreviewInPad(false);
     const waitForMetadata = (media: HTMLMediaElement) => {
       if (media.error) {
         return Promise.reject(new Error('No se pudo cargar el medio para el preview'));
@@ -2247,7 +2362,7 @@ export function ReelEditor({
 
     function onTimeUpdate(event: Event) {
       const video = programVideo();
-      if (!video || event.target !== video || jumpingRef.current) return;
+      if (!video || event.target !== video || jumpingRef.current || inPadRef.current) return;
       setSourceTime(video.currentTime);
       if (scrubbingRef.current) return;
       if (!previewingRef.current || !activeReel) return;
@@ -2971,6 +3086,7 @@ export function ReelEditor({
                       ? orderedSegments[previewIndex + 1]?.manual_crop_y
                       : null
                   }
+                  inPad={previewInPad}
                 />
                 </div>
               ) : (
@@ -3512,6 +3628,7 @@ export function ReelEditor({
             onSelectOverlay={selectTimelineOverlay}
             onSelectMusic={() => setActiveTool('audio')}
             onReorderSegments={handleReorderSegments}
+            onMoveVideoPad={handleMoveVideoPad}
             onTrimSegment={handleTrimSegment}
             onMoveCaption={handleMoveCaption}
             onMoveCaptions={handleMoveCaptions}

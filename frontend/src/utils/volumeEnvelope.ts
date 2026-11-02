@@ -18,8 +18,11 @@ export function seedEndpoints(
   points: VolumeKeyframe[] | null | undefined,
   durationMs: number,
 ): VolumeKeyframe[] {
-  const ordered = normalizeKeyframes(points);
   const dur = Math.max(1, Math.round(durationMs));
+  const ordered = normalizeKeyframes(points).map((point) => ({
+    t_ms: Math.max(0, Math.min(dur, point.t_ms)),
+    gain: point.gain,
+  }));
   const startGain = ordered[0]?.gain ?? 1;
   const endGain = ordered[ordered.length - 1]?.gain ?? startGain;
   const next = [...ordered];

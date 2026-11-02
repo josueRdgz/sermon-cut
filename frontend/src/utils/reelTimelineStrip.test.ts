@@ -4,9 +4,12 @@ import type { ReelSegment } from '../types/reel';
 import {
   buildClipSpans,
   buildSourceGaps,
+  dropAnchorFromPointer,
+  packRestClosed,
   outputTimeFromTrackRatio,
   playheadPercent,
   pxToTime,
+  reorderIdsByDelta,
   reorderIdsOnDrop,
   shiftCaptionWindow,
 } from './reelTimelineStrip';
@@ -35,6 +38,16 @@ describe('reelTimelineStrip', () => {
     expect(spans[1].widthRatio).toBeCloseTo(0.6);
     expect(spans[2].leftRatio).toBeCloseTo(0.8);
     expect(spans[2].widthRatio).toBeCloseTo(0.2);
+  });
+
+  it('shifts a clip right when it has a leading pad, leaving empty track behind', () => {
+    const spans = buildClipSpans([
+      { ...seg('a', 8, 0), pad_before_ms: 2000 },
+      seg('b', 8, 1),
+    ]);
+    expect(spans[0].start).toBeCloseTo(2);
+    expect(spans[0].leftRatio).toBeCloseTo(2 / 18);
+    expect(spans[1].start).toBeCloseTo(10);
   });
 
   it('maps track click ratio to output time', () => {
@@ -113,6 +126,30 @@ describe('pxToTime', () => {
   });
 });
 
+describe('reorderIdsByDelta', () => {
+  const spans = [
+    { id: 'a', duration: 4 },
+    { id: 'b', duration: 4 },
+    { id: 'c', duration: 4 },
+  ];
+
+  it('moves the first clip after the next one when dragged past a short threshold', () => {
+    expect(reorderIdsByDelta(spans, ['a'], 1.2, 40)).toEqual(['b', 'a', 'c']);
+  });
+
+  it('does not reorder on a tiny nudge', () => {
+    expect(reorderIdsByDelta(spans, ['a'], 0.4, 40)).toBeNull();
+  });
+
+  it('lets a later clip sit to the left of the previous one', () => {
+    expect(reorderIdsByDelta(spans, ['c'], -3)).toEqual(['a', 'c', 'b']);
+  });
+
+  it('moves a clip all the way to the start', () => {
+    expect(reorderIdsByDelta(spans, ['c'], -7)).toEqual(['c', 'a', 'b']);
+  });
+});
+
 describe('reorderIdsOnDrop', () => {
   const ids = ['a', 'b', 'c'];
 
@@ -126,6 +163,43 @@ describe('reorderIdsOnDrop', () => {
 
   it('does nothing when dropping onto itself', () => {
     expect(reorderIdsOnDrop(ids, ['a'], 'a', true)).toBeNull();
+  });
+});
+
+describe('dropAnchorFromPointer', () => {
+  const spans = [
+    { id: 'a', start: 0, duration: 4 },
+    { id: 'b', start: 4, duration: 4 },
+    { id: 'c', start: 8, duration: 4 },
+  ];
+
+  it('inserts the dragged clip at the start when the pointer is before everyone else', () => {
+    expect(dropAnchorFromPointer(spans, 0.2, ['c'])).toEqual({ targetId: 'a', dropAfter: false });
+  });
+
+  it('inserts after the last remaining clip when the pointer is past the end', () => {
+    expect(dropAnchorFromPointer(spans, 11.5, ['a'])).toEqual({ targetId: 'c', dropAfter: true });
+  });
+
+  it('uses the right half of a clip as insert-after', () => {
+    expect(dropAnchorFromPointer(spans, 6.5, ['a'])).toEqual({ targetId: 'b', dropAfter: true });
+  });
+});
+
+describe('packRestClosed', () => {
+  it('slides the remaining clips to the start while one is lifted', () => {
+    const packed = packRestClosed(
+      [
+        { id: 'a', index: 0, start: 0, duration: 4, leftRatio: 0, widthRatio: 0.4 },
+        { id: 'b', index: 1, start: 4, duration: 6, leftRatio: 0.4, widthRatio: 0.6 },
+      ],
+      ['a'],
+      10,
+    );
+    expect(packed).toHaveLength(1);
+    expect(packed[0].id).toBe('b');
+    expect(packed[0].start).toBe(0);
+    expect(packed[0].leftRatio).toBeCloseTo(0);
   });
 });
 

@@ -225,5 +225,7 @@ class ReelSegment(Base):
     volume_keyframes_json: Mapped[str | None] = mapped_column(Text, nullable=True)
     # Per-cut voice sync: positive delays audio, negative advances it.
     audio_offset_ms: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    # Silent black before this clip on the output clock (leading gap / intro).
+    pad_before_ms: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
 
     reel: Mapped[Reel] = relationship(back_populates="segments")

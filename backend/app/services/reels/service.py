@@ -47,6 +47,7 @@ def _timing_view(segments: list[ReelSegment]) -> list[SegmentTiming]:
             source_end_seconds=s.source_end_seconds,
             transition_type=s.transition_type,
             transition_duration_ms=s.transition_duration_ms,
+            pad_before_ms=getattr(s, "pad_before_ms", 0) or 0,
         )
         for s in sorted(segments, key=lambda s: s.order)
     ]
@@ -73,6 +74,7 @@ def _segment_response(segment: ReelSegment) -> ReelSegmentResponse:
         caption_out_ms=getattr(segment, "caption_out_ms", None),
         volume_keyframes=parse_keyframes(getattr(segment, "volume_keyframes_json", None)),
         audio_offset_ms=getattr(segment, "audio_offset_ms", 0) or 0,
+        pad_before_ms=getattr(segment, "pad_before_ms", 0) or 0,
     )
 
 
@@ -410,6 +412,7 @@ def split_segment(
         caption_out_ms=None,
         volume_keyframes_json=segment.volume_keyframes_json,
         audio_offset_ms=getattr(segment, "audio_offset_ms", 0) or 0,
+        pad_before_ms=0,
     )
     segment.source_end_seconds = cut
     segment.transition_type = TransitionType.hard_cut

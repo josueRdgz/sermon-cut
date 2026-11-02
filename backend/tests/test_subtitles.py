@@ -44,6 +44,18 @@ def test_hard_cut_places_second_segment_after_first() -> None:
     assert timeline.total_duration == pytest.approx(50.0)
 
 
+def test_leading_pad_shifts_content_and_grows_total() -> None:
+    timeline = build_output_timeline(
+        [
+            TimelineSegment(100.0, 110.0, pad_before_ms=2000),
+            TimelineSegment(400.0, 410.0, pad_before_ms=500),
+        ]
+    )
+    assert timeline.placements[0].output_start == pytest.approx(2.0)
+    assert timeline.placements[1].output_start == pytest.approx(12.5)
+    assert timeline.total_duration == pytest.approx(22.5)
+
+
 def test_crossfade_shortens_total_and_overlaps_starts() -> None:
     timeline = build_output_timeline(
         [
@@ -452,7 +464,13 @@ def test_timeline_matches_render_expected_duration() -> None:
     )
     timeline = build_output_timeline(
         [
-            TimelineSegment(s.start, s.end, s.transition_type, s.transition_duration_ms)
+            TimelineSegment(
+                s.start,
+                s.end,
+                s.transition_type,
+                s.transition_duration_ms,
+                s.pad_before_ms,
+            )
             for s in specs
         ]
     )

@@ -34,6 +34,7 @@ export interface ReelSegment {
   caption_out_ms?: number | null;
   volume_keyframes?: { t_ms: number; gain: number }[];
   audio_offset_ms?: number;
+  pad_before_ms?: number;
 }
 
 export interface Reel {
@@ -131,6 +132,7 @@ export interface ReelSegmentUpdatePayload {
   caption_out_ms?: number | null;
   volume_keyframes?: { t_ms: number; gain: number }[];
   audio_offset_ms?: number;
+  pad_before_ms?: number;
 }
 
 export interface ReelFromTranscriptPayload {

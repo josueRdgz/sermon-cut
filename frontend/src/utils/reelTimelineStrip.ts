@@ -76,6 +76,114 @@ export function reorderIdsOnDrop(
   return rest;
 }
 
+const REORDER_MIN_PX = 36;
+
+/**
+ * Reorder packed clips by how far the block has been dragged.
+ * Crossing ~36px (or half of a short neighbor) swaps past it.
+ */
+export function reorderIdsByDelta(
+  spans: Array<{ id: string; duration: number }>,
+  movingIds: string[],
+  deltaSeconds: number,
+  pxPerSecond = 40,
+): string[] | null {
+  const ids = spans.map((span) => span.id);
+  const movingSet = new Set(movingIds);
+  const movingOrdered = ids.filter((id) => movingSet.has(id));
+  const rest = spans.filter((span) => !movingSet.has(span.id));
+  if (movingOrdered.length === 0 || rest.length === 0 || !Number.isFinite(deltaSeconds)) return null;
+  const movingDuration = movingOrdered.reduce((sum, id) => {
+    const span = spans.find((item) => item.id === id);
+    return sum + (span?.duration ?? 0);
+  }, 0);
+  const maxThreshold = REORDER_MIN_PX / Math.max(pxPerSecond, 1);
+
+  let originRestIndex = 0;
+  for (const span of spans) {
+    if (movingSet.has(span.id)) break;
+    originRestIndex += 1;
+  }
+
+  let insertAt = originRestIndex;
+  if (deltaSeconds > 0) {
+    let traveled = 0;
+    for (let index = originRestIndex; index < rest.length; index += 1) {
+      const threshold = Math.min(rest[index].duration / 2, movingDuration / 2, maxThreshold);
+      if (deltaSeconds < traveled + threshold) break;
+      traveled += rest[index].duration;
+      insertAt = index + 1;
+    }
+  } else if (deltaSeconds < 0) {
+    let traveled = 0;
+    for (let index = originRestIndex - 1; index >= 0; index -= 1) {
+      const threshold = Math.min(rest[index].duration / 2, movingDuration / 2, maxThreshold);
+      if (-deltaSeconds < traveled + threshold) break;
+      traveled += rest[index].duration;
+      insertAt = index;
+    }
+  }
+
+  const next = rest.map((span) => span.id);
+  next.splice(insertAt, 0, ...movingOrdered);
+  if (next.length !== ids.length || next.every((id, index) => id === ids[index])) return null;
+  return next;
+}
+
+/**
+ * Packed A-roll drop target from a pointer on the output clock.
+ * Hits before the first remaining clip go to the start; past the last go to the end.
+ */
+export function dropAnchorFromPointer(
+  spans: Pick<TimelineClipSpan, 'id' | 'start' | 'duration'>[],
+  outputSeconds: number,
+  movingIds: string[],
+): { targetId: string; dropAfter: boolean } | null {
+  const others = spans.filter((span) => !movingIds.includes(span.id));
+  if (others.length === 0) return null;
+  const first = others[0];
+  if (outputSeconds <= first.start) {
+    return { targetId: first.id, dropAfter: false };
+  }
+  const last = others[others.length - 1];
+  if (outputSeconds >= last.start + last.duration) {
+    return { targetId: last.id, dropAfter: true };
+  }
+  const hit =
+    others.find(
+      (span) => outputSeconds >= span.start && outputSeconds < span.start + span.duration,
+    ) ?? null;
+  if (!hit) return null;
+  return {
+    targetId: hit.id,
+    dropAfter: outputSeconds >= hit.start + hit.duration / 2,
+  };
+}
+
+/**
+ * Close the gap the lifted clips leave so neighbors slide in during a drag.
+ * The moving clips keep their original spans and follow the pointer in the UI.
+ */
+export function packRestClosed(
+  spans: TimelineClipSpan[],
+  movingIds: string[],
+  totalDuration: number,
+): TimelineClipSpan[] {
+  const rest = spans.filter((span) => !movingIds.includes(span.id));
+  const total = Math.max(totalDuration, 0.01);
+  let time = 0;
+  return rest.map((span) => {
+    const next: TimelineClipSpan = {
+      ...span,
+      start: time,
+      leftRatio: time / total,
+      widthRatio: span.duration / total,
+    };
+    time += span.duration;
+    return next;
+  });
+}
+
 const MIN_CAPTION_MS = 200;
 
 /** Slide or trim a caption on the output clock without shrinking past 200 ms. */

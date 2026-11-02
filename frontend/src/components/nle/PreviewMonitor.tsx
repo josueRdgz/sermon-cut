@@ -39,6 +39,7 @@ interface PreviewMonitorProps {
   xfade?: { type: TransitionType; outLane: 0 | 1 } | null;
   incomingCropX?: number | null;
   incomingCropY?: number | null;
+  inPad?: boolean;
 }
 
 function aspectClass(aspect: AspectRatio): 'portrait' | 'square' | 'landscape' {
@@ -77,6 +78,7 @@ export function PreviewMonitor({
   xfade = null,
   incomingCropX = null,
   incomingCropY = null,
+  inPad = false,
 }: PreviewMonitorProps) {
   const videoSrc = projectVideoUrl(projectId, mediaRevision);
   const audioSrc = separateAudio
@@ -95,7 +97,7 @@ export function PreviewMonitor({
     objectPosition: lane0Out ? inPosition : outPosition,
   } as const;
   const hideLane = (lane: 0 | 1) =>
-    previewMode === 'assembled' || (!xfade && activeProgramLane !== lane);
+    inPad || previewMode === 'assembled' || (!xfade && activeProgramLane !== lane);
   const laneClass = (lane: 0 | 1) => {
     const role = xfade ? (xfade.outLane === lane ? 'out' : 'in') : null;
     return `reel-player__video reel-player__video--${videoFit}${

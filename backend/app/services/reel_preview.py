@@ -110,6 +110,7 @@ def ensure_reel_assembled_preview(
             end=item.source_end_seconds,
             transition_type=item.transition_type.value,
             transition_duration_ms=item.transition_duration_ms,
+            pad_before_ms=getattr(item, "pad_before_ms", 0) or 0,
         )
         for item in sorted(reel.segments, key=lambda s: s.order)
     ]

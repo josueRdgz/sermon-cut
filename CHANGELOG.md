@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.4.14] — 2026-11-02
+
+### Changed
+
+- Arrastrar un clip de video a la derecha deja un hueco negro (fondo oscuro) al
+  inicio o entre cortes, en vez de reordenar. El preview y el export FFmpeg
+  respetan ese vacío con silencio.
+
+### Fixed
+
+- En la misma franja los clips pueden ir a izquierda o derecha, pero no se
+  superponen en el mismo tiempo.
+- Los puntos de la curva de volumen quedan dentro de la onda del A-roll.
+
 ## [0.4.13] — 2026-11-02
 
 ### Added

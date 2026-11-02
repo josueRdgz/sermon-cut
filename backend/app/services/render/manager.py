@@ -433,6 +433,7 @@ class RenderManager:
                         for point in parse_keyframes(getattr(item, "volume_keyframes_json", None))
                     ),
                     audio_offset_ms=getattr(item, "audio_offset_ms", 0) or 0,
+                    pad_before_ms=getattr(item, "pad_before_ms", 0) or 0,
                 )
                 for item in sorted(reel.segments, key=lambda s: s.order)
             ]
@@ -476,6 +477,7 @@ class RenderManager:
                             crop_y_expr=y_expr,
                             volume_keyframes=spec.volume_keyframes,
                             audio_offset_ms=spec.audio_offset_ms,
+                            pad_before_ms=spec.pad_before_ms,
                         )
                     )
                 segments = enriched

@@ -1,5 +1,6 @@
 import {
   buildOutputClock,
+  clampPadBeforeMs,
   outputTimeAtSource,
   outputTimeForSource,
   sourceWindowsContiguous,
@@ -91,6 +92,30 @@ describe('reelOutputClock', () => {
     expect(outputTimeAtSource(clock, 2)).toBeCloseTo(2, 5);
     expect(outputTimeAtSource(clock, 12)).toBeCloseTo(7, 5);
     expect(outputTimeAtSource(clock, 7)).toBeNull();
+  });
+
+  it('inserts leading black before a clip and ripples later ones', () => {
+    const clock = buildOutputClock([
+      base({ id: 'a', order: 0, duration_seconds: 5, source_end_seconds: 5, pad_before_ms: 2000 }),
+      base({
+        id: 'b',
+        order: 1,
+        source_start_seconds: 10,
+        source_end_seconds: 16,
+        duration_seconds: 6,
+        pad_before_ms: 500,
+      }),
+    ]);
+    expect(clock.placements[0].outputStart).toBeCloseTo(2, 5);
+    expect(clock.placements[0].padSeconds).toBeCloseTo(2, 5);
+    expect(clock.placements[1].outputStart).toBeCloseTo(7.5, 5);
+    expect(clock.totalDuration).toBeCloseTo(13.5, 5);
+  });
+
+  it('clamps pad to a two-minute ceiling', () => {
+    expect(clampPadBeforeMs(-40)).toBe(0);
+    expect(clampPadBeforeMs(2500.4)).toBe(2500);
+    expect(clampPadBeforeMs(999_999)).toBe(120_000);
   });
 
   it('detects contiguous source windows vs omitted gaps', () => {

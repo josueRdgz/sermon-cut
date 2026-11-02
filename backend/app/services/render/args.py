@@ -86,10 +86,19 @@ class RenderSegmentSpec:
     crop_y_expr: str | None = None
     volume_keyframes: tuple[tuple[float, float], ...] = ()
     audio_offset_ms: int = 0
+    pad_before_ms: int = 0
 
     @property
     def duration(self) -> float:
         return max(0.0, self.end - self.start)
+
+    @property
+    def pad_before_seconds(self) -> float:
+        return max(0, self.pad_before_ms) / 1000.0
+
+    @property
+    def output_duration(self) -> float:
+        return self.duration + self.pad_before_seconds
 
 
 @dataclass(frozen=True)
@@ -198,7 +207,7 @@ def _video_chain(
         effective = segment.layout_override
 
     if effective == LAYOUT_BLURRED_BACKGROUND:
-        return [
+        lines = [
             f"[{index}:v]split=2[bgsrc{index}][fgsrc{index}]",
             (
                 f"[bgsrc{index}]scale={width}:{height}"
@@ -211,15 +220,17 @@ def _video_chain(
             ),
             (f"[bg{index}][fg{index}]overlay=(W-w)/2:(H-h)/2:shortest=1,{common}[v{index}]"),
         ]
+        return _with_leading_black(lines, index, segment)
 
     crop = _crop_filter(width=width, height=height, segment=segment)
-    return [
+    lines = [
         (
             f"[{index}:v]scale={width}:{height}"
             f":force_original_aspect_ratio=increase,"
             f"{crop},{common}[v{index}]"
         )
     ]
+    return _with_leading_black(lines, index, segment)
 
 
 def _crop_filter(
@@ -240,6 +251,27 @@ def _crop_filter(
     return f"crop={width}:{height}"
 
 
+def _with_leading_black(
+    lines: list[str],
+    index: int,
+    segment: RenderSegmentSpec | None,
+) -> list[str]:
+    """Pad black frames at the start of a normalized clip (leading gap)."""
+    pad = 0.0 if segment is None else segment.pad_before_seconds
+    if pad <= 0 or not lines:
+        return lines
+    label = f"[v{index}]"
+    last = lines[-1]
+    if not last.endswith(label):
+        return lines
+    lines[-1] = last[: -len(label)] + f"[vpre{index}]"
+    lines.append(
+        f"[vpre{index}]tpad=start_duration={_fmt(pad)}:start_mode=add:color=black,"
+        f"setpts=PTS-STARTPTS{label}"
+    )
+    return lines
+
+
 def _audio_chain(
     stream: str,
     index: int,
@@ -248,6 +280,7 @@ def _audio_chain(
     delay_seconds: float = 0.0,
     volume_keyframes: tuple[tuple[float, float], ...] = (),
     voice_center: float = 0.0,
+    pad_seconds: float = 0.0,
 ) -> str:
     """Per-segment audio normalization chain, ending in label ``[a{index}]``.
 
@@ -285,6 +318,11 @@ def _audio_chain(
         )
         if envelope:
             parts.append(envelope)
+    if pad_seconds > 0:
+        output_duration = duration + pad_seconds
+        parts.append(f"adelay={round(pad_seconds * 1000)}:all=1")
+        parts.append(f"apad=whole_dur={_fmt(output_duration)}")
+        parts.append(f"atrim=0:{_fmt(output_duration)}")
     return ",".join(parts) + f"[a{index}]"
 
 
@@ -298,7 +336,7 @@ def _join_chain(segments: list[RenderSegmentSpec]) -> tuple[list[str], str, str,
     lines: list[str] = []
     current_v = "v0"
     current_a = "a0"
-    total = segments[0].duration
+    total = segments[0].output_duration
 
     for index in range(1, len(segments)):
         previous = segments[index - 1]
@@ -310,7 +348,7 @@ def _join_chain(segments: list[RenderSegmentSpec]) -> tuple[list[str], str, str,
         usable = min(
             requested,
             total - _MIN_XFADE_SLACK,
-            segment.duration - _MIN_XFADE_SLACK,
+            segment.output_duration - _MIN_XFADE_SLACK,
         )
 
         if transition is None or usable <= 0:
@@ -318,7 +356,7 @@ def _join_chain(segments: list[RenderSegmentSpec]) -> tuple[list[str], str, str,
                 f"[{current_v}][{current_a}][v{index}][a{index}]"
                 f"concat=n=2:v=1:a=1[cv{index}][ca{index}]"
             )
-            total += segment.duration
+            total += segment.output_duration
         else:
             offset = total - usable
             lines.append(
@@ -328,7 +366,7 @@ def _join_chain(segments: list[RenderSegmentSpec]) -> tuple[list[str], str, str,
             lines.append(
                 f"[{current_a}][a{index}]acrossfade=d={_fmt(usable)}:c1=tri:c2=tri[ca{index}]"
             )
-            total += segment.duration - usable
+            total += segment.output_duration - usable
 
         current_v = f"cv{index}"
         current_a = f"ca{index}"
@@ -748,12 +786,13 @@ def build_render_command(
                 delay_seconds=audio_input_delays[index],
                 volume_keyframes=segment.volume_keyframes,
                 voice_center=voice_center,
+                pad_seconds=segment.pad_before_seconds,
             )
         )
 
     if count == 1:
         video_label, audio_label = "v0", "a0"
-        expected = segments[0].duration
+        expected = segments[0].output_duration
     else:
         join_lines, video_label, audio_label, expected = _join_chain(segments)
         filters += join_lines

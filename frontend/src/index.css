@@ -2584,7 +2584,7 @@ a:hover {
   align-items: stretch;
   overflow: hidden;
   position: relative;
-  z-index: 1;
+  z-index: 0;
 }
 
 .reel-nle__workspace > * {
@@ -2666,7 +2666,8 @@ a:hover {
   max-height: calc(100% - 96px);
   overflow: hidden;
   position: relative;
-  z-index: 2;
+  z-index: 4;
+  isolation: isolate;
   display: flex;
   flex-direction: column;
 }
@@ -3639,6 +3640,8 @@ a:hover {
   min-height: 12rem;
   overflow-x: hidden;
   overflow-y: auto;
+  isolation: isolate;
+  background: #141414;
 }
 
 .reel-nle__label-col {
@@ -3664,7 +3667,7 @@ a:hover {
 
 .reel-nle__scroll {
   overflow-x: auto;
-  overflow-y: visible;
+  overflow-y: hidden;
   min-width: 0;
   min-height: 0;
   height: auto;
@@ -3720,9 +3723,9 @@ a:hover {
   padding: 0;
   border: 0;
   background: transparent;
-  z-index: 5;
+  z-index: 6;
   cursor: ew-resize;
-  pointer-events: auto;
+  pointer-events: none;
 }
 
 .reel-nle__playhead-head {
@@ -3735,6 +3738,7 @@ a:hover {
   background: var(--nle-playhead);
   border-radius: 2px 2px 0 0;
   box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.55);
+  pointer-events: auto;
 }
 
 .reel-nle__playhead-line {
@@ -3781,6 +3785,9 @@ a:hover {
   color: var(--text-secondary);
   font-size: 0.9rem;
   cursor: pointer;
+  position: relative;
+  z-index: 0;
+  flex: 0 0 auto;
 }
 
 .reel-nle__add-lane:hover {
@@ -3794,7 +3801,7 @@ a:hover {
   border-radius: 6px;
   background: var(--nle-track-bg);
   border: 1px solid var(--nle-track-border);
-  overflow: hidden;
+  overflow: visible;
 }
 
 .reel-nle__track--aroll {
@@ -3811,13 +3818,15 @@ a:hover {
   background: color-mix(in srgb, var(--accent) 14%, var(--nle-track-bg));
 }
 
-.reel-nle__strip--lane-drag .reel-nle__track {
-  overflow: visible;
+.reel-nle__track--drop-blocked {
+  outline: 1px dashed #e07070;
+  outline-offset: -1px;
+  background: color-mix(in srgb, #e07070 12%, var(--nle-track-bg));
 }
 
 .reel-nle__clip--dragging {
   z-index: 12;
-  pointer-events: none;
+  cursor: grabbing;
   box-shadow: 0 10px 22px rgba(0, 0, 0, 0.45);
   opacity: 0.96;
 }
@@ -3837,16 +3846,18 @@ a:hover {
 
 .reel-nle__envelope {
   position: absolute;
-  inset: 0;
+  inset: 6px 8px;
   z-index: 2;
-  cursor: ns-resize;
+  pointer-events: none;
+  overflow: hidden;
   touch-action: none;
 }
 
 .reel-nle__envelope svg {
   width: 100%;
   height: 100%;
-  overflow: visible;
+  overflow: hidden;
+  pointer-events: none;
 }
 
 .reel-nle__envelope polyline {
@@ -3860,9 +3871,9 @@ a:hover {
 
 .reel-nle__envelope-dot {
   position: absolute;
-  width: 14px;
-  height: 14px;
-  margin: -7px 0 0 -7px;
+  width: 10px;
+  height: 10px;
+  margin: -5px 0 0 -5px;
   border-radius: 50%;
   background: #fff3c4;
   border: 1px solid #1a1a1a;
@@ -3918,7 +3929,20 @@ a:hover {
   border-color: color-mix(in srgb, var(--nle-clip-video) 70%, #000);
   cursor: grab;
   touch-action: none;
-  z-index: 4;
+  user-select: none;
+  -webkit-user-drag: none;
+  pointer-events: auto;
+  z-index: 5;
+}
+
+.reel-nle__clip--aroll .reel-nle__clip-video,
+.reel-nle__clip--aroll .reel-nle__clip-label {
+  pointer-events: auto;
+  cursor: grab;
+}
+
+.reel-nle__clip--aroll .reel-nle__clip-wave {
+  pointer-events: none;
 }
 
 .reel-nle__clip-video {
@@ -3938,6 +3962,7 @@ a:hover {
   flex: 0.95 1 0;
   min-height: 1.7rem;
   position: relative;
+  overflow: hidden;
   background: #12343c;
   border-top: 1px solid rgba(0, 0, 0, 0.35);
 }
@@ -3979,7 +4004,7 @@ a:hover {
   cursor: grab;
   z-index: 1;
   touch-action: none;
-  pointer-events: none;
+  pointer-events: auto;
 }
 
 .reel-nle__clip--caption .reel-nle__clip-label,
@@ -3988,8 +4013,13 @@ a:hover {
 }
 
 .reel-nle__clip--caption .reel-nle__clip-label {
-  min-height: 100%;
-  width: 100%;
+  position: absolute;
+  inset: 0;
+  min-height: 0;
+  width: auto;
+  display: flex;
+  align-items: center;
+  padding: 0 0.5rem;
 }
 
 .reel-nle__clip--caption.reel-nle__clip--dragging,
@@ -4125,7 +4155,7 @@ a:hover {
   border: 0;
   background: transparent;
   transform: translateX(-50%);
-  z-index: 5;
+  z-index: 3;
   cursor: copy;
 }
 
@@ -4475,7 +4505,8 @@ a:hover {
 
   .reel-nle__timeline-slot {
     flex: 1 1 34%;
-    z-index: 2;
+    z-index: 4;
+    isolation: isolate;
     max-height: min(38vh, calc(100% - 220px));
     min-height: 10rem;
   }

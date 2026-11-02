@@ -45,6 +45,7 @@ class ReelSegmentUpdate(BaseModel):
     caption_out_ms: int | None = Field(default=None, ge=0)
     volume_keyframes: list[dict] | None = None
     audio_offset_ms: int | None = Field(default=None, ge=-1000, le=1000)
+    pad_before_ms: int | None = Field(default=None, ge=0, le=120000)
 
 
 class ReelSegmentReorderItem(BaseModel):
@@ -137,6 +138,7 @@ class ReelSegmentResponse(BaseModel):
     caption_out_ms: int | None = None
     volume_keyframes: list[dict] = Field(default_factory=list)
     audio_offset_ms: int = 0
+    pad_before_ms: int = 0
 
 
 class ReelResponse(BaseModel):
