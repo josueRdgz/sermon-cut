@@ -175,24 +175,24 @@ export function PreviewMonitor({
             />
           )}
           <div id="reel-subtitle-overlay" className="reel-player__subtitle-slot" />
+          <audio
+            ref={audioRef}
+            className="reel-player__preview-audio"
+            preload="auto"
+            src={audioSrc}
+            aria-hidden="true"
+          />
+          {musicActive && musicFilename && (
+            <audio
+              ref={musicRef}
+              className="reel-player__preview-audio"
+              preload="auto"
+              src={backgroundMusicAudioUrl(projectId, musicFilename)}
+              aria-hidden="true"
+            />
+          )}
         </div>
       </div>
-      <audio
-        ref={audioRef}
-        className="reel-player__preview-audio"
-        preload="auto"
-        src={audioSrc}
-        aria-hidden="true"
-      />
-      {musicActive && musicFilename && (
-        <audio
-          ref={musicRef}
-          className="reel-player__preview-audio"
-          preload="auto"
-          src={backgroundMusicAudioUrl(projectId, musicFilename)}
-          aria-hidden="true"
-        />
-      )}
     </div>
   );
 }

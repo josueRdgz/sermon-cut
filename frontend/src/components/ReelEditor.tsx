@@ -1570,9 +1570,20 @@ export function ReelEditor({
     const graph = getVoiceCenterGraph();
     voiceCenterGraphRef.current = graph;
     graph.setAmount(voiceCenterRef.current);
-    if (voiceCenterRef.current >= 0.01 || graph.attached) {
-      graph.attach([videoARef.current, videoBRef.current, audioRef.current]);
+    if (graph.running && (voiceCenterRef.current >= 0.01 || graph.attached)) {
+      graph.attach(liveVoiceElements());
     }
+  }
+
+  function liveVoiceElements(): HTMLMediaElement[] {
+    const audio = audioRef.current;
+    const video = programVideo();
+    const standby = standbyVideo();
+    if (separateAudioReady() && !xfadeRef.current && audio) return [audio];
+    const live: HTMLMediaElement[] = [];
+    if (video && !video.muted) live.push(video);
+    if (xfadeRef.current && standby && !standby.muted) live.push(standby);
+    return live;
   }
 
   function ensureSeparateAudioPlaying() {
@@ -2010,7 +2021,14 @@ export function ReelEditor({
     if (!activeReel) return;
     const next = clampVoiceCenter(amount);
     voiceCenterRef.current = next;
-    voiceCenterGraphRef.current?.setAmount(next);
+    const graph = getVoiceCenterGraph();
+    voiceCenterGraphRef.current = graph;
+    graph.setAmount(next);
+    void graph.resume().then((ok) => {
+      if (!ok) return;
+      graph.attach(liveVoiceElements());
+      if (previewingRef.current) ensureSeparateAudioPlaying();
+    });
     setReels((prev) =>
       prev.map((reel) => (reel.id === activeReel.id ? { ...reel, voice_center: next } : reel)),
     );
@@ -2160,7 +2178,14 @@ export function ReelEditor({
     // Prefer a single element (locked A/V). Separate audio only when the user
     // requested an explicit offset — dual seekers break hard cuts in WKWebView.
     applyPreviewGain();
-    getVoiceCenterGraph().resume();
+    void getVoiceCenterGraph()
+      .resume()
+      .then((ok) => {
+        if (!ok) return;
+        getVoiceCenterGraph().attach(liveVoiceElements());
+        applyPreviewGain();
+        if (previewingRef.current) ensureSeparateAudioPlaying();
+      });
     previewingRef.current = true;
     setPreviewing(true);
     if (target.inPad) {

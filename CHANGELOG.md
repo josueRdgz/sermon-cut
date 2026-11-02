@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.4.16] — 2026-11-02
+
+### Fixed
+
+- Mover **Centrar voz** ya no deja el preview mudo: el grafo de audio solo
+  captura el elemento que está sonando (nunca un video silenciado), espera a
+  un gesto del usuario y remezcla en el AudioContext en lugar de un splitter
+  que WKWebView deja en silencio.
+
 ## [0.4.15] — 2026-11-02
 
 ### Fixed

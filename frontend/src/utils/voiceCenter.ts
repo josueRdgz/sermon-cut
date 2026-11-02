@@ -17,11 +17,18 @@ export function voiceCenterGains(amount: number | null | undefined): {
   return { keepLeft, mixRightIntoLeft: g * keepLeft };
 }
 
+export function mixVoiceCenterSample(
+  left: number,
+  right: number,
+  amount: number | null | undefined,
+): { left: number; right: number } {
+  const { keepLeft, mixRightIntoLeft } = voiceCenterGains(amount);
+  return { left: keepLeft * left + mixRightIntoLeft * right, right };
+}
+
 interface VoiceCenterTap {
-  splitter: ChannelSplitterNode;
-  merger: ChannelMergerNode;
-  keepLeft: GainNode;
-  mixRight: GainNode;
+  source: MediaElementAudioSourceNode;
+  processor: ScriptProcessorNode;
 }
 
 let sharedGraph: VoiceCenterGraph | null = null;
@@ -35,6 +42,10 @@ export function getVoiceCenterGraph(): VoiceCenterGraph {
 /**
  * Routes sermon media through a stereo mix so a right-channel voice sits
  * closer to the center. ``element.volume`` / ``muted`` still apply.
+ *
+ * Capture only after the AudioContext is running (a user gesture). Capturing a
+ * muted video, or capturing while the context is suspended, leaves WKWebView
+ * silent because createMediaElementSource cannot be undone.
  */
 export class VoiceCenterGraph {
   private context: AudioContext | null = null;
@@ -45,48 +56,66 @@ export class VoiceCenterGraph {
     return this.taps.size > 0;
   }
 
-  setAmount(amount: number) {
-    this.amount = clampVoiceCenter(amount);
-    this.applyGains();
+  get running(): boolean {
+    return this.context?.state === 'running';
   }
 
-  resume() {
-    const ctx = this.context;
-    if (ctx && ctx.state === 'suspended') {
-      void ctx.resume().catch(() => undefined);
+  setAmount(amount: number) {
+    this.amount = clampVoiceCenter(amount);
+  }
+
+  async resume(): Promise<boolean> {
+    const ctx = this.ensureContext();
+    if (!ctx) return false;
+    if (ctx.state === 'suspended') {
+      try {
+        await ctx.resume();
+      } catch {
+        return false;
+      }
     }
+    return ctx.state === 'running';
   }
 
   attach(elements: Array<HTMLMediaElement | null | undefined>) {
-    const live = elements.filter((item): item is HTMLMediaElement => Boolean(item));
-    if (live.length === 0) return;
-    const ctx = this.ensureContext();
-    if (!ctx) return;
-    this.resume();
+    const ctx = this.context;
+    if (!ctx || ctx.state !== 'running') return;
+    const live = elements.filter((item): item is HTMLMediaElement =>
+      Boolean(item && item.isConnected && item.readyState >= HTMLMediaElement.HAVE_METADATA && !item.muted),
+    );
     for (const [element] of this.taps) {
       if (!element.isConnected) this.taps.delete(element);
     }
     for (const element of live) {
       if (this.taps.has(element)) continue;
+      const wasPlaying = !element.paused;
       try {
         const source = ctx.createMediaElementSource(element);
-        const splitter = ctx.createChannelSplitter(2);
-        const merger = ctx.createChannelMerger(2);
-        const keepLeft = ctx.createGain();
-        const mixRight = ctx.createGain();
-        source.connect(splitter);
-        splitter.connect(keepLeft, 0);
-        splitter.connect(mixRight, 1);
-        splitter.connect(merger, 1, 1);
-        keepLeft.connect(merger, 0, 0);
-        mixRight.connect(merger, 0, 0);
-        merger.connect(ctx.destination);
-        this.taps.set(element, { splitter, merger, keepLeft, mixRight });
+        const processor = ctx.createScriptProcessor(1024, 2, 2);
+        processor.onaudioprocess = (event) => {
+          const input = event.inputBuffer;
+          const output = event.outputBuffer;
+          const inL = input.getChannelData(0);
+          const inR = input.numberOfChannels > 1 ? input.getChannelData(1) : inL;
+          const outL = output.getChannelData(0);
+          const outR = output.numberOfChannels > 1 ? output.getChannelData(1) : outL;
+          const { keepLeft, mixRightIntoLeft } = voiceCenterGains(this.amount);
+          for (let i = 0; i < inL.length; i++) {
+            const right = inR[i] ?? inL[i];
+            outL[i] = keepLeft * inL[i] + mixRightIntoLeft * right;
+            if (outR !== outL) outR[i] = right;
+          }
+        };
+        source.connect(processor);
+        processor.connect(ctx.destination);
+        this.taps.set(element, { source, processor });
+        if (wasPlaying) {
+          void element.play().catch(() => undefined);
+        }
       } catch {
         // Already captured by another graph, or the element is not ready.
       }
     }
-    this.applyGains();
   }
 
   private ensureContext(): AudioContext | null {
@@ -97,13 +126,5 @@ export class VoiceCenterGraph {
     if (!Ctor) return null;
     this.context = new Ctor();
     return this.context;
-  }
-
-  private applyGains() {
-    const { keepLeft, mixRightIntoLeft } = voiceCenterGains(this.amount);
-    this.taps.forEach((tap) => {
-      tap.keepLeft.gain.value = keepLeft;
-      tap.mixRight.gain.value = mixRightIntoLeft;
-    });
   }
 }
