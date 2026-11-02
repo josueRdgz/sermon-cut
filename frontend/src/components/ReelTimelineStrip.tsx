@@ -42,6 +42,7 @@ import {
   outputTimeFromTrackRatio,
   playheadPercent,
   pxToTime,
+  reorderIdsOnDrop,
   shiftCaptionWindow,
   timeToPx,
 } from '../utils/reelTimelineStrip';
@@ -212,12 +213,9 @@ export function ReelTimelineStrip({
     reelId ? loadLaneLayout(reelId) : defaultLaneLayout(),
   );
   const [menu, setMenu] = useState<{ x: number; y: number; items: NleMenuItem[] } | null>(null);
-  const [captionDraft, setCaptionDraft] = useState<{
-    id: string;
-    inMs: number;
-    outMs: number;
-    lane: number;
-  } | null>(null);
+  const [captionDrafts, setCaptionDrafts] = useState<
+    Record<string, { inMs: number; outMs: number; lane: number }>
+  >({});
   const [overlayDrafts, setOverlayDrafts] = useState<
     Record<string, { startMs: number; lane: number }>
   >({});
@@ -445,6 +443,12 @@ export function ReelTimelineStrip({
     const pointerId = event.pointerId;
     const startX = event.clientX;
     const startY = event.clientY;
+    const target = event.currentTarget;
+    try {
+      target.setPointerCapture(pointerId);
+    } catch {
+      // already captured
+    }
     let last = origins;
 
     const apply = (clientX: number, clientY: number) => {
@@ -458,16 +462,21 @@ export function ReelTimelineStrip({
         lane: dropLane != null ? dropLane : origin.lane,
       }));
       setOverlayDrafts(Object.fromEntries(last.map((entry) => [entry.id, entry])));
-      if (onMoveOverlays) onMoveOverlays(last, false);
     };
 
     const onMove = (moveEvent: globalThis.PointerEvent) => {
       if (moveEvent.pointerId !== pointerId) return;
+      moveEvent.preventDefault();
       apply(moveEvent.clientX, moveEvent.clientY);
     };
     const onUp = (upEvent: globalThis.PointerEvent) => {
       if (upEvent.pointerId !== pointerId) return;
       apply(upEvent.clientX, upEvent.clientY);
+      try {
+        target.releasePointerCapture(pointerId);
+      } catch {
+        // already released
+      }
       if (onMoveOverlays) onMoveOverlays(last, true);
       else {
         last.forEach((entry) => {
@@ -478,14 +487,14 @@ export function ReelTimelineStrip({
         });
       }
       setOverlayDrafts({});
-      window.removeEventListener('pointermove', onMove);
-      window.removeEventListener('pointerup', onUp);
-      window.removeEventListener('pointercancel', onUp);
+      window.removeEventListener('pointermove', onMove, true);
+      window.removeEventListener('pointerup', onUp, true);
+      window.removeEventListener('pointercancel', onUp, true);
     };
 
-    window.addEventListener('pointermove', onMove);
-    window.addEventListener('pointerup', onUp);
-    window.addEventListener('pointercancel', onUp);
+    window.addEventListener('pointermove', onMove, true);
+    window.addEventListener('pointerup', onUp, true);
+    window.addEventListener('pointercancel', onUp, true);
   }
 
   function beginSegmentDrag(event: PointerEvent<HTMLElement>, segment: ReelSegment) {
@@ -503,10 +512,17 @@ export function ReelTimelineStrip({
     const pointerId = event.pointerId;
     const startY = event.clientY;
     const startX = event.clientX;
+    const target = event.currentTarget;
+    try {
+      target.setPointerCapture(pointerId);
+    } catch {
+      // already captured
+    }
     let lastLane = originLane;
 
     const onMove = (moveEvent: globalThis.PointerEvent) => {
       if (moveEvent.pointerId !== pointerId) return;
+      moveEvent.preventDefault();
       autoScrollBoard(moveEvent.clientY);
       const hover = laneFromClientY(moveEvent.clientY);
       if (hover != null) lastLane = hover;
@@ -520,9 +536,14 @@ export function ReelTimelineStrip({
 
     const onUp = (upEvent: globalThis.PointerEvent) => {
       if (upEvent.pointerId !== pointerId) return;
-      window.removeEventListener('pointermove', onMove);
-      window.removeEventListener('pointerup', onUp);
-      window.removeEventListener('pointercancel', onUp);
+      window.removeEventListener('pointermove', onMove, true);
+      window.removeEventListener('pointerup', onUp, true);
+      window.removeEventListener('pointercancel', onUp, true);
+      try {
+        target.releasePointerCapture(pointerId);
+      } catch {
+        // already released
+      }
       setSegmentDraft(null);
       const dropLane = laneFromClientY(upEvent.clientY) ?? lastLane;
       const dy = upEvent.clientY - startY;
@@ -538,20 +559,22 @@ export function ReelTimelineStrip({
       if (!surface || !onReorderSegments) return;
       const output = timeFromClientX(upEvent.clientX, surface, totalDuration, pxPerSecond);
       const targetId = segmentAtOutput(spans, output);
-      if (!targetId || groupIds.includes(targetId)) return;
-      const ids = segments.map((entry) => entry.id);
-      const moving = ids.filter((id) => groupIds.includes(id));
-      const rest = ids.filter((id) => !groupIds.includes(id));
-      const insertAt = rest.indexOf(targetId);
-      if (insertAt < 0) return;
-      rest.splice(insertAt, 0, ...moving);
-      onReorderSegments(rest);
+      if (!targetId) return;
+      const targetSpan = spans.find((span) => span.id === targetId);
+      const mid = (targetSpan?.start ?? 0) + (targetSpan?.duration ?? 0) / 2;
+      const next = reorderIdsOnDrop(
+        segments.map((entry) => entry.id),
+        groupIds,
+        targetId,
+        output >= mid,
+      );
+      if (next) onReorderSegments(next);
     };
 
     setSegmentDraft({ ids: groupIds, dx: 0, dy: 0, lane: originLane });
-    window.addEventListener('pointermove', onMove);
-    window.addEventListener('pointerup', onUp);
-    window.addEventListener('pointercancel', onUp);
+    window.addEventListener('pointermove', onMove, true);
+    window.addEventListener('pointerup', onUp, true);
+    window.addEventListener('pointercancel', onUp, true);
   }
 
   function beginCaptionDrag(
@@ -573,6 +596,12 @@ export function ReelTimelineStrip({
     const pointerId = event.pointerId;
     const startX = event.clientX;
     const startY = event.clientY;
+    const target = event.currentTarget;
+    try {
+      target.setPointerCapture(pointerId);
+    } catch {
+      // already captured or not a capturing target
+    }
     const layoutNow = { ...laneLayoutRef.current, laneCount };
     const groupIds = edge === 'move' ? selectedIds('caption', segment.id) : [segment.id];
     const origins = groupIds.map((id) => {
@@ -589,7 +618,8 @@ export function ReelTimelineStrip({
       };
     });
     const totalMs = Math.max(200, totalDuration * 1000);
-    let last = origins;
+    let last: Array<{ id: string; inMs: number; outMs: number; lane: number; dropLane: number }> =
+      origins.map((origin) => ({ ...origin, dropLane: origin.lane }));
 
     const apply = (clientX: number, clientY: number) => {
       autoScrollBoard(clientY);
@@ -599,27 +629,42 @@ export function ReelTimelineStrip({
       last = origins.map((origin) => ({
         ...shiftCaptionWindow(origin.inMs, origin.outMs, deltaMs, edge, totalMs),
         id: origin.id,
-        lane: dropLane != null ? dropLane : origin.lane,
+        // Keep the origin lane in the DOM while dragging so pointer capture
+        // is not lost when the clip remounts on another track.
+        lane: origin.lane,
+        dropLane: dropLane != null ? dropLane : origin.lane,
       }));
-      const primary = last.find((entry) => entry.id === segment.id) ?? last[0];
-      setCaptionDraft({ id: primary.id, inMs: primary.inMs, outMs: primary.outMs, lane: primary.lane });
-      if (onMoveCaptions) onMoveCaptions(last, false);
-      else last.forEach((entry) => onMoveCaption(entry.id, entry.inMs, entry.outMs, false));
+      setCaptionDrafts(
+        Object.fromEntries(
+          last.map((entry) => [
+            entry.id,
+            { inMs: entry.inMs, outMs: entry.outMs, lane: entry.lane },
+          ]),
+        ),
+      );
     };
 
     const onMove = (moveEvent: globalThis.PointerEvent) => {
       if (moveEvent.pointerId !== pointerId) return;
+      moveEvent.preventDefault();
       apply(moveEvent.clientX, moveEvent.clientY);
     };
     const onUp = (upEvent: globalThis.PointerEvent) => {
       if (upEvent.pointerId !== pointerId) return;
       apply(upEvent.clientX, upEvent.clientY);
+      try {
+        target.releasePointerCapture(pointerId);
+      } catch {
+        // already released
+      }
       const layout = laneLayoutRef.current;
       const nextLanes = { ...layout.captionLanes };
       let lanesChanged = false;
       last.forEach((entry, index) => {
-        if (entry.lane !== origins[index]?.lane) {
-          nextLanes[entry.id] = entry.lane;
+        const nextLane = entry.dropLane ?? entry.lane;
+        entry.lane = nextLane;
+        if (nextLane !== origins[index]?.lane) {
+          nextLanes[entry.id] = nextLane;
           lanesChanged = true;
         }
       });
@@ -632,15 +677,15 @@ export function ReelTimelineStrip({
       }
       if (onMoveCaptions) onMoveCaptions(last, true);
       else last.forEach((entry) => onMoveCaption(entry.id, entry.inMs, entry.outMs, true));
-      setCaptionDraft(null);
-      window.removeEventListener('pointermove', onMove);
-      window.removeEventListener('pointerup', onUp);
-      window.removeEventListener('pointercancel', onUp);
+      setCaptionDrafts({});
+      window.removeEventListener('pointermove', onMove, true);
+      window.removeEventListener('pointerup', onUp, true);
+      window.removeEventListener('pointercancel', onUp, true);
     };
 
-    window.addEventListener('pointermove', onMove);
-    window.addEventListener('pointerup', onUp);
-    window.addEventListener('pointercancel', onUp);
+    window.addEventListener('pointermove', onMove, true);
+    window.addEventListener('pointerup', onUp, true);
+    window.addEventListener('pointercancel', onUp, true);
   }
 
   function beginVolumeDrag(
@@ -960,7 +1005,7 @@ export function ReelTimelineStrip({
     <div
       className={`reel-nle__strip${dragging ? ' reel-nle__strip--dragging' : ''}${
         dragOver ? ' reel-nle__strip--drag-over' : ''
-      }${segmentDraft ? ' reel-nle__strip--lane-drag' : ''}`}
+      }${segmentDraft || Object.keys(captionDrafts).length > 0 ? ' reel-nle__strip--lane-drag' : ''}`}
       aria-label="Línea temporal del Reel"
     >
       <button
@@ -1042,7 +1087,8 @@ export function ReelTimelineStrip({
                 return clampLane(z, laneCount) === lane;
               });
               const laneCaptions = spans.filter((span) => {
-                if (captionDraft?.id === segments[span.index].id) return captionDraft.lane === lane;
+                const draft = captionDrafts[segments[span.index].id];
+                if (draft) return draft.lane === lane;
                 return laneForCaption(layoutWithCount, segments[span.index].id) === lane;
               });
               const laneVideos = spans.filter((span) => {
@@ -1475,7 +1521,7 @@ export function ReelTimelineStrip({
                       nleItemSelected(selection, { kind: 'caption', id: segment.id }) ||
                       segment.id === selectedSegmentId;
                     const label = (captionLabels[segment.id] ?? '').trim();
-                    const draft = captionDraft?.id === segment.id ? captionDraft : null;
+                    const draft = captionDrafts[segment.id] ?? null;
                     const startSec =
                       draft != null
                         ? draft.inMs / 1000

@@ -62,6 +62,8 @@ export interface Reel {
   framing_mode?: FramingMode | string;
   /** Positive delays audio; negative advances it. */
   audio_offset_ms: number;
+  /** Mix the right-channel voice toward the stereo center (0 = original). */
+  voice_center?: number;
   created_at: string;
   updated_at: string;
   segments: ReelSegment[];
@@ -116,6 +118,7 @@ export interface ReelUpdatePayload {
   aspect_ratio?: AspectRatio;
   status?: ReelStatus;
   audio_offset_ms?: number;
+  voice_center?: number;
 }
 
 export interface ReelSegmentUpdatePayload {

@@ -90,6 +90,17 @@ describe('previewTimelineIdentity', () => {
     );
   });
 
+  it('does not change when caption windows slide on the output clock', () => {
+    const original = [segment('a', 0, 10, 15), segment('b', 1, 40, 47)];
+    const moved = original.map((item, index) =>
+      index === 0 ? { ...item, caption_in_ms: 400, caption_out_ms: 2800 } : item,
+    );
+
+    expect(previewTimelineIdentity('reel-1', moved)).toBe(
+      previewTimelineIdentity('reel-1', original),
+    );
+  });
+
   it('changes when the selected Reel or timing changes', () => {
     const original = [segment('a', 0, 10, 15), segment('b', 1, 40, 47)];
     const trimmed = [

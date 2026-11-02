@@ -247,12 +247,15 @@ def _audio_chain(
     *,
     delay_seconds: float = 0.0,
     volume_keyframes: tuple[tuple[float, float], ...] = (),
+    voice_center: float = 0.0,
 ) -> str:
     """Per-segment audio normalization chain, ending in label ``[a{index}]``.
 
     Mono/stereo/other layouts are converted to a fixed stereo 48 kHz stream, and
     a ~15 ms fade is applied at both edges so joins never click.
     """
+    from app.services.audio.voice_center import build_voice_center_filter
+
     fade = min(BOUNDARY_FADE_SECONDS, max(duration / 4.0, 0.0))
     parts = [
         f"[{stream}]aformat=sample_fmts=fltp:sample_rates={TARGET_SAMPLE_RATE}"
@@ -260,6 +263,9 @@ def _audio_chain(
         f"aresample={TARGET_SAMPLE_RATE}",
         "asetpts=PTS-STARTPTS",
     ]
+    pan = build_voice_center_filter(voice_center)
+    if pan:
+        parts.append(pan)
     if delay_seconds > 0:
         parts.append(f"adelay={round(delay_seconds * 1000)}:all=1")
     # An advanced offset can seek close to the beginning/end of the source.
@@ -592,6 +598,7 @@ def build_render_command(
     background_music: BackgroundMusicSpec | None = None,
     loudness: LoudnessSpec | None = None,
     audio_offset_ms: int = 0,
+    voice_center: float = 0.0,
     overlays: list[OverlaySpec] | None = None,
 ) -> RenderPlan:
     """Build the full FFmpeg argument list for one reel render.
@@ -740,6 +747,7 @@ def build_render_command(
                 segment.duration,
                 delay_seconds=audio_input_delays[index],
                 volume_keyframes=segment.volume_keyframes,
+                voice_center=voice_center,
             )
         )
 

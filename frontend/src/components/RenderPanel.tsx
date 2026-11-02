@@ -24,6 +24,7 @@ import { ACTIVE_RENDER_STATUSES } from '../types/render';
 import { groupCoherenceIssues } from '../utils/coherenceGroups';
 import { formatDuration } from '../utils/format';
 import { nativeVideoControlProps } from '../utils/nativeMediaControls';
+import { previewTimelineIdentity } from '../utils/reelPreview';
 import { ConfirmDialog } from './ConfirmDialog';
 import { ProgressBar } from './ProgressBar';
 
@@ -133,6 +134,7 @@ export function RenderPanel({
   const [pendingDeleteRender, setPendingDeleteRender] = useState<RenderJob | null>(null);
   const previousReelRef = useRef<string>(reelId);
   const segmentCount = segments.length;
+  const cutsIdentity = previewTimelineIdentity(reelId, segments);
 
   const matchingProfiles = useMemo(
     () => profiles.filter((item) => item.aspect_ratio === reelAspectRatio),
@@ -208,7 +210,7 @@ export function RenderPanel({
       window.clearTimeout(timer);
       controller.abort();
     };
-  }, [projectId, reelId, segmentCount, segments]);
+  }, [projectId, reelId, segmentCount, cutsIdentity]);
 
   useEffect(() => {
     let cancelled = false;

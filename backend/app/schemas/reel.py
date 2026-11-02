@@ -84,6 +84,7 @@ class ReelCreate(BaseModel):
     aspect_ratio: AspectRatio = AspectRatio.nine_sixteen
     status: ReelStatus = ReelStatus.draft
     audio_offset_ms: int = Field(default=0, ge=-1000, le=1000)
+    voice_center: float = Field(default=0.35, ge=0.0, le=1.0)
     segments: list[ReelSegmentCreate] = Field(default_factory=list)
 
 
@@ -111,6 +112,7 @@ class ReelUpdate(BaseModel):
     status: ReelStatus | None = None
     framing_mode: str | None = None
     audio_offset_ms: int | None = Field(default=None, ge=-1000, le=1000)
+    voice_center: float | None = Field(default=None, ge=0.0, le=1.0)
 
 
 class ReelSegmentResponse(BaseModel):
@@ -166,6 +168,7 @@ class ReelResponse(BaseModel):
     status: ReelStatus
     framing_mode: str = "center_crop"
     audio_offset_ms: int = 0
+    voice_center: float = 0.35
     created_at: datetime
     updated_at: datetime
     segments: list[ReelSegmentResponse]

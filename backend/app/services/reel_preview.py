@@ -136,6 +136,7 @@ def ensure_reel_assembled_preview(
         end_card=None,
         background_music=None,
         audio_offset_ms=getattr(reel, "audio_offset_ms", 0) or 0,
+        voice_center=float(getattr(reel, "voice_center", 0.0) or 0.0),
         overlays=overlay_specs or None,
     )
     args = list(plan.args)

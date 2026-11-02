@@ -22,6 +22,7 @@ import {
   reorderReelSegments,
   joinReelSegment,
   splitReelSegment,
+  updateReel,
   updateReelSegment,
 } from '../api/reels';
 import { getTranscript } from '../api/transcripts';
@@ -75,6 +76,7 @@ import {
   resolvePreviewSeek,
   type PreviewSeekTarget,
 } from '../utils/reelPreview';
+import { DEFAULT_VOICE_CENTER, VoiceCenterGraph, clampVoiceCenter } from '../utils/voiceCenter';
 
 function overlappingTranscriptSegments(
   segments: TranscriptSegment[],
@@ -322,6 +324,9 @@ export function ReelEditor({
   const musicVolumeSaveTimerRef = useRef<number | null>(null);
   const segmentPersistTimerRef = useRef<number | null>(null);
   const overlayPersistTimerRef = useRef<number | null>(null);
+  const voiceCenterTimerRef = useRef<number | null>(null);
+  const voiceCenterRef = useRef(DEFAULT_VOICE_CENTER);
+  const voiceCenterGraphRef = useRef<VoiceCenterGraph | null>(null);
   const pendingSegmentWorkRef = useRef<(() => Promise<void>) | null>(null);
   const pendingOverlayWorkRef = useRef<(() => Promise<void>) | null>(null);
   const assembledVideoRef = useRef<HTMLVideoElement>(null);
@@ -1083,6 +1088,7 @@ export function ReelEditor({
         }
         replaceReel(updated);
       } catch (err) {
+        if (err instanceof ApiError && err.code === 'request_cancelled') return;
         setError(err instanceof Error ? err.message : 'No se pudo mover el subtítulo');
         void reload();
       }
@@ -1525,6 +1531,14 @@ export function ReelEditor({
       }
     }
     applyMusicGain();
+    if (!voiceCenterGraphRef.current) {
+      voiceCenterGraphRef.current = new VoiceCenterGraph();
+    }
+    const graph = voiceCenterGraphRef.current;
+    graph.setAmount(voiceCenterRef.current);
+    if (voiceCenterRef.current >= 0.01 || graph.attached) {
+      graph.attach([videoARef.current, videoBRef.current, audioRef.current]);
+    }
   }
 
   function stopPreviewTick() {
@@ -1898,6 +1912,26 @@ export function ReelEditor({
     if (usesSeparateAudio()) {
       syncAudioToVideo(video.currentTime, true);
     }
+  }
+
+  function handleVoiceCenter(amount: number) {
+    if (!activeReel) return;
+    const next = clampVoiceCenter(amount);
+    voiceCenterRef.current = next;
+    voiceCenterGraphRef.current?.setAmount(next);
+    setReels((prev) =>
+      prev.map((reel) => (reel.id === activeReel.id ? { ...reel, voice_center: next } : reel)),
+    );
+    if (voiceCenterTimerRef.current != null) {
+      window.clearTimeout(voiceCenterTimerRef.current);
+    }
+    const reelId = activeReel.id;
+    voiceCenterTimerRef.current = window.setTimeout(() => {
+      voiceCenterTimerRef.current = null;
+      void updateReel(projectId, reelId, { voice_center: next }).then(replaceReel).catch((err: unknown) => {
+        setError(err instanceof Error ? err.message : 'No se pudo guardar el paneo de la voz');
+      });
+    }, 280);
   }
 
   async function saveAudioOffset(offsetMs = audioOffsetMs) {
@@ -2288,6 +2322,7 @@ export function ReelEditor({
   orderedSegmentsRef.current = orderedSegments;
   editingSegmentIdRef.current = editingSegmentId;
   audioOffsetMsRef.current = audioOffsetMs;
+  voiceCenterRef.current = clampVoiceCenter(activeReel?.voice_center ?? DEFAULT_VOICE_CENTER);
   const outputClock = useMemo(() => buildOutputClock(orderedSegments), [orderedSegments]);
   const selectedOverlay =
     overlays.find((item) => item.id === selectedOverlayId) ?? null;
@@ -2424,6 +2459,9 @@ export function ReelEditor({
       }
       if (overlayPersistTimerRef.current != null) {
         window.clearTimeout(overlayPersistTimerRef.current);
+      }
+      if (voiceCenterTimerRef.current != null) {
+        window.clearTimeout(voiceCenterTimerRef.current);
       }
       if (cutTimerRef.current != null) {
         window.clearTimeout(cutTimerRef.current);
@@ -3337,6 +3375,28 @@ export function ReelEditor({
                   <p className="muted">
                     Aplica solo al corte seleccionado. «Como el anterior» copia la sincronía del
                     corte previo. La música importada en Archivos no se desplaza.
+                  </p>
+                </div>
+                <div className="reel-audio-sync reel-audio-sync--inspector">
+                  <div className="reel-audio-sync__header">
+                    <label htmlFor={`voice-center-${activeReel.id}`}>
+                      Centrar voz:{' '}
+                      <strong>{Math.round(clampVoiceCenter(activeReel.voice_center ?? DEFAULT_VOICE_CENTER) * 100)}%</strong>
+                    </label>
+                  </div>
+                  <input
+                    id={`voice-center-${activeReel.id}`}
+                    type="range"
+                    min={0}
+                    max={1}
+                    step={0.05}
+                    value={clampVoiceCenter(activeReel.voice_center ?? DEFAULT_VOICE_CENTER)}
+                    onChange={(event) => handleVoiceCenter(Number(event.target.value))}
+                  />
+                  <p className="muted">
+                    Este sermón trae la voz a la derecha y el ambiente a la izquierda. Sube el
+                    control para mezclar un poco de la voz en ambos oídos. 0% deja el estéreo
+                    original; 100% centra la voz por completo.
                   </p>
                 </div>
                 <details className="reel-nle__details" open>

@@ -54,6 +54,28 @@ export function pxToTime(px: number, pxPerSecond: number): number {
   return px / pxPerSecond;
 }
 
+/**
+ * Reorder packed video clips by dropping onto another clip.
+ * Left half of the target inserts before it; right half inserts after.
+ * Returns null when the order would not change.
+ */
+export function reorderIdsOnDrop(
+  ids: string[],
+  movingIds: string[],
+  targetId: string,
+  dropAfter: boolean,
+): string[] | null {
+  if (movingIds.includes(targetId)) return null;
+  const moving = ids.filter((id) => movingIds.includes(id));
+  const rest = ids.filter((id) => !movingIds.includes(id));
+  let insertAt = rest.indexOf(targetId);
+  if (moving.length === 0 || insertAt < 0) return null;
+  if (dropAfter) insertAt += 1;
+  rest.splice(insertAt, 0, ...moving);
+  if (rest.length !== ids.length || rest.every((id, index) => id === ids[index])) return null;
+  return rest;
+}
+
 const MIN_CAPTION_MS = 200;
 
 /** Slide or trim a caption on the output clock without shrinking past 200 ms. */

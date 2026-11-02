@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.4.13] — 2026-11-02
+
+### Added
+
+- Audio: control **Centrar voz** (35% por defecto) para mezclas dual-mono de
+  iglesia (púlpito a la derecha, ambiente a la izquierda). Mezcla parte del
+  canal derecho hacia el centro en el preview y en el export FFmpeg.
+
+### Fixed
+
+- Arrastrar subtítulos en la línea de tiempo ya no congela el editor ni
+  dispara «La solicitud tardó demasiado o se canceló»: el PATCH espera al
+  soltar, con captura de puntero, y la coherencia de export no se relanza
+  al mover ventanas de caption.
+- Los clips de video (incluido el pegado a la izquierda) se reordenan al
+  soltar: mitad izquierda del destino = insertar antes, mitad derecha =
+  insertar después. El arrastre sigue al cursor fuera de la tira.
+
 ## [0.4.12] — 2026-10-23
 
 ### Added

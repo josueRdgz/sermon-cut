@@ -7,6 +7,7 @@ import {
   outputTimeFromTrackRatio,
   playheadPercent,
   pxToTime,
+  reorderIdsOnDrop,
   shiftCaptionWindow,
 } from './reelTimelineStrip';
 
@@ -91,6 +92,13 @@ describe('shiftCaptionWindow', () => {
     expect(next.outMs).toBe(3000);
   });
 
+  it('keeps a negative pixel delta so the caption can travel left', () => {
+    const deltaMs = Math.round(pxToTime(-80, 40) * 1000);
+    const next = shiftCaptionWindow(4000, 7000, deltaMs, 'move', 30_000);
+    expect(next.inMs).toBe(2000);
+    expect(next.outMs).toBe(5000);
+  });
+
   it('slides a caption right without stretching it', () => {
     const next = shiftCaptionWindow(0, 3000, 1500, 'move', 30_000);
     expect(next.inMs).toBe(1500);
@@ -102,6 +110,22 @@ describe('pxToTime', () => {
   it('keeps the sign of a drag delta so clips can move left', () => {
     expect(pxToTime(-80, 40)).toBeCloseTo(-2);
     expect(pxToTime(80, 40)).toBeCloseTo(2);
+  });
+});
+
+describe('reorderIdsOnDrop', () => {
+  const ids = ['a', 'b', 'c'];
+
+  it('lets the left-most clip move after a later one', () => {
+    expect(reorderIdsOnDrop(ids, ['a'], 'b', true)).toEqual(['b', 'a', 'c']);
+  });
+
+  it('lets a later clip move to the start', () => {
+    expect(reorderIdsOnDrop(ids, ['c'], 'a', false)).toEqual(['c', 'a', 'b']);
+  });
+
+  it('does nothing when dropping onto itself', () => {
+    expect(reorderIdsOnDrop(ids, ['a'], 'a', true)).toBeNull();
   });
 });
 

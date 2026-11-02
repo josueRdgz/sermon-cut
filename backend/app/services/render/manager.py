@@ -645,6 +645,7 @@ class RenderManager:
                     background_music=full_reel_music,
                     loudness=loudness,
                     audio_offset_ms=getattr(reel, "audio_offset_ms", 0) or 0,
+                    voice_center=float(getattr(reel, "voice_center", 0.0) or 0.0),
                     overlays=overlay_specs or None,
                 )
             except ValueError as exc:

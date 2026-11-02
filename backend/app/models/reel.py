@@ -158,6 +158,8 @@ class Reel(Base):
     )
     # Positive values delay audio; negative values advance it.
     audio_offset_ms: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    # Mix the right channel (pulpit mic) toward the stereo center. 0 = original.
+    voice_center: Mapped[float] = mapped_column(Float, nullable=False, default=0.35)
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=_utc_now
