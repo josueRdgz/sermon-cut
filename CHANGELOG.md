@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.4.19] — 2026-11-02
+
+### Fixed
+
+- Centrar voz vuelve a oírse en la app de escritorio: el preview no captura el
+  ``<audio>`` con Web Audio (eso dejaba WKWebView mudo). La pista en curso no
+  se recarga; el paneo de FFmpeg se carga en un segundo ``<audio>`` y solo
+  entra cuando ya está sonando.
+
 ## [0.4.18] — 2026-11-02
 
 ### Fixed

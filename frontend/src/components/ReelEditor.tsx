@@ -64,7 +64,7 @@ import { ReelTimelineStrip, type TimelineTrackKind } from './ReelTimelineStrip';
 import { SubtitlePanel } from './SubtitlePanel';
 import type { CutSuggestion, CutSuggestionsReport } from '../types/cutSuggestions';
 import { acceptCutSuggestion, rejectCutSuggestion } from '../api/cutSuggestions';
-import { getProjectWaveform } from '../api/projects';
+import { getProjectWaveform, projectAudioUrl } from '../api/projects';
 import {
   getBackgroundMusic,
   saveBackgroundMusic,
@@ -76,7 +76,7 @@ import {
   resolvePreviewSeek,
   type PreviewSeekTarget,
 } from '../utils/reelPreview';
-import { DEFAULT_VOICE_CENTER, clampVoiceCenter, getVoiceCenterMixer } from '../utils/voiceCenter';
+import { DEFAULT_VOICE_CENTER, clampVoiceCenter } from '../utils/voiceCenter';
 
 function overlappingTranscriptSegments(
   segments: TranscriptSegment[],
@@ -250,8 +250,15 @@ export function ReelEditor({
   const videoBRef = useRef<HTMLVideoElement>(null);
   const programLaneRef = useRef<0 | 1>(0);
   const [programLane, setProgramLane] = useState<0 | 1>(0);
-  const audioRef = useRef<HTMLAudioElement>(null);
+  const audioARef = useRef<HTMLAudioElement>(null);
+  const audioBRef = useRef<HTMLAudioElement>(null);
+  const audioLaneRef = useRef<0 | 1>(0);
+  const promotingAudioRef = useRef(false);
   const musicRef = useRef<HTMLAudioElement>(null);
+  const [audioSrcA, setAudioSrcA] = useState(() => projectAudioUrl(projectId, mediaRevision));
+  const [audioSrcB, setAudioSrcB] = useState<string | null>(null);
+  const liveVoiceUrlRef = useRef(projectAudioUrl(projectId, mediaRevision));
+  const pendingStandbyUrlRef = useRef<string | null>(null);
   const [reels, setReels] = useState<Reel[]>([]);
   const [activeReelId, setActiveReelId] = useState<string | null>(null);
   const [transcriptSegments, setTranscriptSegments] = useState<TranscriptSegment[]>([]);
@@ -327,7 +334,6 @@ export function ReelEditor({
   const overlayPersistTimerRef = useRef<number | null>(null);
   const voiceCenterTimerRef = useRef<number | null>(null);
   const voiceCenterRef = useRef(DEFAULT_VOICE_CENTER);
-  const voiceMixerRef = useRef(getVoiceCenterMixer());
   const pendingSegmentWorkRef = useRef<(() => Promise<void>) | null>(null);
   const pendingOverlayWorkRef = useRef<(() => Promise<void>) | null>(null);
   const assembledVideoRef = useRef<HTMLVideoElement>(null);
@@ -375,6 +381,14 @@ export function ReelEditor({
 
   function standbyVideo(): HTMLVideoElement | null {
     return (programLaneRef.current === 0 ? videoBRef : videoARef).current;
+  }
+
+  function programAudio(): HTMLAudioElement | null {
+    return (audioLaneRef.current === 0 ? audioARef : audioBRef).current;
+  }
+
+  function standbyPreviewAudio(): HTMLAudioElement | null {
+    return (audioLaneRef.current === 0 ? audioBRef : audioARef).current;
   }
 
   function clearCutTimer() {
@@ -1369,19 +1383,15 @@ export function ReelEditor({
   }
 
   function usesSeparateAudio(): boolean {
-    // Offset needs a second clock. Voice-centering remixes that same AAC via
-    // GainNodes (never reload the file; never capture a muted video).
-    // After capture, the element's default output is gone — stay on this path.
+    // Offset needs a second clock. Voice-centering plays a pre-panned AAC in a
+    // standby <audio> (Web Audio capture mutes WKWebView). The live element
+    // never reloads, so the sermon keeps sounding while FFmpeg writes the pan.
     syncPlayingAudioOffset();
-    return (
-      Math.abs(audioOffsetRef.current) >= 1 ||
-      voiceCenterRef.current >= 0.01 ||
-      voiceMixerRef.current.attached
-    );
+    return Math.abs(audioOffsetRef.current) >= 1 || voiceCenterRef.current >= 0.01;
   }
 
   function separateAudioReady(): boolean {
-    const audio = audioRef.current;
+    const audio = programAudio();
     return Boolean(
       usesSeparateAudio() &&
         audio &&
@@ -1536,7 +1546,7 @@ export function ReelEditor({
     const index = previewIndexRef.current;
     const video = programVideo();
     const standby = standbyVideo();
-    const audio = audioRef.current;
+    const audio = programAudio();
     const xfade = xfadeRef.current;
     const sourceTime = video?.currentTime ?? 0;
     const outputTime = inPadRef.current
@@ -1554,29 +1564,34 @@ export function ReelEditor({
     const outVol = muted ? 0 : volume * outGain * mix.out;
     const inVol = xfade && !muted ? volume * inGain * mix.in : 0;
     const separate = separateAudioReady() && !xfade;
+    const audioLive = Boolean(
+      separate &&
+        audio &&
+        !audio.paused &&
+        !audio.error &&
+        audio.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA,
+    );
     if (xfade) applyXfadeVars(xfade.type, progress);
     if (video) {
-      video.muted = separate ? true : muted || outVol <= 0.0005;
-      video.volume = separate ? 1 : clampMediaVolume(outVol);
+      video.muted = audioLive ? true : muted || outVol <= 0.0005;
+      video.volume = audioLive ? 1 : clampMediaVolume(outVol);
     }
     if (standby) {
-      standby.muted = Boolean(separate || muted || inVol <= 0.0005);
-      standby.volume = separate ? 0 : clampMediaVolume(inVol);
+      standby.muted = Boolean(audioLive || muted || inVol <= 0.0005);
+      standby.volume = audioLive ? 0 : clampMediaVolume(inVol);
     }
     if (audio) {
       const mixGain = separate ? (muted ? 0 : clampMediaVolume(volume * outGain)) : 0;
-      if (voiceMixerRef.current.attached) {
-        audio.muted = false;
-        audio.volume = 1;
-        voiceMixerRef.current.setOutputGain(mixGain, !separate);
-      } else {
-        audio.muted = separate ? muted : true;
-        audio.volume = mixGain;
-      }
+      audio.muted = audioLive ? muted : true;
+      audio.volume = audioLive ? mixGain : 0;
       if (!separate && !xfade) {
         audio.pause();
         audio.playbackRate = 1;
       }
+    }
+    const standbyAudio = standbyPreviewAudio();
+    if (standbyAudio && standbyAudio !== audio && !promotingAudioRef.current) {
+      standbyAudio.muted = true;
     }
     applyMusicGain();
   }
@@ -1585,7 +1600,7 @@ export function ReelEditor({
     if (!previewingRef.current || scrubbingRef.current || inPadRef.current || xfadeRef.current) {
       return;
     }
-    const audio = audioRef.current;
+    const audio = programAudio();
     if (!separateAudioReady() || !audio || previewMutedRef.current) return;
     if (audio.paused) {
       void audio.play().catch(() => undefined);
@@ -1638,7 +1653,7 @@ export function ReelEditor({
     if (incoming) {
       syncPlayingAudioOffset();
       if (separateAudioReady()) {
-        const audio = audioRef.current;
+        const audio = programAudio();
         if (audio) {
           setMediaTime(
             audio,
@@ -1751,7 +1766,7 @@ export function ReelEditor({
     videoARef.current?.pause();
     videoBRef.current?.pause();
     assembledVideoRef.current?.pause();
-    const audio = audioRef.current;
+    const audio = programAudio();
     if (audio) {
       audio.pause();
       audio.playbackRate = 1;
@@ -1826,9 +1841,10 @@ export function ReelEditor({
       setPreviewIndex(index + 1);
       video.pause();
       standbyVideo()?.pause();
-      if (audioRef.current) {
-        audioRef.current.pause();
-        audioRef.current.playbackRate = 1;
+      const padAudio = programAudio();
+      if (padAudio) {
+        padAudio.pause();
+        padAudio.playbackRate = 1;
       }
       inPadRef.current = true;
       setPreviewInPad(true);
@@ -1853,7 +1869,7 @@ export function ReelEditor({
 
   function syncAudioToVideo(videoTime: number, force = false) {
     if (!separateAudioReady()) return;
-    const audio = audioRef.current;
+    const audio = programAudio();
     if (!audio) return;
     const target = audioTimeForVideo(videoTime, audioOffsetRef.current);
     pendingAudioTimeRef.current = target;
@@ -1876,7 +1892,7 @@ export function ReelEditor({
     const token = ++jumpTokenRef.current;
     jumpingRef.current = true;
     cancelXfade();
-    const audio = audioRef.current;
+    const audio = programAudio();
     const keepPlaying = Boolean(resume && previewingRef.current && !scrubbingRef.current);
     pendingVideoTimeRef.current = sourceTimeSeconds;
     clearCutTimer();
@@ -2012,39 +2028,62 @@ export function ReelEditor({
     }
   }
 
-  function armVoiceCenterMixer() {
-    const audio = audioRef.current;
-    if (!audio) return;
-    const mixer = voiceMixerRef.current;
-    mixer.setAmount(voiceCenterRef.current);
-    void mixer.resume().then((ok) => {
-      if (!ok) return;
-      audio.muted = false;
-      audio.volume = 1;
-      mixer.attach(audio);
+  function queueVoiceAudio(amount: number) {
+    const next = clampVoiceCenter(amount);
+    const url = projectAudioUrl(projectId, mediaRevision, next >= 0.01 ? next : null);
+    if (liveVoiceUrlRef.current === url || pendingStandbyUrlRef.current === url) return;
+    pendingStandbyUrlRef.current = url;
+    if (audioLaneRef.current === 0) setAudioSrcB(url);
+    else setAudioSrcA(url);
+  }
+
+  function promoteStandbyAudio() {
+    if (promotingAudioRef.current) return;
+    const url = pendingStandbyUrlRef.current;
+    if (!url) return;
+    const live = programAudio();
+    const next = standbyPreviewAudio();
+    if (!next || next.readyState < HTMLMediaElement.HAVE_CURRENT_DATA) return;
+    promotingAudioRef.current = true;
+    pendingStandbyUrlRef.current = null;
+    const t = live?.currentTime ?? 0;
+    const playing = Boolean(previewingRef.current && live && !live.paused);
+    next.muted = false;
+    next.volume = live?.volume ?? previewVolumeRef.current;
+    setMediaTime(next, t, true);
+    const finish = () => {
+      liveVoiceUrlRef.current = url;
+      audioLaneRef.current = audioLaneRef.current === 0 ? 1 : 0;
+      live?.pause();
+      promotingAudioRef.current = false;
       applyPreviewGain();
       if (previewingRef.current) ensureSeparateAudioPlaying();
-    });
+    };
+    const abort = () => {
+      pendingStandbyUrlRef.current = url;
+      promotingAudioRef.current = false;
+    };
+    if (!playing) {
+      finish();
+      return;
+    }
+    void next.play().then(finish).catch(abort);
   }
 
   function handleVoiceCenter(amount: number) {
     if (!activeReel) return;
     const next = clampVoiceCenter(amount);
     voiceCenterRef.current = next;
-    voiceMixerRef.current.setAmount(next);
     setReels((prev) =>
       prev.map((reel) => (reel.id === activeReel.id ? { ...reel, voice_center: next } : reel)),
     );
-    applyPreviewGain();
-    if (previewingRef.current && usesSeparateAudio() && !voiceMixerRef.current.attached) {
-      armVoiceCenterMixer();
-    }
     if (voiceCenterTimerRef.current != null) {
       window.clearTimeout(voiceCenterTimerRef.current);
     }
     const reelId = activeReel.id;
     voiceCenterTimerRef.current = window.setTimeout(() => {
       voiceCenterTimerRef.current = null;
+      queueVoiceAudio(next);
       void updateReel(projectId, reelId, { voice_center: next }).then(replaceReel).catch((err: unknown) => {
         setError(err instanceof Error ? err.message : 'No se pudo guardar el paneo de la voz');
       });
@@ -2078,7 +2117,7 @@ export function ReelEditor({
     if (target.inPad) {
       video.pause();
       standbyVideo()?.pause();
-      audioRef.current?.pause();
+      programAudio()?.pause();
       return;
     }
     pendingVideoTimeRef.current = target.sourceTime;
@@ -2127,9 +2166,10 @@ export function ReelEditor({
     clearCutTimer();
     videoARef.current?.pause();
     videoBRef.current?.pause();
-    if (audioRef.current) {
-      audioRef.current.pause();
-      audioRef.current.playbackRate = 1;
+    const scrubAudio = programAudio();
+    if (scrubAudio) {
+      scrubAudio.pause();
+      scrubAudio.playbackRate = 1;
     }
     musicRef.current?.pause();
   }
@@ -2168,7 +2208,7 @@ export function ReelEditor({
     }
     const video = programVideo();
     if (!video) return;
-    const audio = audioRef.current;
+    const audio = programAudio();
     const total = outputClock.totalDuration;
     const target =
       previewOutputTime >= total - 0.05
@@ -2201,16 +2241,7 @@ export function ReelEditor({
     jumpingRef.current = true;
     inPadRef.current = false;
     setPreviewInPad(false);
-    if (usesSeparateAudio() && audio) {
-      voiceMixerRef.current.setAmount(voiceCenterRef.current);
-      void voiceMixerRef.current.resume().then((ok) => {
-        if (!ok || !audio) return;
-        audio.muted = false;
-        audio.volume = 1;
-        voiceMixerRef.current.attach(audio);
-        applyPreviewGain();
-      });
-    }
+    if (usesSeparateAudio()) queueVoiceAudio(voiceCenterRef.current);
     if (separateAudioReady() && audio && audio.paused && !previewMuted) {
       void audio.play().catch(() => undefined);
     }
@@ -2241,11 +2272,6 @@ export function ReelEditor({
         if (!previewingRef.current || scrubbingRef.current) {
           jumpingRef.current = false;
           return;
-        }
-        if (usesSeparateAudio() && audio) {
-          audio.muted = false;
-          audio.volume = 1;
-          voiceMixerRef.current.attach(audio);
         }
         await jumpPreviewToSource(target.sourceTime, true);
       })
@@ -2414,7 +2440,9 @@ export function ReelEditor({
     const videos = [videoARef.current, videoBRef.current].filter(
       (item): item is HTMLVideoElement => Boolean(item),
     );
-    const previewAudio = audioRef.current;
+    const previewAudios = [audioARef.current, audioBRef.current].filter(
+      (item): item is HTMLAudioElement => Boolean(item),
+    );
     if (videos.length === 0 || !activeReel) return;
 
     function onTimeUpdate(event: Event) {
@@ -2464,10 +2492,16 @@ export function ReelEditor({
       }
     }
 
-    function onAudioMetadata() {
-      if (!previewAudio) return;
+    function onAudioReady(event: Event) {
+      const el = event.target;
+      if (!(el instanceof HTMLAudioElement)) return;
+      if (el === standbyPreviewAudio()) {
+        promoteStandbyAudio();
+        return;
+      }
+      if (el !== programAudio()) return;
       if (pendingAudioTimeRef.current != null) {
-        if (setMediaTime(previewAudio, pendingAudioTimeRef.current)) {
+        if (setMediaTime(el, pendingAudioTimeRef.current)) {
           pendingAudioTimeRef.current = null;
         }
       }
@@ -2480,18 +2514,36 @@ export function ReelEditor({
       syncedVideo.addEventListener('seeking', onSeeking);
       syncedVideo.addEventListener('loadedmetadata', onVideoMetadata);
     }
-    previewAudio?.addEventListener('loadedmetadata', onAudioMetadata);
-    previewAudio?.addEventListener('canplay', onAudioMetadata);
+    for (const previewAudio of previewAudios) {
+      previewAudio.addEventListener('loadedmetadata', onAudioReady);
+      previewAudio.addEventListener('canplay', onAudioReady);
+    }
     return () => {
       for (const syncedVideo of videos) {
         syncedVideo.removeEventListener('timeupdate', onTimeUpdate);
         syncedVideo.removeEventListener('seeking', onSeeking);
         syncedVideo.removeEventListener('loadedmetadata', onVideoMetadata);
       }
-      previewAudio?.removeEventListener('loadedmetadata', onAudioMetadata);
-      previewAudio?.removeEventListener('canplay', onAudioMetadata);
+      for (const previewAudio of previewAudios) {
+        previewAudio.removeEventListener('loadedmetadata', onAudioReady);
+        previewAudio.removeEventListener('canplay', onAudioReady);
+      }
     };
-  }, [activeReel, programLane]);
+  }, [activeReel, programLane, audioSrcA, audioSrcB, hasVideo]);
+
+  useEffect(() => {
+    const base = projectAudioUrl(projectId, mediaRevision);
+    setAudioSrcA(base);
+    setAudioSrcB(null);
+    audioLaneRef.current = 0;
+    liveVoiceUrlRef.current = base;
+    pendingStandbyUrlRef.current = null;
+  }, [projectId, mediaRevision]);
+
+  useEffect(() => {
+    if (!activeReel) return;
+    queueVoiceAudio(activeReel.voice_center ?? DEFAULT_VOICE_CENTER);
+  }, [activeReel?.id, projectId, mediaRevision]);
 
   const orderedSegments = useMemo(
     () => (activeReel ? [...activeReel.segments].sort((a, b) => a.order - b.order) : []),
@@ -2501,7 +2553,6 @@ export function ReelEditor({
   editingSegmentIdRef.current = editingSegmentId;
   audioOffsetMsRef.current = audioOffsetMs;
   voiceCenterRef.current = clampVoiceCenter(activeReel?.voice_center ?? DEFAULT_VOICE_CENTER);
-  voiceMixerRef.current.setAmount(voiceCenterRef.current);
   const outputClock = useMemo(() => buildOutputClock(orderedSegments), [orderedSegments]);
   const selectedOverlay =
     overlays.find((item) => item.id === selectedOverlayId) ?? null;
@@ -2536,12 +2587,12 @@ export function ReelEditor({
       setProgramLane(0);
       videoARef.current?.pause();
       videoBRef.current?.pause();
-      audioRef.current?.pause();
+      programAudio()?.pause();
     };
 
     const showSourceFrame = (sourceSeconds: number) => {
       const video = programVideo() ?? videoARef.current;
-      const audio = audioRef.current;
+      const audio = programAudio();
       if (!video) return;
       const apply = () => {
         setMediaTime(video, sourceSeconds);
@@ -3110,7 +3161,10 @@ export function ReelEditor({
                   standbyVideoRef={videoBRef}
                   assembledVideoRef={assembledVideoRef}
                   activeProgramLane={programLane}
-                  audioRef={audioRef}
+                  audioRef={audioARef}
+                  audioStandbyRef={audioBRef}
+                  audioSrc={audioSrcA}
+                  standbyAudioSrc={audioSrcB}
                   musicRef={musicRef}
                   assembledSrc={null}
                   previewMode="logical"

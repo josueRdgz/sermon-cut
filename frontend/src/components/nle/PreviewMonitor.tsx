@@ -1,7 +1,7 @@
 import type { Ref } from 'react';
 
 import { backgroundMusicAudioUrl } from '../../api/backgroundMusic';
-import { projectAudioUrl, projectVideoUrl } from '../../api/projects';
+import { projectVideoUrl } from '../../api/projects';
 import type { ReelOverlay } from '../../types/overlay';
 import type { AspectRatio, FramingMode, TransitionType } from '../../types/reel';
 import { previewObjectPosition, previewVideoFit } from '../../utils/previewFraming';
@@ -18,6 +18,9 @@ interface PreviewMonitorProps {
   assembledVideoRef: Ref<HTMLVideoElement>;
   activeProgramLane: 0 | 1;
   audioRef: Ref<HTMLAudioElement>;
+  audioStandbyRef: Ref<HTMLAudioElement>;
+  audioSrc: string;
+  standbyAudioSrc: string | null;
   musicRef: Ref<HTMLAudioElement>;
   assembledSrc: string | null;
   previewMode: PreviewMode;
@@ -56,6 +59,9 @@ export function PreviewMonitor({
   assembledVideoRef,
   activeProgramLane,
   audioRef,
+  audioStandbyRef,
+  audioSrc,
+  standbyAudioSrc,
   musicRef,
   assembledSrc,
   previewMode,
@@ -79,7 +85,6 @@ export function PreviewMonitor({
   inPad = false,
 }: PreviewMonitorProps) {
   const videoSrc = projectVideoUrl(projectId, mediaRevision);
-  const audioSrc = projectAudioUrl(projectId, mediaRevision);
   const videoFit = previewVideoFit(framingMode);
   const outPosition = previewObjectPosition(cropX, cropY);
   const inPosition = previewObjectPosition(incomingCropX ?? cropX, incomingCropY ?? cropY);
@@ -176,6 +181,13 @@ export function PreviewMonitor({
             className="reel-player__preview-audio"
             preload="auto"
             src={audioSrc}
+            aria-hidden="true"
+          />
+          <audio
+            ref={audioStandbyRef}
+            className="reel-player__preview-audio"
+            preload="auto"
+            src={standbyAudioSrc ?? undefined}
             aria-hidden="true"
           />
           {musicActive && musicFilename && (
