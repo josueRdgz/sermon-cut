@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest';
 
-import { clampVoiceCenter, mixVoiceCenterSample, voiceCenterGains } from './voiceCenter';
+import {
+  clampVoiceCenter,
+  getVoiceCenterMixer,
+  mixVoiceCenterSample,
+  voiceCenterGains,
+} from './voiceCenter';
 
 describe('voiceCenterGains', () => {
   it('is a passthrough at 0', () => {
@@ -29,5 +34,11 @@ describe('mixVoiceCenterSample', () => {
     const mixed = mixVoiceCenterSample(0.2, 0.8, 0.35);
     expect(mixed.right).toBe(0.8);
     expect(mixed.left).toBeCloseTo(0.2 / 1.35 + (0.35 / 1.35) * 0.8, 5);
+  });
+});
+
+describe('getVoiceCenterMixer', () => {
+  it('reuses one mixer so the media element is captured at most once', () => {
+    expect(getVoiceCenterMixer()).toBe(getVoiceCenterMixer());
   });
 });

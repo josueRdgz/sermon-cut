@@ -64,7 +64,7 @@ import { ReelTimelineStrip, type TimelineTrackKind } from './ReelTimelineStrip';
 import { SubtitlePanel } from './SubtitlePanel';
 import type { CutSuggestion, CutSuggestionsReport } from '../types/cutSuggestions';
 import { acceptCutSuggestion, rejectCutSuggestion } from '../api/cutSuggestions';
-import { getProjectWaveform, projectAudioUrl } from '../api/projects';
+import { getProjectWaveform } from '../api/projects';
 import {
   getBackgroundMusic,
   saveBackgroundMusic,
@@ -76,7 +76,7 @@ import {
   resolvePreviewSeek,
   type PreviewSeekTarget,
 } from '../utils/reelPreview';
-import { DEFAULT_VOICE_CENTER, clampVoiceCenter } from '../utils/voiceCenter';
+import { DEFAULT_VOICE_CENTER, clampVoiceCenter, getVoiceCenterMixer } from '../utils/voiceCenter';
 
 function overlappingTranscriptSegments(
   segments: TranscriptSegment[],
@@ -326,10 +326,8 @@ export function ReelEditor({
   const segmentPersistTimerRef = useRef<number | null>(null);
   const overlayPersistTimerRef = useRef<number | null>(null);
   const voiceCenterTimerRef = useRef<number | null>(null);
-  const voiceCenterLoadTokenRef = useRef(0);
   const voiceCenterRef = useRef(DEFAULT_VOICE_CENTER);
-  const previewAudioVoiceCenterRef = useRef(0);
-  const [previewAudioVoiceCenter, setPreviewAudioVoiceCenter] = useState(0);
+  const voiceMixerRef = useRef(getVoiceCenterMixer());
   const pendingSegmentWorkRef = useRef<(() => Promise<void>) | null>(null);
   const pendingOverlayWorkRef = useRef<(() => Promise<void>) | null>(null);
   const assembledVideoRef = useRef<HTMLVideoElement>(null);
@@ -1371,12 +1369,15 @@ export function ReelEditor({
   }
 
   function usesSeparateAudio(): boolean {
-    // Offset needs a second clock. Voice-centering uses a pre-panned AAC file
-    // (Web Audio's MediaElementSource mutes WKWebView for the rest of the session).
-    // Only switch clocks once that file is actually assigned — otherwise the
-    // video is muted while FFmpeg is still writing the pan cache.
+    // Offset needs a second clock. Voice-centering remixes that same AAC via
+    // GainNodes (never reload the file; never capture a muted video).
+    // After capture, the element's default output is gone — stay on this path.
     syncPlayingAudioOffset();
-    return Math.abs(audioOffsetRef.current) >= 1 || previewAudioVoiceCenterRef.current >= 0.01;
+    return (
+      Math.abs(audioOffsetRef.current) >= 1 ||
+      voiceCenterRef.current >= 0.01 ||
+      voiceMixerRef.current.attached
+    );
   }
 
   function separateAudioReady(): boolean {
@@ -1563,8 +1564,15 @@ export function ReelEditor({
       standby.volume = separate ? 0 : clampMediaVolume(inVol);
     }
     if (audio) {
-      audio.muted = separate ? muted : true;
-      audio.volume = separate ? (muted ? 0 : clampMediaVolume(volume * outGain)) : 0;
+      const mixGain = separate ? (muted ? 0 : clampMediaVolume(volume * outGain)) : 0;
+      if (voiceMixerRef.current.attached) {
+        audio.muted = false;
+        audio.volume = 1;
+        voiceMixerRef.current.setOutputGain(mixGain, !separate);
+      } else {
+        audio.muted = separate ? muted : true;
+        audio.volume = mixGain;
+      }
       if (!separate && !xfade) {
         audio.pause();
         audio.playbackRate = 1;
@@ -2004,51 +2012,39 @@ export function ReelEditor({
     }
   }
 
-  function applyLoadedVoiceCenter(amount: number) {
+  function armVoiceCenterMixer() {
     const audio = audioRef.current;
-    const video = programVideo();
-    if (audio) {
-      pendingAudioTimeRef.current = video
-        ? audioTimeForVideo(video.currentTime, audioOffsetRef.current)
-        : audio.currentTime;
-    }
-    previewAudioVoiceCenterRef.current = amount;
-    setPreviewAudioVoiceCenter(amount);
-  }
-
-  async function warmPreviewVoiceAudio(amount: number) {
-    const next = clampVoiceCenter(amount);
-    const token = ++voiceCenterLoadTokenRef.current;
-    if (next < 0.01) {
-      applyLoadedVoiceCenter(0);
-      return;
-    }
-    try {
-      const url = projectAudioUrl(projectId, mediaRevision, next);
-      const res = await fetch(url, { cache: 'no-store' });
-      await res.body?.cancel();
-      if (token !== voiceCenterLoadTokenRef.current) return;
-      if (!res.ok) return;
-      applyLoadedVoiceCenter(next);
-    } catch {
-      if (token !== voiceCenterLoadTokenRef.current) return;
-    }
+    if (!audio) return;
+    const mixer = voiceMixerRef.current;
+    mixer.setAmount(voiceCenterRef.current);
+    void mixer.resume().then((ok) => {
+      if (!ok) return;
+      audio.muted = false;
+      audio.volume = 1;
+      mixer.attach(audio);
+      applyPreviewGain();
+      if (previewingRef.current) ensureSeparateAudioPlaying();
+    });
   }
 
   function handleVoiceCenter(amount: number) {
     if (!activeReel) return;
     const next = clampVoiceCenter(amount);
     voiceCenterRef.current = next;
+    voiceMixerRef.current.setAmount(next);
     setReels((prev) =>
       prev.map((reel) => (reel.id === activeReel.id ? { ...reel, voice_center: next } : reel)),
     );
+    applyPreviewGain();
+    if (previewingRef.current && usesSeparateAudio() && !voiceMixerRef.current.attached) {
+      armVoiceCenterMixer();
+    }
     if (voiceCenterTimerRef.current != null) {
       window.clearTimeout(voiceCenterTimerRef.current);
     }
     const reelId = activeReel.id;
     voiceCenterTimerRef.current = window.setTimeout(() => {
       voiceCenterTimerRef.current = null;
-      void warmPreviewVoiceAudio(next);
       void updateReel(projectId, reelId, { voice_center: next }).then(replaceReel).catch((err: unknown) => {
         setError(err instanceof Error ? err.message : 'No se pudo guardar el paneo de la voz');
       });
@@ -2205,6 +2201,16 @@ export function ReelEditor({
     jumpingRef.current = true;
     inPadRef.current = false;
     setPreviewInPad(false);
+    if (usesSeparateAudio() && audio) {
+      voiceMixerRef.current.setAmount(voiceCenterRef.current);
+      void voiceMixerRef.current.resume().then((ok) => {
+        if (!ok || !audio) return;
+        audio.muted = false;
+        audio.volume = 1;
+        voiceMixerRef.current.attach(audio);
+        applyPreviewGain();
+      });
+    }
     if (separateAudioReady() && audio && audio.paused && !previewMuted) {
       void audio.play().catch(() => undefined);
     }
@@ -2235,6 +2241,11 @@ export function ReelEditor({
         if (!previewingRef.current || scrubbingRef.current) {
           jumpingRef.current = false;
           return;
+        }
+        if (usesSeparateAudio() && audio) {
+          audio.muted = false;
+          audio.volume = 1;
+          voiceMixerRef.current.attach(audio);
         }
         await jumpPreviewToSource(target.sourceTime, true);
       })
@@ -2482,11 +2493,6 @@ export function ReelEditor({
     };
   }, [activeReel, programLane]);
 
-  useEffect(() => {
-    if (!activeReel) return;
-    void warmPreviewVoiceAudio(activeReel.voice_center ?? DEFAULT_VOICE_CENTER);
-  }, [activeReel?.id]);
-
   const orderedSegments = useMemo(
     () => (activeReel ? [...activeReel.segments].sort((a, b) => a.order - b.order) : []),
     [activeReel],
@@ -2495,7 +2501,7 @@ export function ReelEditor({
   editingSegmentIdRef.current = editingSegmentId;
   audioOffsetMsRef.current = audioOffsetMs;
   voiceCenterRef.current = clampVoiceCenter(activeReel?.voice_center ?? DEFAULT_VOICE_CENTER);
-  previewAudioVoiceCenterRef.current = previewAudioVoiceCenter;
+  voiceMixerRef.current.setAmount(voiceCenterRef.current);
   const outputClock = useMemo(() => buildOutputClock(orderedSegments), [orderedSegments]);
   const selectedOverlay =
     overlays.find((item) => item.id === selectedOverlayId) ?? null;
@@ -2666,10 +2672,6 @@ export function ReelEditor({
     selectedClipIndex >= 0 ? outputClock.placements[selectedClipIndex] : undefined;
   const playingSegment = orderedSegments[previewIndex] ?? selectedSegment;
   const playingPlacement = outputClock.placements[previewIndex] ?? selectedClipPlacement;
-  const previewAudioOffsetMs =
-    playingSegment?.id === selectedSegment?.id
-      ? audioOffsetMs
-      : (playingSegment?.audio_offset_ms ?? 0);
   clipEnvelopeRef.current = {
     keys: playingSegment?.volume_keyframes,
     outputStart: playingPlacement?.outputStart ?? 0,
@@ -3132,10 +3134,6 @@ export function ReelEditor({
                     if (overlay) void handleOverlayField(overlay, { scale });
                   }}
                   onAssembledTime={() => undefined}
-                  separateAudio={
-                    Math.abs(previewAudioOffsetMs) >= 1 || previewAudioVoiceCenter >= 0.01
-                  }
-                  voiceCenter={previewAudioVoiceCenter}
                   xfade={xfadeUi}
                   incomingCropX={
                     xfadeUi

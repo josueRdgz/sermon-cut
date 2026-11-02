@@ -27,8 +27,6 @@ interface PreviewMonitorProps {
   previewMuted?: boolean;
   musicFilename: string | null;
   musicActive: boolean;
-  separateAudio?: boolean;
-  voiceCenter?: number;
   onAssembledTime: (seconds: number) => void;
   selectedOverlayId?: string | null;
   onSelectOverlay?: (overlayId: string) => void;
@@ -67,8 +65,6 @@ export function PreviewMonitor({
   previewMuted = false,
   musicFilename,
   musicActive,
-  separateAudio = false,
-  voiceCenter = 0,
   onAssembledTime,
   selectedOverlayId = null,
   onSelectOverlay,
@@ -83,9 +79,7 @@ export function PreviewMonitor({
   inPad = false,
 }: PreviewMonitorProps) {
   const videoSrc = projectVideoUrl(projectId, mediaRevision);
-  const audioSrc = separateAudio
-    ? projectAudioUrl(projectId, mediaRevision, voiceCenter)
-    : videoSrc;
+  const audioSrc = projectAudioUrl(projectId, mediaRevision);
   const videoFit = previewVideoFit(framingMode);
   const outPosition = previewObjectPosition(cropX, cropY);
   const inPosition = previewObjectPosition(incomingCropX ?? cropX, incomingCropY ?? cropY);

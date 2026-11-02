@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.4.18] — 2026-11-02
+
+### Fixed
+
+- Centrar voz ya no recarga la pista (eso fragmentaba el audio). El preview
+  mezcla en vivo con GainNodes sobre el ``<audio>`` dedicado; el slider solo
+  cambia la mezcla, y FFmpeg sigue paneando en la exportación.
+
 ## [0.4.17] — 2026-11-02
 
 ### Fixed
