@@ -370,6 +370,10 @@ export function ProjectDetailPage() {
           projectId={project.id}
           transcriptRevision={transcriptRevision}
           sourceKind={project.source_kind}
+          onOpenEditor={() => {
+            setReelRevision((revision) => revision + 1);
+            activateSection('editor');
+          }}
         />
       </div>
 
@@ -387,6 +391,7 @@ export function ProjectDetailPage() {
           videoDuration={project.duration_seconds}
           mediaRevision={project.updated_at}
           refreshToken={reelRevision}
+          active={activeSection === 'editor'}
           onCoverUpdated={handleCoverUpdated}
         />
       </div>

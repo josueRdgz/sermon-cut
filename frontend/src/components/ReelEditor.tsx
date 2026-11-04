@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import { Blend, Captions, Image, Music, Scissors, Square } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 
-import { listAnalysisCandidates } from '../api/analysis';
+import { acceptAnalysisCandidate, listAnalysisCandidates } from '../api/analysis';
 import { ApiError } from '../api/client';
 import { listAssets } from '../api/assets';
 import {
@@ -48,6 +48,7 @@ import { ConfirmDialog } from './ConfirmDialog';
 import { CutSuggestionsPanel } from './CutSuggestionsPanel';
 import { EndCardPanel } from './EndCardPanel';
 import { FramingPanel } from './FramingPanel';
+import { AnalysisProposalList, visibleAnalysisCandidates } from './AnalysisProposalList';
 import { MediaBinPanel } from './MediaBinPanel';
 import { AddFragmentForm } from './nle/AddFragmentForm';
 import { ClipInspector } from './nle/ClipInspector';
@@ -163,6 +164,7 @@ interface ReelEditorProps {
   videoDuration: number | null;
   mediaRevision?: string | number | null;
   refreshToken?: number;
+  active?: boolean;
   focusReelId?: string | null;
   onCoverUpdated?: (project: Project) => void;
 }
@@ -243,6 +245,7 @@ export function ReelEditor({
   videoDuration,
   mediaRevision = null,
   refreshToken = 0,
+  active = true,
   focusReelId = null,
   onCoverUpdated,
 }: ReelEditorProps) {
@@ -621,19 +624,48 @@ export function ReelEditor({
     }
   }
 
-  async function handleAddAnalysisCandidate(candidate: AnalysisCandidate) {
+  async function handleEditAnalysisCandidate(candidate: AnalysisCandidate) {
     setBusy(true);
     setError(null);
     try {
-      let reel = activeReel;
-      if (!reel) {
-        reel = await createReel(projectId, {
-          title: candidate.title || titleDraft.trim() || 'Nuevo Reel',
-          aspect_ratio: aspect,
-          segments: [],
-        });
+      if (candidate.accepted_reel_id) {
+        const existing = reels.find((reel) => reel.id === candidate.accepted_reel_id);
+        if (existing) {
+          stopPreview();
+          setEditingSegmentId(null);
+          setActiveReelId(existing.id);
+          setAspect(existing.aspect_ratio);
+          return;
+        }
       }
-      let updated = reel;
+      const result = await acceptAnalysisCandidate(projectId, candidate.id, aspect);
+      const [reelList, listed] = await Promise.all([
+        listReels(projectId),
+        listAnalysisCandidates(projectId),
+      ]);
+      setReels(reelList.items);
+      setAnalysisCandidates(listed.items);
+      stopPreview();
+      setEditingSegmentId(null);
+      setActiveReelId(result.reel_id);
+      const created = reelList.items.find((item) => item.id === result.reel_id);
+      if (created) setAspect(created.aspect_ratio);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'No se pudo abrir la propuesta en el editor');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleAddAnalysisCandidate(candidate: AnalysisCandidate) {
+    if (!activeReel) {
+      await handleEditAnalysisCandidate(candidate);
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    try {
+      let updated = activeReel;
       for (const fragment of candidate.segments) {
         updated = await addReelSegment(projectId, updated.id, {
           source_start_seconds: fragment.start,
@@ -2658,10 +2690,11 @@ export function ReelEditor({
   }, [projectId]);
 
   useEffect(() => {
+    if (!active) return;
     void listAnalysisCandidates(projectId)
       .then((response) => setAnalysisCandidates(response.items))
       .catch(() => setAnalysisCandidates([]));
-  }, [projectId, refreshToken]);
+  }, [projectId, refreshToken, active]);
 
   useEffect(() => {
     if (!activeReel?.id) {
@@ -2902,6 +2935,7 @@ export function ReelEditor({
   });
 
   const nleActive = Boolean(activeReel);
+  const openAnalysisCandidates = visibleAnalysisCandidates(analysisCandidates);
 
   return (
     <section className={`card reel-editor${nleActive ? ' reel-editor--nle' : ''}`}>
@@ -2945,6 +2979,21 @@ export function ReelEditor({
               </button>
             ))}
           </div>
+        </div>
+      )}
+
+      {!activeReel && openAnalysisCandidates.length > 0 && (
+        <div className="analysis-candidates">
+          <h3>Propuestas del análisis</h3>
+          <p className="muted">
+            Elige una para editarla como short, o crea un Reel vacío y luego añade fragmentos a
+            ese short.
+          </p>
+          <AnalysisProposalList
+            candidates={openAnalysisCandidates}
+            busy={busy}
+            onEdit={(candidate) => void handleEditAnalysisCandidate(candidate)}
+          />
         </div>
       )}
 
@@ -3123,13 +3172,12 @@ export function ReelEditor({
                 onAddAtPlayhead={(assetId) => void handleDropAsset(assetId, previewOutputTime)}
                 collapsed={binCollapsed}
                 onCollapsedChange={setBinCollapsedExclusive}
-                analysisCandidates={analysisCandidates.map((candidate) =>
-                  addedCandidateIds.includes(candidate.id)
-                    ? { ...candidate, status: 'accepted' }
-                    : candidate,
-                )}
+                analysisCandidates={openAnalysisCandidates}
                 onAddCandidate={(candidate) => void handleAddAnalysisCandidate(candidate)}
+                onEditCandidate={(candidate) => void handleEditAnalysisCandidate(candidate)}
                 candidatesBusy={busy}
+                currentReelTitle={activeReel.title}
+                addedCandidateIds={addedCandidateIds}
               />
               <NleSplitter
                 label="Ancho del baúl"
@@ -3209,6 +3257,21 @@ export function ReelEditor({
                       ? 'Añade al menos un fragmento para ver la vista previa.'
                       : 'Carga un video del proyecto para previsualizar el Reel.'}
                   </p>
+                  {openAnalysisCandidates.length > 0 && (
+                    <>
+                      <h3>Propuestas del análisis</h3>
+                      <AnalysisProposalList
+                        compact
+                        candidates={openAnalysisCandidates}
+                        busy={busy}
+                        canAddToReel
+                        addedCandidateIds={addedCandidateIds}
+                        currentReelTitle={activeReel.title}
+                        onEdit={(candidate) => void handleEditAnalysisCandidate(candidate)}
+                        onAddToReel={(candidate) => void handleAddAnalysisCandidate(candidate)}
+                      />
+                    </>
+                  )}
                 </div>
               )}
               {hasVideo && orderedSegments.length > 0 && (
@@ -3285,6 +3348,24 @@ export function ReelEditor({
                 hidden={activeTool !== 'cuts'}
               >
                 <div className="reel-nle__inspector-section reel-nle__cuts-workspace">
+                  {openAnalysisCandidates.length > 0 && (
+                    <div className="analysis-candidates">
+                      <h3 className="reel-nle__cuts-title">Propuestas del análisis</h3>
+                      <p className="muted">
+                        Edita una como short propio o añádela a «{activeReel.title}».
+                      </p>
+                      <AnalysisProposalList
+                        compact
+                        candidates={openAnalysisCandidates}
+                        busy={busy}
+                        canAddToReel
+                        addedCandidateIds={addedCandidateIds}
+                        currentReelTitle={activeReel.title}
+                        onEdit={(candidate) => void handleEditAnalysisCandidate(candidate)}
+                        onAddToReel={(candidate) => void handleAddAnalysisCandidate(candidate)}
+                      />
+                    </div>
+                  )}
                   <div className="reel-nle__cuts-toolbar">
                     <h3 className="reel-nle__cuts-title">Ajuste de cortes</h3>
                     <div className="button-stack">

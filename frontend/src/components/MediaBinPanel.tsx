@@ -8,7 +8,8 @@ import {
 } from '../api/assets';
 import type { AnalysisCandidate } from '../types/analysis';
 import type { ProjectAsset } from '../types/asset';
-import { formatDuration, formatTimecode } from '../utils/format';
+import { formatDuration } from '../utils/format';
+import { AnalysisProposalList } from './AnalysisProposalList';
 
 const ASSET_MIME = 'application/x-sermon-asset';
 
@@ -22,7 +23,10 @@ interface MediaBinPanelProps {
   onCollapsedChange?: (collapsed: boolean) => void;
   analysisCandidates?: AnalysisCandidate[];
   onAddCandidate?: (candidate: AnalysisCandidate) => void;
+  onEditCandidate?: (candidate: AnalysisCandidate) => void;
   candidatesBusy?: boolean;
+  currentReelTitle?: string | null;
+  addedCandidateIds?: string[];
 }
 
 export function MediaBinPanel({
@@ -35,7 +39,10 @@ export function MediaBinPanel({
   onCollapsedChange,
   analysisCandidates = [],
   onAddCandidate,
+  onEditCandidate,
   candidatesBusy = false,
+  currentReelTitle = null,
+  addedCandidateIds = [],
 }: MediaBinPanelProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState(false);
@@ -134,38 +141,21 @@ export function MediaBinPanel({
           {error && <p className="error">{error}</p>}
 
           {analysisCandidates.length > 0 && (
-            <div className="reel-nle__bin-candidates" aria-label="Cortes del análisis">
-              <h4>Cortes del análisis</h4>
-              <p className="muted">Añádelos al Reel; el formato largo o corto lo define lo que elijas aquí.</p>
-              <ul>
-                {analysisCandidates.map((candidate) => {
-                  const duration = candidate.segments.reduce(
-                    (sum, segment) => sum + Math.max(0, segment.end - segment.start),
-                    0,
-                  );
-                  return (
-                    <li key={candidate.id}>
-                      <strong>{candidate.title}</strong>
-                      <span className="muted">
-                        {formatDuration(duration)} · {candidate.segments.length} fragmento(s)
-                        {candidate.segments[0]
-                          ? ` · ${formatTimecode(candidate.segments[0].start)}`
-                          : ''}
-                      </span>
-                      {onAddCandidate && (
-                        <button
-                          type="button"
-                          className="button button--inline"
-                          disabled={candidatesBusy || candidate.status === 'accepted'}
-                          onClick={() => onAddCandidate(candidate)}
-                        >
-                          {candidate.status === 'accepted' ? 'Ya añadido' : 'Añadir al Reel'}
-                        </button>
-                      )}
-                    </li>
-                  );
-                })}
-              </ul>
+            <div className="reel-nle__bin-candidates" aria-label="Propuestas del análisis">
+              <h4>Propuestas del análisis</h4>
+              <p className="muted">
+                Ábrela como short propio o añádela al Reel que estás editando.
+              </p>
+              <AnalysisProposalList
+                compact
+                candidates={analysisCandidates}
+                busy={candidatesBusy}
+                canAddToReel={Boolean(onAddCandidate)}
+                addedCandidateIds={addedCandidateIds}
+                currentReelTitle={currentReelTitle}
+                onEdit={onEditCandidate}
+                onAddToReel={onAddCandidate}
+              />
             </div>
           )}
 

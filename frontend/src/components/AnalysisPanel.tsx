@@ -9,7 +9,7 @@ import {
 } from '../api/analysis';
 import { ApiError } from '../api/client';
 import { getTranscript } from '../api/transcripts';
-import type { AnalysisCandidate, AnalysisJob, AnalysisProviderStatus } from '../types/analysis';
+import type { AnalysisJob, AnalysisProviderStatus } from '../types/analysis';
 import { ACTIVE_ANALYSIS_STATUSES } from '../types/analysis';
 import {
   ANALYSIS_OUTPUT_PRESETS,
@@ -19,13 +19,14 @@ import {
   type AnalysisOutputKind,
   type EditorialPresetId,
 } from '../utils/editorialPresets';
-import { formatDuration, formatTimecode } from '../utils/format';
 import { ProgressBar } from './ProgressBar';
+import { AnalysisProposalList } from './AnalysisProposalList';
 
 interface AnalysisPanelProps {
   projectId: string;
   transcriptRevision?: number;
   sourceKind?: 'full_service' | 'sermon_only';
+  onOpenEditor?: () => void;
 }
 
 const POLL_INTERVAL_MS = 1500;
@@ -46,14 +47,11 @@ function isActive(job: AnalysisJob | null): boolean {
   return job != null && ACTIVE_ANALYSIS_STATUSES.includes(job.status);
 }
 
-function candidateDuration(candidate: AnalysisCandidate): number {
-  return candidate.segments.reduce((sum, seg) => sum + Math.max(0, seg.end - seg.start), 0);
-}
-
 export function AnalysisPanel({
   projectId,
   transcriptRevision = 0,
   sourceKind = 'sermon_only',
+  onOpenEditor,
 }: AnalysisPanelProps) {
   const [provider, setProvider] = useState<AnalysisProviderStatus | null>(null);
   const [job, setJob] = useState<AnalysisJob | null>(null);
@@ -175,8 +173,9 @@ export function AnalysisPanel({
       </div>
 
       <p className="muted">
-        Aquí solo se analiza: nada entra al Reel hasta que lo elijas. Los candidatos aparecen
-        después en el editor, en Archivos, con duración y «Añadir al Reel». El paso anterior (
+        Aquí solo se analiza: nada entra al Reel hasta que lo elijas. Las propuestas salen
+        también en el editor para abrirlas una a una o añadirlas a un short que ya estés
+        editando. El paso anterior (
         {sourceKind === 'full_service' ? 'culto completo' : 'solo predicación'}) ya le dice a la IA
         qué fuente usar.
       </p>
@@ -345,36 +344,17 @@ export function AnalysisPanel({
             <div className="analysis-candidates">
               <h3>Propuestas del análisis</h3>
               <p className="muted">
-                No se eligen aquí. Ábrelas en el editor, en Archivos, y añádelas al Reel.
+                {candidates.length} propuesta{candidates.length === 1 ? '' : 's'}. En el editor
+                puedes editar cada una o añadirla a un short ya abierto.
               </p>
-              <ol className="analysis-candidates__list">
-                {candidates.map((candidate) => (
-                  <li key={candidate.id} className="analysis-candidate">
-                    <div className="analysis-candidate__header">
-                      <strong>
-                        {candidate.rank + 1}. {candidate.title}
-                      </strong>
-                    </div>
-                    <p className="muted">
-                      Score {candidate.editorial_score.toFixed(1)} ·{' '}
-                      {formatDuration(candidateDuration(candidate))} · {candidate.segments.length}{' '}
-                      fragmento(s)
-                    </p>
-                    {candidate.hook && <p>{candidate.hook}</p>}
-                    {candidate.summary && <p className="muted">{candidate.summary}</p>}
-                    <ul className="analysis-candidate__segments">
-                      {candidate.segments.map((segment, index) => (
-                        <li key={`${candidate.id}-${index}`}>
-                          <span className="reel-timeline__range">
-                            {formatTimecode(segment.start)} – {formatTimecode(segment.end)}
-                          </span>
-                          <span>{segment.exact_text}</span>
-                        </li>
-                      ))}
-                    </ul>
-                  </li>
-                ))}
-              </ol>
+              {onOpenEditor && (
+                <div className="button-stack">
+                  <button type="button" onClick={onOpenEditor}>
+                    Abrir propuestas en el editor
+                  </button>
+                </div>
+              )}
+              <AnalysisProposalList candidates={candidates} />
             </div>
           )}
         </>

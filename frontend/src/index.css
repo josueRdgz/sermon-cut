@@ -2128,10 +2128,19 @@ a:hover {
   list-style: none;
   margin: 0;
   padding: 0;
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr));
-  gap: 1rem;
-  align-items: start;
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+}
+
+.analysis-candidates__list--compact {
+  gap: 0.45rem;
+}
+
+.analysis-candidate__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
 }
 
 .analysis-candidate {
@@ -3381,10 +3390,14 @@ a:hover {
 }
 
 .reel-nle__stage-empty {
-  display: grid;
-  place-items: center;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-start;
+  align-items: stretch;
+  gap: 0.75rem;
   min-height: 16rem;
-  padding: 1.5rem;
+  padding: 1rem 1.25rem 1.5rem;
+  overflow: auto;
 }
 
 .reel-nle__dock {

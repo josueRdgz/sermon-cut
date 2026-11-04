@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.4.20] — 2026-11-03
+
+### Fixed
+
+- Las propuestas del análisis editorial vuelven a verse en el editor (lista
+  vertical, no columnas). Se pueden abrir una a una o añadirlas a un short
+  que ya esté en edición; el editor ya no sale vacío tras el análisis.
+
 ## [0.4.19] — 2026-11-02
 
 ### Fixed
