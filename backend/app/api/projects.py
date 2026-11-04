@@ -187,16 +187,11 @@ def stream_project_video(project_id: UUID, db: Session = Depends(get_db)) -> Fil
 @router.get("/{project_id}/media/audio")
 def stream_project_audio(
     project_id: UUID,
-    voice_center: float = Query(default=0.0, ge=0.0, le=1.0),
     db: Session = Depends(get_db),
 ) -> FileResponse:
     """Stream a dedicated AAC/WAV track for HTML5 ``<audio>`` preview."""
     project = projects_service.get_project(db, project_id)
-    path = preview_audio_path(
-        project.id,
-        project.video_filename or "",
-        voice_center=voice_center,
-    )
+    path = preview_audio_path(project.id, project.video_filename or "")
     media_types = {
         ".wav": "audio/wav",
         ".m4a": "audio/mp4",

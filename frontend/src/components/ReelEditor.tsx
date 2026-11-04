@@ -22,7 +22,6 @@ import {
   reorderReelSegments,
   joinReelSegment,
   splitReelSegment,
-  updateReel,
   updateReelSegment,
 } from '../api/reels';
 import { getTranscript } from '../api/transcripts';
@@ -77,8 +76,6 @@ import {
   resolvePreviewSeek,
   type PreviewSeekTarget,
 } from '../utils/reelPreview';
-import { DEFAULT_VOICE_CENTER, clampVoiceCenter } from '../utils/voiceCenter';
-
 function overlappingTranscriptSegments(
   segments: TranscriptSegment[],
   start: number,
@@ -253,15 +250,9 @@ export function ReelEditor({
   const videoBRef = useRef<HTMLVideoElement>(null);
   const programLaneRef = useRef<0 | 1>(0);
   const [programLane, setProgramLane] = useState<0 | 1>(0);
-  const audioARef = useRef<HTMLAudioElement>(null);
-  const audioBRef = useRef<HTMLAudioElement>(null);
-  const audioLaneRef = useRef<0 | 1>(0);
-  const promotingAudioRef = useRef(false);
+  const audioRef = useRef<HTMLAudioElement>(null);
   const musicRef = useRef<HTMLAudioElement>(null);
-  const [audioSrcA, setAudioSrcA] = useState(() => projectAudioUrl(projectId, mediaRevision));
-  const [audioSrcB, setAudioSrcB] = useState<string | null>(null);
-  const liveVoiceUrlRef = useRef(projectAudioUrl(projectId, mediaRevision));
-  const pendingStandbyUrlRef = useRef<string | null>(null);
+  const [audioSrc, setAudioSrc] = useState(() => projectAudioUrl(projectId, mediaRevision));
   const [reels, setReels] = useState<Reel[]>([]);
   const [activeReelId, setActiveReelId] = useState<string | null>(null);
   const [transcriptSegments, setTranscriptSegments] = useState<TranscriptSegment[]>([]);
@@ -335,8 +326,6 @@ export function ReelEditor({
   const musicVolumeSaveTimerRef = useRef<number | null>(null);
   const segmentPersistTimerRef = useRef<number | null>(null);
   const overlayPersistTimerRef = useRef<number | null>(null);
-  const voiceCenterTimerRef = useRef<number | null>(null);
-  const voiceCenterRef = useRef(DEFAULT_VOICE_CENTER);
   const pendingSegmentWorkRef = useRef<(() => Promise<void>) | null>(null);
   const pendingOverlayWorkRef = useRef<(() => Promise<void>) | null>(null);
   const assembledVideoRef = useRef<HTMLVideoElement>(null);
@@ -387,11 +376,7 @@ export function ReelEditor({
   }
 
   function programAudio(): HTMLAudioElement | null {
-    return (audioLaneRef.current === 0 ? audioARef : audioBRef).current;
-  }
-
-  function standbyPreviewAudio(): HTMLAudioElement | null {
-    return (audioLaneRef.current === 0 ? audioBRef : audioARef).current;
+    return audioRef.current;
   }
 
   function clearCutTimer() {
@@ -1415,11 +1400,9 @@ export function ReelEditor({
   }
 
   function usesSeparateAudio(): boolean {
-    // Offset needs a second clock. Voice-centering plays a pre-panned AAC in a
-    // standby <audio> (Web Audio capture mutes WKWebView). The live element
-    // never reloads, so the sermon keeps sounding while FFmpeg writes the pan.
+    // Offset needs a second clock. Otherwise the video's own soundtrack plays.
     syncPlayingAudioOffset();
-    return Math.abs(audioOffsetRef.current) >= 1 || voiceCenterRef.current >= 0.01;
+    return Math.abs(audioOffsetRef.current) >= 1;
   }
 
   function separateAudioReady(): boolean {
@@ -1604,26 +1587,27 @@ export function ReelEditor({
         audio.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA,
     );
     if (xfade) applyXfadeVars(xfade.type, progress);
-    if (video) {
-      video.muted = audioLive ? true : muted || outVol <= 0.0005;
-      video.volume = audioLive ? 1 : clampMediaVolume(outVol);
-    }
-    if (standby) {
-      standby.muted = Boolean(audioLive || muted || inVol <= 0.0005);
-      standby.volume = audioLive ? 0 : clampMediaVolume(inVol);
-    }
     if (audio) {
       const mixGain = separate ? (muted ? 0 : clampMediaVolume(volume * outGain)) : 0;
-      audio.muted = audioLive ? muted : true;
-      audio.volume = audioLive ? mixGain : 0;
+      // Keep the program <audio> unmuted while it is the output path. Muting it
+      // while paused and unmuting on play() clicks, then WKWebView can stay silent.
+      audio.muted = separate ? muted : true;
+      audio.volume = separate ? mixGain : 0;
       if (!separate && !xfade) {
         audio.pause();
         audio.playbackRate = 1;
       }
     }
-    const standbyAudio = standbyPreviewAudio();
-    if (standbyAudio && standbyAudio !== audio && !promotingAudioRef.current) {
-      standbyAudio.muted = true;
+    const intendSeparate = Boolean(separate && audio && !audio.error);
+    if (video) {
+      video.muted = audioLive || (intendSeparate && previewingRef.current)
+        ? true
+        : muted || outVol <= 0.0005;
+      video.volume = audioLive || intendSeparate ? 1 : clampMediaVolume(outVol);
+    }
+    if (standby) {
+      standby.muted = Boolean(audioLive || intendSeparate || muted || inVol <= 0.0005);
+      standby.volume = audioLive || intendSeparate ? 0 : clampMediaVolume(inVol);
     }
     applyMusicGain();
   }
@@ -1702,7 +1686,7 @@ export function ReelEditor({
   }
 
   function runPreviewTick() {
-    if (!previewingRef.current || jumpingRef.current || scrubbingRef.current) {
+    if (!previewingRef.current || scrubbingRef.current) {
       applyPreviewGain();
       return;
     }
@@ -1741,6 +1725,14 @@ export function ReelEditor({
     const index = previewIndexRef.current;
     const current = ordered[index];
     if (!video || !current) return;
+    const outputNow = outputTimeForSource(buildOutputClock(ordered), index, video.currentTime);
+    previewOutputTimeRef.current = Math.max(0, outputNow);
+    setPreviewOutputTime(previewOutputTimeRef.current);
+    setSourceTime(video.currentTime);
+    if (jumpingRef.current) {
+      applyPreviewGain();
+      return;
+    }
     applyPreviewGain();
     ensureSeparateAudioPlaying();
     const next = ordered[index + 1];
@@ -2008,10 +2000,8 @@ export function ReelEditor({
     setSourceTime(sourceTimeSeconds);
     applyPreviewGain();
     try {
-      const plays: Promise<unknown>[] = [];
-      if (video.paused) plays.push(video.play());
-      if (separateAudioReady() && audio && audio.paused) plays.push(audio.play());
-      if (plays.length) await Promise.all(plays);
+      if (video.paused) await video.play();
+      if (separateAudioReady() && audio && audio.paused) await audio.play();
     } catch (err: unknown) {
       if (token !== jumpTokenRef.current) return;
       stopPreview();
@@ -2058,68 +2048,6 @@ export function ReelEditor({
     if (usesSeparateAudio()) {
       syncAudioToVideo(video.currentTime, true);
     }
-  }
-
-  function queueVoiceAudio(amount: number) {
-    const next = clampVoiceCenter(amount);
-    const url = projectAudioUrl(projectId, mediaRevision, next >= 0.01 ? next : null);
-    if (liveVoiceUrlRef.current === url || pendingStandbyUrlRef.current === url) return;
-    pendingStandbyUrlRef.current = url;
-    if (audioLaneRef.current === 0) setAudioSrcB(url);
-    else setAudioSrcA(url);
-  }
-
-  function promoteStandbyAudio() {
-    if (promotingAudioRef.current) return;
-    const url = pendingStandbyUrlRef.current;
-    if (!url) return;
-    const live = programAudio();
-    const next = standbyPreviewAudio();
-    if (!next || next.readyState < HTMLMediaElement.HAVE_CURRENT_DATA) return;
-    promotingAudioRef.current = true;
-    pendingStandbyUrlRef.current = null;
-    const t = live?.currentTime ?? 0;
-    const playing = Boolean(previewingRef.current && live && !live.paused);
-    next.muted = false;
-    next.volume = live?.volume ?? previewVolumeRef.current;
-    setMediaTime(next, t, true);
-    const finish = () => {
-      liveVoiceUrlRef.current = url;
-      audioLaneRef.current = audioLaneRef.current === 0 ? 1 : 0;
-      live?.pause();
-      promotingAudioRef.current = false;
-      applyPreviewGain();
-      if (previewingRef.current) ensureSeparateAudioPlaying();
-    };
-    const abort = () => {
-      pendingStandbyUrlRef.current = url;
-      promotingAudioRef.current = false;
-    };
-    if (!playing) {
-      finish();
-      return;
-    }
-    void next.play().then(finish).catch(abort);
-  }
-
-  function handleVoiceCenter(amount: number) {
-    if (!activeReel) return;
-    const next = clampVoiceCenter(amount);
-    voiceCenterRef.current = next;
-    setReels((prev) =>
-      prev.map((reel) => (reel.id === activeReel.id ? { ...reel, voice_center: next } : reel)),
-    );
-    if (voiceCenterTimerRef.current != null) {
-      window.clearTimeout(voiceCenterTimerRef.current);
-    }
-    const reelId = activeReel.id;
-    voiceCenterTimerRef.current = window.setTimeout(() => {
-      voiceCenterTimerRef.current = null;
-      queueVoiceAudio(next);
-      void updateReel(projectId, reelId, { voice_center: next }).then(replaceReel).catch((err: unknown) => {
-        setError(err instanceof Error ? err.message : 'No se pudo guardar el paneo de la voz');
-      });
-    }, 280);
   }
 
   async function saveAudioOffset(offsetMs = audioOffsetMs) {
@@ -2240,7 +2168,6 @@ export function ReelEditor({
     }
     const video = programVideo();
     if (!video) return;
-    const audio = programAudio();
     const total = outputClock.totalDuration;
     const target =
       previewOutputTime >= total - 0.05
@@ -2250,75 +2177,55 @@ export function ReelEditor({
     previewIndexRef.current = target.segmentIndex;
     setPreviewIndex(target.segmentIndex);
     setPreviewOutputTime(target.outputTime);
+    previewOutputTimeRef.current = target.outputTime;
     setSourceTime(target.sourceTime);
     pendingPreviewSeekRef.current = target;
     previewMutedRef.current = previewMuted;
     previewVolumeRef.current = previewVolume;
-    // Prefer a single element (locked A/V). Separate audio only when the user
-    // requested an explicit offset — dual seekers break hard cuts in WKWebView.
-    applyPreviewGain();
     previewingRef.current = true;
     setPreviewing(true);
+    applyPreviewGain();
     if (target.inPad) {
       inPadRef.current = true;
       setPreviewInPad(true);
       padWallRef.current = performance.now();
       video.pause();
       standbyVideo()?.pause();
-      audio?.pause();
+      programAudio()?.pause();
       void playMusicForOutput(target.outputTime);
       ensurePreviewTick();
       return;
     }
-    jumpingRef.current = true;
+    jumpingRef.current = false;
     inPadRef.current = false;
     setPreviewInPad(false);
-    if (usesSeparateAudio()) queueVoiceAudio(voiceCenterRef.current);
-    if (separateAudioReady() && audio && audio.paused && !previewMuted) {
-      void audio.play().catch(() => undefined);
+    pendingVideoTimeRef.current = target.sourceTime;
+    if (setMediaTime(video, target.sourceTime, true)) {
+      pendingVideoTimeRef.current = null;
     }
-    const waitForMetadata = (media: HTMLMediaElement) => {
-      if (media.error) {
-        return Promise.reject(new Error('No se pudo cargar el medio para el preview'));
+    const audio = programAudio();
+    if (usesSeparateAudio() && audio) {
+      const audioTime = audioTimeForVideo(target.sourceTime, audioOffsetRef.current);
+      pendingAudioTimeRef.current = audioTime;
+      if (setMediaTime(audio, audioTime, true)) {
+        pendingAudioTimeRef.current = null;
       }
-      if (media.readyState >= HTMLMediaElement.HAVE_METADATA) return Promise.resolve();
-      return new Promise<void>((resolve, reject) => {
-        const onReady = () => {
-          media.removeEventListener('error', onError);
-          resolve();
-        };
-        const onError = () => {
-          media.removeEventListener('loadedmetadata', onReady);
-          reject(new Error('No se pudo cargar el medio para el preview'));
-        };
-        media.addEventListener('loadedmetadata', onReady, { once: true });
-        media.addEventListener('error', onError, { once: true });
-      });
-    };
-    const mediaReady =
-      usesSeparateAudio() && audio && !audio.error
-        ? Promise.all([waitForMetadata(video), waitForMetadata(audio)])
-        : waitForMetadata(video);
-    void mediaReady
-      .then(async () => {
-        if (!previewingRef.current || scrubbingRef.current) {
-          jumpingRef.current = false;
-          return;
-        }
-        await jumpPreviewToSource(target.sourceTime, true);
-      })
-      .catch(async (err: unknown) => {
-        if (previewingRef.current && video.readyState >= HTMLMediaElement.HAVE_METADATA) {
-          await jumpPreviewToSource(target.sourceTime, true);
-          return;
-        }
-        jumpingRef.current = false;
-        previewingRef.current = false;
-        setPreviewing(false);
-        video.pause();
-        audio?.pause();
+    }
+    applyPreviewGain();
+    ensurePreviewTick();
+    if (video.paused) {
+      void video.play().catch((err: unknown) => {
+        if (!previewingRef.current) return;
+        stopPreview();
         setError(err instanceof Error ? err.message : 'El navegador bloqueó la reproducción');
       });
+    }
+    if (usesSeparateAudio() && audio && audio.paused && !previewMuted) {
+      void audio.play().catch(() => undefined);
+    }
+    scheduleCutAdvance();
+    prefetchStandby();
+    void playMusicForOutput(target.outputTime);
   }
 
   function togglePreviewAudio() {
@@ -2472,9 +2379,7 @@ export function ReelEditor({
     const videos = [videoARef.current, videoBRef.current].filter(
       (item): item is HTMLVideoElement => Boolean(item),
     );
-    const previewAudios = [audioARef.current, audioBRef.current].filter(
-      (item): item is HTMLAudioElement => Boolean(item),
-    );
+    const previewAudio = audioRef.current;
     if (videos.length === 0 || !activeReel) return;
 
     function onTimeUpdate(event: Event) {
@@ -2526,12 +2431,7 @@ export function ReelEditor({
 
     function onAudioReady(event: Event) {
       const el = event.target;
-      if (!(el instanceof HTMLAudioElement)) return;
-      if (el === standbyPreviewAudio()) {
-        promoteStandbyAudio();
-        return;
-      }
-      if (el !== programAudio()) return;
+      if (!(el instanceof HTMLAudioElement) || el !== programAudio()) return;
       if (pendingAudioTimeRef.current != null) {
         if (setMediaTime(el, pendingAudioTimeRef.current)) {
           pendingAudioTimeRef.current = null;
@@ -2546,7 +2446,7 @@ export function ReelEditor({
       syncedVideo.addEventListener('seeking', onSeeking);
       syncedVideo.addEventListener('loadedmetadata', onVideoMetadata);
     }
-    for (const previewAudio of previewAudios) {
+    if (previewAudio) {
       previewAudio.addEventListener('loadedmetadata', onAudioReady);
       previewAudio.addEventListener('canplay', onAudioReady);
     }
@@ -2556,26 +2456,16 @@ export function ReelEditor({
         syncedVideo.removeEventListener('seeking', onSeeking);
         syncedVideo.removeEventListener('loadedmetadata', onVideoMetadata);
       }
-      for (const previewAudio of previewAudios) {
+      if (previewAudio) {
         previewAudio.removeEventListener('loadedmetadata', onAudioReady);
         previewAudio.removeEventListener('canplay', onAudioReady);
       }
     };
-  }, [activeReel, programLane, audioSrcA, audioSrcB, hasVideo]);
+  }, [activeReel, programLane, audioSrc, hasVideo]);
 
   useEffect(() => {
-    const base = projectAudioUrl(projectId, mediaRevision);
-    setAudioSrcA(base);
-    setAudioSrcB(null);
-    audioLaneRef.current = 0;
-    liveVoiceUrlRef.current = base;
-    pendingStandbyUrlRef.current = null;
+    setAudioSrc(projectAudioUrl(projectId, mediaRevision));
   }, [projectId, mediaRevision]);
-
-  useEffect(() => {
-    if (!activeReel) return;
-    queueVoiceAudio(activeReel.voice_center ?? DEFAULT_VOICE_CENTER);
-  }, [activeReel?.id, projectId, mediaRevision]);
 
   const orderedSegments = useMemo(
     () => (activeReel ? [...activeReel.segments].sort((a, b) => a.order - b.order) : []),
@@ -2584,7 +2474,6 @@ export function ReelEditor({
   orderedSegmentsRef.current = orderedSegments;
   editingSegmentIdRef.current = editingSegmentId;
   audioOffsetMsRef.current = audioOffsetMs;
-  voiceCenterRef.current = clampVoiceCenter(activeReel?.voice_center ?? DEFAULT_VOICE_CENTER);
   const outputClock = useMemo(() => buildOutputClock(orderedSegments), [orderedSegments]);
   const selectedOverlay =
     overlays.find((item) => item.id === selectedOverlayId) ?? null;
@@ -2722,9 +2611,6 @@ export function ReelEditor({
       }
       if (overlayPersistTimerRef.current != null) {
         window.clearTimeout(overlayPersistTimerRef.current);
-      }
-      if (voiceCenterTimerRef.current != null) {
-        window.clearTimeout(voiceCenterTimerRef.current);
       }
       if (cutTimerRef.current != null) {
         window.clearTimeout(cutTimerRef.current);
@@ -3209,10 +3095,8 @@ export function ReelEditor({
                   standbyVideoRef={videoBRef}
                   assembledVideoRef={assembledVideoRef}
                   activeProgramLane={programLane}
-                  audioRef={audioARef}
-                  audioStandbyRef={audioBRef}
-                  audioSrc={audioSrcA}
-                  standbyAudioSrc={audioSrcB}
+                  audioRef={audioRef}
+                  audioSrc={audioSrc}
                   musicRef={musicRef}
                   assembledSrc={null}
                   previewMode="logical"
@@ -3685,28 +3569,6 @@ export function ReelEditor({
                   <p className="muted">
                     Aplica solo al corte seleccionado. «Como el anterior» copia la sincronía del
                     corte previo. La música importada en Archivos no se desplaza.
-                  </p>
-                </div>
-                <div className="reel-audio-sync reel-audio-sync--inspector">
-                  <div className="reel-audio-sync__header">
-                    <label htmlFor={`voice-center-${activeReel.id}`}>
-                      Centrar voz:{' '}
-                      <strong>{Math.round(clampVoiceCenter(activeReel.voice_center ?? DEFAULT_VOICE_CENTER) * 100)}%</strong>
-                    </label>
-                  </div>
-                  <input
-                    id={`voice-center-${activeReel.id}`}
-                    type="range"
-                    min={0}
-                    max={1}
-                    step={0.05}
-                    value={clampVoiceCenter(activeReel.voice_center ?? DEFAULT_VOICE_CENTER)}
-                    onChange={(event) => handleVoiceCenter(Number(event.target.value))}
-                  />
-                  <p className="muted">
-                    Este sermón trae la voz a la derecha y el ambiente a la izquierda. Sube el
-                    control para mezclar un poco de la voz en ambos oídos. 0% deja el estéreo
-                    original; 100% centra la voz por completo.
                   </p>
                 </div>
                 <details className="reel-nle__details" open>

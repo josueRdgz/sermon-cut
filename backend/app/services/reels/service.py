@@ -117,7 +117,7 @@ def to_response(reel: Reel) -> ReelResponse:
         status=reel.status,
         framing_mode=getattr(reel, "framing_mode", None) or "center_crop",
         audio_offset_ms=getattr(reel, "audio_offset_ms", 0) or 0,
-        voice_center=float(getattr(reel, "voice_center", 0.35) or 0.0),
+        voice_center=float(getattr(reel, "voice_center", 0.0) or 0.0),
         created_at=reel.created_at,
         updated_at=reel.updated_at,
         segments=[_segment_response(s) for s in ordered],

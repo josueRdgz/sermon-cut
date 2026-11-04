@@ -68,25 +68,3 @@ def test_preview_audio_ignores_repair_wavs(tmp_path: Path, monkeypatch: object) 
         result = preview_audio_path(project_id, "video.mp4")
 
     assert result.name == "preview-audio.m4a"
-
-
-def test_preview_audio_voice_center_writes_panned_cache(tmp_path: Path, monkeypatch: object) -> None:
-    monkeypatch.setattr(paths, "PROJECTS_DIR", tmp_path)
-    project_id = uuid4()
-    project_dir = tmp_path / str(project_id)
-    project_dir.mkdir()
-    (project_dir / "video.mp4").write_bytes(b"video")
-    (project_dir / "preview-audio.m4a").write_bytes(b"\x00" * 2048)
-
-    def fake_pan(
-        _ffmpeg: str, _source: Path, destination: Path, _log: Path, _pan: str
-    ) -> None:
-        destination.write_bytes(b"\x00" * 2048)
-
-    with (
-        patch("app.services.media_audio.locate_ffmpeg", return_value="ffmpeg"),
-        patch("app.services.media_audio._pan", side_effect=fake_pan),
-    ):
-        result = preview_audio_path(project_id, "video.mp4", voice_center=0.35)
-
-    assert result.name == "preview-audio-vc07.m4a"

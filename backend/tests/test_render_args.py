@@ -136,12 +136,6 @@ def test_audio_normalized_to_stereo_48k_with_boundary_fades() -> None:
     assert "pan=stereo" not in graph
 
 
-def test_voice_center_mixes_right_channel_into_left() -> None:
-    plan = _build(voice_center=0.35)
-    assert plan.filter_complex.count("pan=stereo|c0=") == 2
-    assert "c1=c1" in plan.filter_complex
-
-
 def test_per_segment_audio_offset_uses_that_clip_only() -> None:
     plan = _build(
         segments=[

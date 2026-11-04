@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.4.22] — 2026-11-04
+
+### Removed
+
+- Se quita **Centrar voz** del editor, del preview y del render. El sermón se
+  oye en estéreo original; el paneo ya no interfiere con la reproducción.
+
+### Fixed
+
+- La aguja de la línea temporal avanza con el video (antes dependía de
+  ``timeupdate`` y se quedaba parada si el paneo bloqueaba el play). Pulsar
+  reproducir arranca el video en el mismo clic, sin esperar a un archivo de
+  audio extra.
+
+## [0.4.21] — 2026-11-04
+
+### Fixed
+
+- El preview ya no hace clic y se queda mudo: WKWebView silencia la salida si
+  dos ``<audio>`` suenan a la vez al aplicar el paneo. El archivo paneado se
+  carga en espera y solo entra con el preview en pausa; al reproducir suena un
+  solo elemento.
+
 ## [0.4.20] — 2026-11-03
 
 ### Fixed

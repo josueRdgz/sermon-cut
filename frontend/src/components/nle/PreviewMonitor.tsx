@@ -18,9 +18,7 @@ interface PreviewMonitorProps {
   assembledVideoRef: Ref<HTMLVideoElement>;
   activeProgramLane: 0 | 1;
   audioRef: Ref<HTMLAudioElement>;
-  audioStandbyRef: Ref<HTMLAudioElement>;
   audioSrc: string;
-  standbyAudioSrc: string | null;
   musicRef: Ref<HTMLAudioElement>;
   assembledSrc: string | null;
   previewMode: PreviewMode;
@@ -59,9 +57,7 @@ export function PreviewMonitor({
   assembledVideoRef,
   activeProgramLane,
   audioRef,
-  audioStandbyRef,
   audioSrc,
-  standbyAudioSrc,
   musicRef,
   assembledSrc,
   previewMode,
@@ -181,13 +177,6 @@ export function PreviewMonitor({
             className="reel-player__preview-audio"
             preload="auto"
             src={audioSrc}
-            aria-hidden="true"
-          />
-          <audio
-            ref={audioStandbyRef}
-            className="reel-player__preview-audio"
-            preload="auto"
-            src={standbyAudioSrc ?? undefined}
             aria-hidden="true"
           />
           {musicActive && musicFilename && (
