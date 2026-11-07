@@ -47,6 +47,15 @@ def gemini_status(settings: Settings) -> ToolAvailability:
     )
 
 
+def groq_status(settings: Settings) -> ToolAvailability:
+    """Report whether optional Groq analysis is configured (never the key)."""
+    configured = bool(settings.groq_api_key) and settings.ai_provider != "mock"
+    return ToolAvailability(
+        available=configured,
+        version=settings.groq_model if configured else None,
+    )
+
+
 def storage_usage() -> StorageUsage:
     """Sum bytes stored under the projects tree and count project folders."""
     total = 0

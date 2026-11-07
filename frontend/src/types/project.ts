@@ -44,6 +44,10 @@ export interface ProjectListResponse {
   total: number;
 }
 
+export interface ProjectUpdatePayload {
+  source_kind?: 'full_service' | 'sermon_only';
+}
+
 export interface ProjectCreatePayload {
   title: string;
   preacher_name?: string | null;
@@ -56,6 +60,6 @@ export interface ProjectCreatePayload {
 }
 
 export interface ApiErrorBody {
-  detail: string;
+  detail?: unknown;
   code?: string;
 }

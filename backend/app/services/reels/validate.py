@@ -22,6 +22,7 @@ class SegmentTiming:
     source_end_seconds: float
     transition_type: TransitionType = TransitionType.hard_cut
     transition_duration_ms: int = 0
+    pad_before_ms: int = 0
 
 
 def validate_segment_timing(
@@ -122,6 +123,7 @@ def total_duration_seconds(segments: list[SegmentTiming]) -> float:
                 source_end=s.source_end_seconds,
                 transition_type=s.transition_type.value,
                 transition_duration_ms=s.transition_duration_ms,
+                pad_before_ms=s.pad_before_ms,
             )
             for s in segments
         ]

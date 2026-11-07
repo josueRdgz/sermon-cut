@@ -29,9 +29,14 @@ def test_run_migrations_adds_source_kind(tmp_path, monkeypatch) -> None:
     assert run_migrations(raise_on_error=True) is True
 
     conn = sqlite3.connect(db_file)
-    columns = {row[1] for row in conn.execute("PRAGMA table_info(projects)")}
+    project_columns = {row[1] for row in conn.execute("PRAGMA table_info(projects)")}
+    reel_columns = {row[1] for row in conn.execute("PRAGMA table_info(reels)")}
     version = conn.execute("SELECT version_num FROM alembic_version").fetchone()[0]
     conn.close()
-    assert "source_kind" in columns
-    assert version == "b8c9d0e1f2a3"
+    config = Config(str(BACKEND_DIR / "alembic.ini"))
+    config.set_main_option("script_location", str(BACKEND_DIR / "alembic"))
+    head = ScriptDirectory.from_config(config).get_current_head()
+    assert "source_kind" in project_columns
+    assert "subtitle_bold" in reel_columns
+    assert version == head
     clear_settings_cache()

@@ -14,11 +14,26 @@
 .modal {
   width: 100%;
   max-width: 440px;
+  max-height: min(86vh, 720px);
+  display: flex;
+  flex-direction: column;
   background: var(--panel);
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow-lg);
   animation: rise var(--dur) var(--ease);
+}
+
+.lg {
+  max-width: 760px;
+  max-height: 86vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.lg .body {
+  overflow: auto;
+  min-height: 0;
 }
 
 .header {
@@ -28,6 +43,7 @@
   gap: var(--space-3);
   padding: var(--space-4) var(--space-5);
   border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
 }
 
 .title {
@@ -62,6 +78,8 @@
 
 .body {
   padding: var(--space-5);
+  overflow: auto;
+  min-height: 0;
 }
 
 @keyframes fade {

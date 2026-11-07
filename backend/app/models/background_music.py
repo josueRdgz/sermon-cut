@@ -6,7 +6,7 @@ import enum
 import uuid
 from datetime import UTC, datetime
 
-from sqlalchemy import Boolean, DateTime, Enum, Float, ForeignKey, Integer, String, UniqueConstraint
+from sqlalchemy import Boolean, DateTime, Enum, Float, ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.types import Uuid
 
@@ -86,6 +86,7 @@ class BackgroundMusicSettings(Base):
     # Integrated loudness target for the final mix (spoken-word friendly).
     target_lufs: Mapped[float] = mapped_column(Float, nullable=False, default=-16.0)
     true_peak_db: Mapped[float] = mapped_column(Float, nullable=False, default=-1.5)
+    volume_keyframes_json: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=_utc_now

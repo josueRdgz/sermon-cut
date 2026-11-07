@@ -1,10 +1,20 @@
 import type { ReelSegment } from '../types/reel';
 import { buildOutputClock, outputTimeForSource } from './reelOutputClock';
 
+export interface PreviewXfadeSeek {
+  fromIndex: number;
+  toIndex: number;
+  progress: number;
+  duration: number;
+  incomingSourceTime: number;
+}
+
 export interface PreviewSeekTarget {
   outputTime: number;
   segmentIndex: number;
   sourceTime: number;
+  inPad: boolean;
+  xfade?: PreviewXfadeSeek;
 }
 
 function segmentSignature(segments: ReelSegment[]): string {
@@ -16,6 +26,7 @@ function segmentSignature(segments: ReelSegment[]): string {
     Math.round(segment.source_end_seconds * 1000) / 1000,
     segment.transition_type,
     segment.transition_duration_ms,
+    Math.round(segment.pad_before_ms ?? 0),
   ]);
   return JSON.stringify(payload);
 }
@@ -46,8 +57,50 @@ export function resolvePreviewSeek(
   for (let index = 0; index < placements.length; index += 1) {
     const placement = placements[index];
     const next = placements[index + 1];
+    const padStart = Math.max(0, placement.outputStart - placement.padSeconds);
+    if (outputTime < placement.outputStart) {
+      if (outputTime >= padStart) {
+        return {
+          outputTime,
+          segmentIndex: index,
+          sourceTime: placement.sourceStart,
+          inPad: true,
+        };
+      }
+      continue;
+    }
+    const contentEnd = placement.outputStart + placement.contentDuration;
+    const overlap = placement.overlapSeconds;
+    if (next && overlap > 0 && outputTime >= contentEnd - overlap && outputTime < contentEnd) {
+      const mixLocal = outputTime - (contentEnd - overlap);
+      const incomingSourceTime =
+        outputTime >= next.outputStart
+          ? next.sourceStart + (outputTime - next.outputStart)
+          : next.sourceStart;
+      return {
+        outputTime,
+        segmentIndex: index,
+        sourceTime: placement.sourceStart + (outputTime - placement.outputStart),
+        inPad: false,
+        xfade: {
+          fromIndex: index,
+          toIndex: index + 1,
+          progress: mixLocal / overlap,
+          duration: overlap,
+          incomingSourceTime,
+        },
+      };
+    }
     if (next && outputTime >= next.outputStart) {
       continue;
+    }
+    if (next && outputTime >= contentEnd && outputTime < next.outputStart) {
+      return {
+        outputTime,
+        segmentIndex: next.index,
+        sourceTime: next.sourceStart,
+        inPad: true,
+      };
     }
     const localTime = Math.max(
       0,
@@ -57,6 +110,7 @@ export function resolvePreviewSeek(
       outputTime,
       segmentIndex: index,
       sourceTime: placement.sourceStart + localTime,
+      inPad: false,
     };
   }
 
@@ -65,6 +119,7 @@ export function resolvePreviewSeek(
     outputTime,
     segmentIndex: placements.length - 1,
     sourceTime: last.sourceEnd,
+    inPad: false,
   };
 }
 

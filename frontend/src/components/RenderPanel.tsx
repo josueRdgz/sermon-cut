@@ -1,9 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
-import { getBackgroundMusicMeters } from '../api/backgroundMusic';
 import { ApiError } from '../api/client';
 import { validateReelCoherence } from '../api/coherence';
-import { estimateExportSize, listExportProfiles, updateExportProfile } from '../api/exportProfiles';
+import { estimateExportSize, listExportProfiles } from '../api/exportProfiles';
 import {
   cancelRenderJob,
   deleteRenderJob,
@@ -15,14 +14,16 @@ import {
   revealRenderOutput,
   startRender,
 } from '../api/renders';
-import type { BackgroundMusicMeters } from '../types/backgroundMusic';
-import type { CoherenceReport, CoherenceSeverity } from '../types/coherence';
+import type { CoherenceReport } from '../types/coherence';
 import type { ExportProfile, ExportQuality, SizeEstimate } from '../types/exportProfile';
-import type { AspectRatio, ReelSegment } from '../types/reel';
+import type { AspectRatio, FramingMode, ReelSegment } from '../types/reel';
 import type { RenderJob, RenderLayout } from '../types/render';
 import { ACTIVE_RENDER_STATUSES } from '../types/render';
+import { groupCoherenceIssues } from '../utils/coherenceGroups';
+import { EXPORT_PROFILES_CHANGED_EVENT, openAppPanel } from '../utils/appPanels';
 import { formatDuration } from '../utils/format';
 import { nativeVideoControlProps } from '../utils/nativeMediaControls';
+import { previewTimelineIdentity } from '../utils/reelPreview';
 import { ConfirmDialog } from './ConfirmDialog';
 import { ProgressBar } from './ProgressBar';
 
@@ -36,16 +37,12 @@ interface RenderPanelProps {
   onBeforeStart?: () => Promise<void>;
   /** Jump to Cuts when the server refuses a blocked join. */
   onGoToCuts?: () => void;
+  framingMode?: FramingMode | string;
+  subtitleEnabled?: boolean;
+  normalizeLoudness?: boolean;
 }
 
 const POLL_INTERVAL_MS = 1500;
-
-const LAYOUT_OPTIONS: { value: RenderLayout; label: string }[] = [
-  { value: 'auto_track', label: 'Seguimiento automático' },
-  { value: 'center_crop', label: 'Recorte centrado' },
-  { value: 'blurred_background', label: 'Fondo desenfocado' },
-  { value: 'manual', label: 'Posición manual' },
-];
 
 const QUALITY_OPTIONS: { value: ExportQuality; label: string }[] = [
   { value: 'draft', label: 'Borrador' },
@@ -65,18 +62,6 @@ const STAGE_LABELS: Record<string, string> = {
   cancelled: 'Cancelado',
   failed: 'Error',
 };
-
-const COHERENCE_LABELS: Record<CoherenceSeverity, string> = {
-  valid: 'Coherencia válida',
-  warning: 'Advertencias editoriales',
-  blocked: 'Unión bloqueada',
-};
-
-function coherenceBadgeClass(severity: CoherenceSeverity): string {
-  if (severity === 'valid') return 'badge--coherence-valid';
-  if (severity === 'warning') return 'badge--coherence-warning';
-  return 'badge--coherence-blocked';
-}
 
 function isActive(job: RenderJob | null): boolean {
   return job != null && ACTIVE_RENDER_STATUSES.includes(job.status);
@@ -103,14 +88,45 @@ function crfForProfile(profile: ExportProfile, quality: ExportQuality): number {
   return profile.crf_standard;
 }
 
+function profileSettingIssues(
+  profile: ExportProfile | null,
+  durationSeconds: number | null,
+  reelAspectRatio: AspectRatio,
+): string[] {
+  if (!profile) return [];
+  const issues: string[] = [];
+  if (durationSeconds != null && durationSeconds > profile.max_duration_seconds + 0.5) {
+    issues.push(
+      `Dura ${formatDuration(durationSeconds)} y ${profile.name} admite como máximo ${profile.max_duration_seconds} s.`,
+    );
+  }
+  if (profile.aspect_ratio !== reelAspectRatio) {
+    issues.push(`El Reel es ${reelAspectRatio} y ${profile.name} es ${profile.aspect_ratio}.`);
+  }
+  if (
+    profile.fragmentation_enabled &&
+    profile.fragment_max_seconds != null &&
+    durationSeconds != null &&
+    durationSeconds > profile.fragment_max_seconds + 0.5
+  ) {
+    issues.push(
+      `WhatsApp sugiere trozos de ${profile.fragment_max_seconds} s y este video dura ${formatDuration(durationSeconds)}.`,
+    );
+  }
+  return issues;
+}
+
 export function RenderPanel({
   projectId,
   reelId,
   reelAspectRatio,
   segments,
-  audioOffsetMs,
+  audioOffsetMs: _audioOffsetMs,
   onBeforeStart,
   onGoToCuts,
+  framingMode = 'center_crop',
+  subtitleEnabled = true,
+  normalizeLoudness = true,
 }: RenderPanelProps) {
   const [job, setJob] = useState<RenderJob | null>(null);
   const [history, setHistory] = useState<RenderJob[]>([]);
@@ -118,39 +134,67 @@ export function RenderPanel({
   const [profileId, setProfileId] = useState<string>('');
   const [quality, setQuality] = useState<ExportQuality>('standard');
   const [crf, setCrf] = useState<number>(23);
-  const [layout, setLayout] = useState<RenderLayout>('center_crop');
-  const [normalizeLoudness, setNormalizeLoudness] = useState(true);
-  const [burnSubtitles, setBurnSubtitles] = useState(true);
   const [estimate, setEstimate] = useState<SizeEstimate | null>(null);
   const [showCommand, setShowCommand] = useState(false);
-  const [showProfileEdit, setShowProfileEdit] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [meters, setMeters] = useState<BackgroundMusicMeters | null>(null);
   const [coherence, setCoherence] = useState<CoherenceReport | null>(null);
-  const [coherenceLoading, setCoherenceLoading] = useState(false);
-  const [coherenceAcknowledged, setCoherenceAcknowledged] = useState(false);
-  const [pendingForceExport, setPendingForceExport] = useState(false);
   const [pendingDeleteRender, setPendingDeleteRender] = useState<RenderJob | null>(null);
   const previousReelRef = useRef<string>(reelId);
   const segmentCount = segments.length;
+  const cutsIdentity = previewTimelineIdentity(reelId, segments);
 
+  const matchingProfiles = useMemo(
+    () => profiles.filter((item) => item.aspect_ratio === reelAspectRatio),
+    [profiles, reelAspectRatio],
+  );
+  const visibleProfiles = matchingProfiles.length > 0 ? matchingProfiles : profiles;
   const selectedProfile = useMemo(
-    () => profiles.find((item) => item.id === profileId) ?? null,
-    [profiles, profileId],
+    () => visibleProfiles.find((item) => item.id === profileId) ?? visibleProfiles[0] ?? null,
+    [visibleProfiles, profileId],
   );
 
   useEffect(() => {
+    if (visibleProfiles.length === 0) return;
+    if (visibleProfiles.some((item) => item.id === profileId)) return;
+    setProfileId(visibleProfiles[0].id);
+  }, [visibleProfiles, profileId]);
+
+  useEffect(() => {
+    let cancelled = false;
     listExportProfiles()
       .then((data) => {
+        if (cancelled) return;
         setProfiles(data.items);
-        const preferred = data.items.find((item) => item.slug === 'youtube-short') ?? data.items[0];
+        const matching = data.items.filter((item) => item.aspect_ratio === reelAspectRatio);
+        const preferred =
+          matching.find((item) => item.slug === 'youtube-short') ??
+          matching[0] ??
+          data.items.find((item) => item.slug === 'youtube-short') ??
+          data.items[0];
         if (preferred) {
           setProfileId((current) => current || preferred.id);
           setCrf(crfForProfile(preferred, 'standard'));
         }
       })
-      .catch(() => setProfiles([]));
+      .catch(() => {
+        if (!cancelled) setProfiles([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    function reloadProfiles() {
+      listExportProfiles()
+        .then((data) => {
+          setProfiles(data.items);
+        })
+        .catch(() => {});
+    }
+    window.addEventListener(EXPORT_PROFILES_CHANGED_EVENT, reloadProfiles);
+    return () => window.removeEventListener(EXPORT_PROFILES_CHANGED_EVENT, reloadProfiles);
   }, []);
 
   useEffect(() => {
@@ -161,12 +205,10 @@ export function RenderPanel({
   useEffect(() => {
     if (segmentCount === 0) {
       setCoherence(null);
-      setCoherenceAcknowledged(false);
       return;
     }
     const controller = new AbortController();
     const timer = window.setTimeout(() => {
-      setCoherenceLoading(true);
       validateReelCoherence(
         projectId,
         reelId,
@@ -179,37 +221,19 @@ export function RenderPanel({
         .then((report) => {
           if (!controller.signal.aborted) {
             setCoherence(report);
-            setCoherenceAcknowledged(false);
           }
         })
         .catch((err: unknown) => {
           if (controller.signal.aborted) return;
           if (err instanceof ApiError && err.code === 'request_cancelled') return;
           if (!controller.signal.aborted) setCoherence(null);
-        })
-        .finally(() => {
-          if (!controller.signal.aborted) setCoherenceLoading(false);
         });
     }, 450);
     return () => {
       window.clearTimeout(timer);
       controller.abort();
     };
-  }, [projectId, reelId, segmentCount, segments]);
-
-  useEffect(() => {
-    let cancelled = false;
-    getBackgroundMusicMeters(projectId)
-      .then((data) => {
-        if (!cancelled) setMeters(data);
-      })
-      .catch(() => {
-        if (!cancelled) setMeters(null);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [projectId, job?.status]);
+  }, [projectId, reelId, segmentCount, cutsIdentity]);
 
   useEffect(() => {
     let cancelled = false;
@@ -300,16 +324,14 @@ export function RenderPanel({
           quality,
           crf,
           aspect_ratio: selectedProfile?.aspect_ratio ?? reelAspectRatio,
-          layout,
+          layout: (framingMode as RenderLayout) || 'center_crop',
           normalize_loudness: normalizeLoudness,
-          burn_subtitles: burnSubtitles,
-          audio_offset_ms: audioOffsetMs,
-          acknowledge_coherence: options.acknowledgeCoherence ?? false,
+          burn_subtitles: subtitleEnabled,
+          acknowledge_coherence: options.acknowledgeCoherence ?? true,
         });
         setJob(started);
         const data = await listRenders(projectId, reelId);
         setHistory(data.items);
-        setPendingForceExport(false);
       } catch (err) {
         const message = err instanceof Error ? err.message : 'No se pudo iniciar el render';
         setError(message);
@@ -328,10 +350,9 @@ export function RenderPanel({
       crf,
       selectedProfile,
       reelAspectRatio,
-      layout,
+      framingMode,
       normalizeLoudness,
-      burnSubtitles,
-      audioOffsetMs,
+      subtitleEnabled,
       onBeforeStart,
       onGoToCuts,
     ],
@@ -380,49 +401,33 @@ export function RenderPanel({
     }
   }, [job?.id, pendingDeleteRender, projectId, reelId]);
 
-  const handleSaveProfile = useCallback(async () => {
-    if (!selectedProfile) return;
-    setBusy(true);
-    setError(null);
-    try {
-      const updated = await updateExportProfile(selectedProfile.id, {
-        max_duration_seconds: selectedProfile.max_duration_seconds,
-        fps_mode: selectedProfile.fps_mode,
-        safe_top: selectedProfile.safe_top,
-        safe_bottom: selectedProfile.safe_bottom,
-        crf_draft: selectedProfile.crf_draft,
-        crf_standard: selectedProfile.crf_standard,
-        crf_high: selectedProfile.crf_high,
-        fragmentation_enabled: selectedProfile.fragmentation_enabled,
-        fragment_max_seconds: selectedProfile.fragment_max_seconds,
-        prefer_small_file: selectedProfile.prefer_small_file,
-      });
-      setProfiles((items) => items.map((item) => (item.id === updated.id ? updated : item)));
-      setCrf(crfForProfile(updated, quality));
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'No se pudo guardar el perfil');
-    } finally {
-      setBusy(false);
-    }
-  }, [selectedProfile, quality]);
-
-  const patchSelected = (patch: Partial<ExportProfile>) => {
-    if (!selectedProfile) return;
-    setProfiles((items) =>
-      items.map((item) => (item.id === selectedProfile.id ? { ...item, ...patch } : item)),
-    );
-  };
-
   const active = isActive(job);
   const percent = job ? Math.round(job.progress * 100) : 0;
   const stageLabel = job?.stage ? (STAGE_LABELS[job.stage] ?? job.stage) : '—';
   const canRender = segmentCount > 0 && !!profileId;
   const openIssues = (coherence?.issues ?? []).filter((issue) => !issue.dismissed);
-  const blockedExport = coherence?.severity === 'blocked';
-  const showForceExport = blockedExport && coherenceAcknowledged;
+  const groupedOpenIssues = groupCoherenceIssues(openIssues);
+  const settingIssues = useMemo(
+    () =>
+      profileSettingIssues(
+        selectedProfile,
+        estimate?.duration_seconds ?? null,
+        reelAspectRatio,
+      ),
+    [selectedProfile, estimate?.duration_seconds, reelAspectRatio],
+  );
 
   return (
     <div className="render-panel">
+      {estimate ? (
+        <div className="render-panel__estimate">
+          <strong>Estimación de tamaño</strong>
+          <p>
+            ~{formatSize(estimate.estimated_bytes)} · {formatDuration(estimate.duration_seconds)}
+          </p>
+        </div>
+      ) : null}
+
       <div className="reel-editor__section-header">
         <h4>Exportar Reel</h4>
         <div className="button-stack">
@@ -445,37 +450,8 @@ export function RenderPanel({
               {busy ? 'Preparando exportación…' : 'Exportar Reel a MP4'}
             </button>
           )}
-          {!active && showForceExport && (
-            <button
-              type="button"
-              className="button button--danger"
-              onClick={() => setPendingForceExport(true)}
-              disabled={busy || !canRender}
-            >
-              Exportar de todos modos
-            </button>
-          )}
         </div>
       </div>
-
-      <p className="muted">
-        Exportación local únicamente — sin publicación automática. MP4 H.264 + AAC, verificada con
-        FFprobe al terminar. La revisión de unión está en Cortes y no apaga este botón.
-      </p>
-
-      <p className="error" role="note">
-        Responsabilidad editorial: un Short/Reel con cortes no consecutivos puede alterar el sentido
-        del sermón. Revisa la unión, los subtítulos tras varios segmentos y el contenido completo
-        antes de publicar.
-      </p>
-
-      {error && onGoToCuts && (
-        <p className="muted">
-          <button type="button" className="button button--secondary" onClick={onGoToCuts}>
-            Ir a Cortes
-          </button>
-        </p>
-      )}
 
       {!canRender && segmentCount === 0 && (
         <p className="muted">Añade al menos un fragmento al Reel para poder exportarlo.</p>
@@ -483,51 +459,53 @@ export function RenderPanel({
 
       {segmentCount > 0 && (
         <>
-          {coherenceLoading && <p className="muted">Revisando coherencia editorial…</p>}
-          {coherence && (
-            <div className="render-panel__coherence" aria-live="polite">
-              <span className={`badge ${coherenceBadgeClass(coherence.severity)}`}>
-                {COHERENCE_LABELS[coherence.severity]}
-              </span>
-              <p className="muted">{coherence.summary}</p>
-              {openIssues.length > 0 && (
-                <ul className="render-panel__coherence-issues">
-                  {openIssues.slice(0, 4).map((issue) => (
-                    <li key={`${issue.code}-${issue.segment_id}`}>
-                      <strong>{issue.severity === 'blocked' ? 'Bloqueado' : 'Aviso'}:</strong>{' '}
-                      {issue.message}
-                    </li>
-                  ))}
-                  {openIssues.length > 4 && (
-                    <li className="muted">… y {openIssues.length - 4} más en Cortes.</li>
-                  )}
-                </ul>
-              )}
-              {blockedExport && (
-                <label className="field field--checkbox">
-                  <input
-                    type="checkbox"
-                    checked={coherenceAcknowledged}
-                    onChange={(event) => setCoherenceAcknowledged(event.target.checked)}
-                    disabled={busy || active}
-                  />
-                  <span>Entiendo el riesgo editorial y quiero exportar de todos modos</span>
-                </label>
-              )}
+          {groupedOpenIssues.length > 0 ? (
+            <div className="render-panel__block-notice" aria-live="polite">
+              <ul className="render-panel__coherence-issues">
+                {groupedOpenIssues.slice(0, 4).map((group) => (
+                  <li key={group.key}>{group.issues[0].message}</li>
+                ))}
+                {groupedOpenIssues.length > 4 ? (
+                  <li>… y {groupedOpenIssues.length - 4} más en Cortes.</li>
+                ) : null}
+              </ul>
+              {onGoToCuts ? (
+                <button type="button" className="button button--secondary" onClick={onGoToCuts}>
+                  Revisar en Cortes
+                </button>
+              ) : null}
             </div>
-          )}
+          ) : null}
+
+          {settingIssues.length > 0 ? (
+            <div className="render-panel__block-notice" aria-live="polite">
+              <ul className="render-panel__coherence-issues">
+                {settingIssues.map((issue) => (
+                  <li key={issue}>{issue}</li>
+                ))}
+              </ul>
+              <button
+                type="button"
+                className="button button--secondary"
+                onClick={() => openAppPanel('settings')}
+              >
+                Revisar configuración
+              </button>
+            </div>
+          ) : null}
 
           <div className="transcript-toolbar">
             <label className="field field--inline">
               <span>Perfil</span>
               <select
-                value={profileId}
+                value={selectedProfile?.id ?? profileId}
                 onChange={(e) => setProfileId(e.target.value)}
                 disabled={active || busy}
               >
-                {profiles.map((item) => (
+                {visibleProfiles.map((item) => (
                   <option key={item.id} value={item.id}>
                     {item.name}
+                    {item.aspect_ratio !== reelAspectRatio ? ` (${item.aspect_ratio})` : ''}
                   </option>
                 ))}
               </select>
@@ -557,38 +535,6 @@ export function RenderPanel({
                 onChange={(e) => setCrf(Number(e.target.value) || 23)}
               />
             </label>
-            <label className="field field--inline">
-              <span>Encuadre</span>
-              <select
-                value={layout}
-                onChange={(e) => setLayout(e.target.value as RenderLayout)}
-                disabled={active || busy}
-              >
-                {LAYOUT_OPTIONS.map((option) => (
-                  <option key={option.value} value={option.value}>
-                    {option.label}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className="field field--inline field--checkbox">
-              <input
-                type="checkbox"
-                checked={normalizeLoudness}
-                onChange={(e) => setNormalizeLoudness(e.target.checked)}
-                disabled={active || busy}
-              />
-              <span>Normalizar audio</span>
-            </label>
-            <label className="field field--inline field--checkbox">
-              <input
-                type="checkbox"
-                checked={burnSubtitles}
-                onChange={(e) => setBurnSubtitles(e.target.checked)}
-                disabled={active || busy}
-              />
-              <span>Quemar subtítulos</span>
-            </label>
             <div className="button-stack">
               {active && (
                 <button
@@ -602,122 +548,6 @@ export function RenderPanel({
               )}
             </div>
           </div>
-
-          {selectedProfile && (
-            <p className="muted">
-              {selectedProfile.width}×{selectedProfile.height} · {selectedProfile.aspect_ratio} ·
-              máx. {selectedProfile.max_duration_seconds}s · FPS{' '}
-              {selectedProfile.fps_mode === 'fixed_30' ? '30' : 'original'} · área segura arriba{' '}
-              {Math.round(selectedProfile.safe_top * 100)}% / abajo{' '}
-              {Math.round(selectedProfile.safe_bottom * 100)}%
-              {selectedProfile.description ? ` — ${selectedProfile.description}` : ''}
-            </p>
-          )}
-
-          <button
-            type="button"
-            className="button--ghost"
-            onClick={() => setShowProfileEdit((value) => !value)}
-          >
-            {showProfileEdit ? 'Ocultar edición de perfil' : 'Editar perfil'}
-          </button>
-
-          {showProfileEdit && selectedProfile && (
-            <div className="render-panel__profile-edit">
-              <label className="field">
-                <span>Máx. duración (s) — Shorts: 60 o 180</span>
-                <input
-                  type="number"
-                  min={5}
-                  max={180}
-                  value={selectedProfile.max_duration_seconds}
-                  disabled={busy}
-                  onChange={(e) =>
-                    patchSelected({ max_duration_seconds: Number(e.target.value) || 60 })
-                  }
-                />
-              </label>
-              <label className="field">
-                <span>FPS</span>
-                <select
-                  value={selectedProfile.fps_mode}
-                  disabled={busy}
-                  onChange={(e) =>
-                    patchSelected({ fps_mode: e.target.value as ExportProfile['fps_mode'] })
-                  }
-                >
-                  <option value="original">Igual al original</option>
-                  <option value="fixed_30">Fijo 30</option>
-                </select>
-              </label>
-              <label className="field">
-                <span>Safe top</span>
-                <input
-                  type="number"
-                  min={0}
-                  max={0.4}
-                  step={0.01}
-                  value={selectedProfile.safe_top}
-                  disabled={busy}
-                  onChange={(e) => patchSelected({ safe_top: Number(e.target.value) })}
-                />
-              </label>
-              <label className="field">
-                <span>Safe bottom</span>
-                <input
-                  type="number"
-                  min={0}
-                  max={0.4}
-                  step={0.01}
-                  value={selectedProfile.safe_bottom}
-                  disabled={busy}
-                  onChange={(e) => patchSelected({ safe_bottom: Number(e.target.value) })}
-                />
-              </label>
-              <label className="field field--checkbox">
-                <input
-                  type="checkbox"
-                  checked={selectedProfile.fragmentation_enabled}
-                  disabled={busy}
-                  onChange={(e) => patchSelected({ fragmentation_enabled: e.target.checked })}
-                />
-                <span>Fragmentación opcional (WhatsApp)</span>
-              </label>
-              <button type="button" disabled={busy} onClick={() => void handleSaveProfile()}>
-                Guardar perfil
-              </button>
-            </div>
-          )}
-
-          {estimate && (
-            <div className="render-panel__estimate">
-              <strong>Estimación de tamaño</strong>
-              <p className="muted">
-                ~{estimate.estimated_mb} MB ({formatSize(estimate.estimated_bytes)}) · CRF{' '}
-                {estimate.crf} · AAC {estimate.audio_bitrate_k} kbps · ~
-                {formatDuration(estimate.duration_seconds)}
-              </p>
-              <p className="muted">{estimate.note}</p>
-              {estimate.fragmentation_note && (
-                <p className="muted">{estimate.fragmentation_note}</p>
-              )}
-            </div>
-          )}
-
-          {meters && (
-            <div className="render-panel__meters" aria-live="polite">
-              <strong>Medidores de audio (antes de exportar)</strong>
-              <p className="muted">
-                {meters.normalize_note} · {meters.voice_priority_note}
-                {meters.enabled
-                  ? ` · Música ~${Math.abs(meters.estimated_music_under_voice_db)} dB bajo la voz`
-                  : ''}
-                {' · '}
-                Clipping: {meters.clipping_risk}
-              </p>
-              <p className="muted render-panel__rights">{meters.rights_warning}</p>
-            </div>
-          )}
 
           {active && job && (
             <div className="transcription-progress">
@@ -878,17 +708,6 @@ export function RenderPanel({
       )}
 
       {error && <p className="error">{error}</p>}
-
-      {pendingForceExport && (
-        <ConfirmDialog
-          title="Exportar con incoherencias"
-          message="La unión del Reel tiene problemas editoriales bloqueados. El MP4 puede alterar el sentido del sermón. ¿Exportar de todos modos?"
-          confirmLabel="Exportar de todos modos"
-          busy={busy}
-          onConfirm={() => void handleStart({ acknowledgeCoherence: true })}
-          onCancel={() => !busy && setPendingForceExport(false)}
-        />
-      )}
 
       {pendingDeleteRender && (
         <ConfirmDialog

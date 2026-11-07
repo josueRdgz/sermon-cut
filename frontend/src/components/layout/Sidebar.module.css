@@ -38,13 +38,12 @@
 .label {
   display: block;
   max-width: 100%;
-  font-size: 0.62rem;
+  font-size: 0.55rem;
   line-height: 1.15;
   font-weight: 600;
   text-align: center;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
+  hyphens: auto;
 }
 
 .active {

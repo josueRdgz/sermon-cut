@@ -120,6 +120,33 @@ def test_validate_accepts_literal_evidence_and_snaps_times() -> None:
     assert validated.match_ratio == pytest.approx(1.0)
 
 
+def test_validate_rejects_clips_over_max_duration() -> None:
+    segments = _segments()
+    response = AnalysisResponse(
+        clips=[
+            SuggestedClip(
+                title="Demasiado largo",
+                segments=[
+                    SuggestedSegment(
+                        start=0.0,
+                        end=8.0,
+                        exact_text="La gracia de Dios es suficiente para todo pecador arrepentido.",
+                    ),
+                ],
+            )
+        ]
+    )
+    report = validate_analysis_response(
+        response,
+        segments=segments,
+        video_duration=70.0,
+        max_clip_seconds=5.0,
+        min_segment_seconds=1.0,
+    )
+    assert report.accepted == []
+    assert "longer than" in report.rejected[0]
+
+
 def test_validate_rejects_invented_words() -> None:
     response = AnalysisResponse(
         clips=[

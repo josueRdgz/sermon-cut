@@ -48,11 +48,11 @@ export function AddFragmentForm({
         </label>
         <button
           type="button"
-          className="button button--inline"
+          className="button button--secondary button--inline"
           disabled={busy || sourceTime == null}
           onClick={onUseCurrentStart}
         >
-          Tiempo actual
+          En el cursor
         </button>
       </div>
       <div className="reel-add-fragment__row">
@@ -69,11 +69,11 @@ export function AddFragmentForm({
         </label>
         <button
           type="button"
-          className="button button--inline"
+          className="button button--secondary button--inline"
           disabled={busy || sourceTime == null}
           onClick={onUseCurrentEnd}
         >
-          Tiempo actual
+          En el cursor
         </button>
       </div>
       <div className="reel-add-fragment__actions">

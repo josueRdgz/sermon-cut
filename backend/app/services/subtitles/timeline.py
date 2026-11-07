@@ -12,7 +12,27 @@ from dataclasses import dataclass
 
 # Keep in sync with ``app.services.render.args``.
 _XFADE_TRANSITIONS: frozenset[str] = frozenset(
-    {"short_crossfade", "dip_to_black", "fade", "flash"}
+    {
+        "short_crossfade",
+        "dip_to_black",
+        "fade",
+        "flash",
+        "light_change",
+        "dissolve",
+        "wipe_down",
+        "wipe_left",
+        "wipe_right",
+        "wipe_up",
+        "slide_down",
+        "slide_left",
+        "slide_right",
+        "slide_up",
+        "circle_open",
+        "circle_close",
+        "pixelize",
+        "radial",
+        "zoom_in",
+    }
 )
 _MIN_XFADE_SLACK = 0.05
 
@@ -25,10 +45,19 @@ class TimelineSegment:
     source_end: float
     transition_type: str = "hard_cut"
     transition_duration_ms: int = 0
+    pad_before_ms: int = 0
 
     @property
     def duration(self) -> float:
         return max(0.0, self.source_end - self.source_start)
+
+    @property
+    def pad_before_seconds(self) -> float:
+        return max(0, self.pad_before_ms) / 1000.0
+
+    @property
+    def stream_duration(self) -> float:
+        return self.pad_before_seconds + self.duration
 
 
 @dataclass(frozen=True)
@@ -41,6 +70,7 @@ class SegmentPlacement:
     output_start: float
     # Length of this segment's content on the output clock (equals source duration).
     content_duration: float
+    pad_before_seconds: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -83,41 +113,34 @@ def build_output_timeline(segments: list[TimelineSegment]) -> OutputTimeline:
         return OutputTimeline(placements=[], total_duration=0.0)
 
     placements: list[SegmentPlacement] = []
-    output_cursor = 0.0
     total = 0.0
 
     for index, segment in enumerate(segments):
-        placements.append(
-            SegmentPlacement(
-                index=index,
-                source_start=segment.source_start,
-                source_end=segment.source_end,
-                output_start=output_cursor,
-                content_duration=segment.duration,
-            )
-        )
+        pad = segment.pad_before_seconds
+        stream_duration = segment.stream_duration
         if index == 0:
-            total = segment.duration
+            stream_start = 0.0
+            total = stream_duration
         else:
             previous = segments[index - 1]
             usable = usable_transition_seconds(
                 transition_type=previous.transition_type,
                 transition_duration_ms=previous.transition_duration_ms,
                 timeline_so_far=total,
-                next_duration=segment.duration,
+                next_duration=stream_duration,
             )
-            total += segment.duration - usable
-
-        if index + 1 < len(segments):
-            next_seg = segments[index + 1]
-            usable = usable_transition_seconds(
-                transition_type=segment.transition_type,
-                transition_duration_ms=segment.transition_duration_ms,
-                timeline_so_far=total,
-                next_duration=next_seg.duration,
+            stream_start = total - usable if usable > 0 else total
+            total = stream_start + stream_duration
+        placements.append(
+            SegmentPlacement(
+                index=index,
+                source_start=segment.source_start,
+                source_end=segment.source_end,
+                output_start=stream_start + pad,
+                content_duration=segment.duration,
+                pad_before_seconds=pad,
             )
-            # Next segment begins at the xfade offset (or at ``total`` for hard cuts).
-            output_cursor = total - usable if usable > 0 else total
+        )
 
     return OutputTimeline(placements=placements, total_duration=total)
 

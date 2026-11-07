@@ -25,6 +25,15 @@ export function saveBackgroundMusic(
   return apiJson(`/api/projects/${projectId}/background-music`, 'PUT', payload);
 }
 
+export function assignBackgroundMusicFromAsset(
+  projectId: string,
+  assetId: string,
+): Promise<BackgroundMusicSettings> {
+  return apiJson(`/api/projects/${projectId}/background-music/from-asset`, 'POST', {
+    asset_id: assetId,
+  });
+}
+
 export function uploadBackgroundMusic(
   projectId: string,
   file: File,

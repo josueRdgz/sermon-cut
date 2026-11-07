@@ -12,10 +12,13 @@ from app.db.session import get_db
 from app.models.reel import SubtitleStyle
 from app.schemas.subtitles import (
     SubtitleCuePreview,
+    SubtitleFontInfo,
+    SubtitleFontListResponse,
     SubtitlePreviewResponse,
     SubtitleTemplateInfo,
     SubtitleTemplateListResponse,
 )
+from app.services.subtitles.fonts import list_available_fonts
 from app.services.reels import service as reels_service
 from app.services.subtitles import (
     caption_windows_for_segments,
@@ -45,10 +48,19 @@ def list_subtitle_templates() -> SubtitleTemplateListResponse:
             default_uppercase=template.default_uppercase,
             default_margin_bottom=template.default_margin_bottom,
             default_granularity=template.default_granularity.value,  # type: ignore[arg-type]
+            default_bold=template.bold,
+            default_italic=template.italic,
         )
         for template in TEMPLATES.values()
     ]
     return SubtitleTemplateListResponse(items=items)
+
+
+@router.get("/subtitle-fonts", response_model=SubtitleFontListResponse)
+def list_subtitle_fonts() -> SubtitleFontListResponse:
+    return SubtitleFontListResponse(
+        items=[SubtitleFontInfo(family=name) for name in list_available_fonts()]
+    )
 
 
 @router.get(

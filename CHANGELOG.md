@@ -7,8 +7,166 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.4.23] — 2026-11-06
+
+### Added
+
+- Groq como motor de análisis (y respaldo automático cuando Gemini responde 503).
+- Clic derecho → Información en las tarjetas de proyecto (Inicio y Proyectos).
+- La pantalla final se puede desactivar para exportar solo la edición.
+
+### Changed
+
+- YouTube Shorts admite hasta 180 s, pantalla final incluida.
+- Los prompts de IA exigen el tope de duración y usan el estilo elegido (Juvenil, Meditación, etc.).
+- La portada se elige en Pantalla final, no en la ficha de proyecto.
+- En Predicación, Culto completo desaparece al recortar; desde culto completo sí se puede pasar a recortar.
+
 ### Fixed
 
+- El tamaño y la tipografía de subtítulos se ven en la vista previa.
+- Los emojis escritos con el teclado ya no se borran al guardar el recuadro.
+
+### Removed
+
+- Sección Proyecto del workspace.
+- Chips de emojis predefinidos bajo el texto de subtítulos.
+
+## [0.4.22] — 2026-11-04
+
+### Removed
+
+- Se quita **Centrar voz** del editor, del preview y del render. El sermón se
+  oye en estéreo original; el paneo ya no interfiere con la reproducción.
+
+### Fixed
+
+- La aguja de la línea temporal avanza con el video (antes dependía de
+  ``timeupdate`` y se quedaba parada si el paneo bloqueaba el play). Pulsar
+  reproducir arranca el video en el mismo clic, sin esperar a un archivo de
+  audio extra.
+
+## [0.4.21] — 2026-11-04
+
+### Fixed
+
+- El preview ya no hace clic y se queda mudo: WKWebView silencia la salida si
+  dos ``<audio>`` suenan a la vez al aplicar el paneo. El archivo paneado se
+  carga en espera y solo entra con el preview en pausa; al reproducir suena un
+  solo elemento.
+
+## [0.4.20] — 2026-11-03
+
+### Fixed
+
+- Las propuestas del análisis editorial vuelven a verse en el editor (lista
+  vertical, no columnas). Se pueden abrir una a una o añadirlas a un short
+  que ya esté en edición; el editor ya no sale vacío tras el análisis.
+
+## [0.4.19] — 2026-11-02
+
+### Fixed
+
+- Centrar voz vuelve a oírse en la app de escritorio: el preview no captura el
+  ``<audio>`` con Web Audio (eso dejaba WKWebView mudo). La pista en curso no
+  se recarga; el paneo de FFmpeg se carga en un segundo ``<audio>`` y solo
+  entra cuando ya está sonando.
+
+## [0.4.18] — 2026-11-02
+
+### Fixed
+
+- Centrar voz ya no recarga la pista (eso fragmentaba el audio). El preview
+  mezcla en vivo con GainNodes sobre el ``<audio>`` dedicado; el slider solo
+  cambia la mezcla, y FFmpeg sigue paneando en la exportación.
+
+## [0.4.17] — 2026-11-02
+
+### Fixed
+
+- Centrar voz ya no usa Web Audio (eso silenciaba WKWebView). El preview pide
+  una pista AAC con el paneo de FFmpeg y el video sigue oyendo.
+
+### Added
+
+- Clic derecho sobre un clip de video: **Agregar punto de inflexión en audio**
+  en el lugar del clic.
+
+## [0.4.16] — 2026-11-02
+
+### Fixed
+
+- Mover **Centrar voz** ya no deja el preview mudo: el grafo de audio solo
+  captura el elemento que está sonando (nunca un video silenciado), espera a
+  un gesto del usuario y remezcla en el AudioContext en lugar de un splitter
+  que WKWebView deja en silencio.
+
+## [0.4.15] — 2026-11-02
+
+### Fixed
+
+- El preview de un proyecto existente quedaba mudo: con desfase de audio el
+  video iba silenciado y el `<audio>` separado no se reanudaba. El tick ya no
+  adelanta cortes antes del seek, el audio se relanza si se pausa, y los
+  elementos de media del preview no usan `hidden` / `display: none`.
+
+## [0.4.14] — 2026-11-02
+
+### Changed
+
+- Arrastrar un clip de video a la derecha deja un hueco negro (fondo oscuro) al
+  inicio o entre cortes, en vez de reordenar. El preview y el export FFmpeg
+  respetan ese vacío con silencio.
+
+### Fixed
+
+- En la misma franja los clips pueden ir a izquierda o derecha, pero no se
+  superponen en el mismo tiempo.
+- Los puntos de la curva de volumen quedan dentro de la onda del A-roll.
+
+## [0.4.13] — 2026-11-02
+
+### Added
+
+- Audio: control **Centrar voz** (35% por defecto) para mezclas dual-mono de
+  iglesia (púlpito a la derecha, ambiente a la izquierda). Mezcla parte del
+  canal derecho hacia el centro en el preview y en el export FFmpeg.
+
+### Fixed
+
+- Arrastrar subtítulos en la línea de tiempo ya no congela el editor ni
+  dispara «La solicitud tardó demasiado o se canceló»: el PATCH espera al
+  soltar, con captura de puntero, y la coherencia de export no se relanza
+  al mover ventanas de caption.
+- Los clips de video (incluido el pegado a la izquierda) se reordenan al
+  soltar: mitad izquierda del destino = insertar antes, mitad derecha =
+  insertar después. El arrastre sigue al cursor fuera de la tira.
+
+## [0.4.12] — 2026-10-23
+
+### Added
+
+- Editor NLE: franjas de video/audio, curva de volumen con puntos en el A-roll,
+  transiciones visibles en el preview (fundido, negro, destello, borrados) y
+  desfase de voz por corte.
+- Ajustes de la app, Biblia Reina Valera 1960 (importación local desde e-Sword)
+  y menús Configuración / Ayuda / Acerca de.
+- Menús contextuales en la línea temporal y atajos documentados en Ayuda.
+
+### Changed
+
+- Chrome compacto: Archivos y Ajustes no se pisan; el visor llena el hueco si
+  ambos están cerrados. Cortes recorta sin Metadatos; «Añadir fragmento» muestra
+  u oculta el formulario. La barra superior solo lleva el nombre del Reel.
+
+### Fixed
+
+- Preview: FFmpeg no generaba `preview-audio.m4a` (temporal `.tmp` sin muxer),
+  el navegador mostraba «The element has no supported sources» y Reproducir no
+  avanzaba.
+- La curva de volumen no se oía cuando había desfase de voz (el gain iba al
+  video silenciado).
+- Las transiciones del timeline eran un corte seco en el visor.
 - Encuadre: el inspector ya no extrae un JPEG con FFmpeg en cada `timeupdate`
   (ni con la pestaña oculta). Eso saturaba el backend en macOS/Safari y
   mostraba «No se pudo conectar con el backend local».

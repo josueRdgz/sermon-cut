@@ -32,11 +32,13 @@ describe('resolvePreviewSeek', () => {
       outputTime: 2.5,
       segmentIndex: 0,
       sourceTime: 12.5,
+      inPad: false,
     });
     expect(resolvePreviewSeek(segments, 8)).toEqual({
       outputTime: 8,
       segmentIndex: 1,
       sourceTime: 43,
+      inPad: false,
     });
   });
 
@@ -45,6 +47,7 @@ describe('resolvePreviewSeek', () => {
       outputTime: 5,
       segmentIndex: 1,
       sourceTime: 40,
+      inPad: false,
     });
   });
 
@@ -55,28 +58,54 @@ describe('resolvePreviewSeek', () => {
       outputTime: 12,
       segmentIndex: 1,
       sourceTime: 47,
+      inPad: false,
     });
     expect(resolvePreviewSeek([], 1)).toBeNull();
   });
 
-  it('respects crossfade overlap on the output clock', () => {
+  it('keeps both clips during the crossfade overlap', () => {
     const xfade = [
       segment('a', 0, 0, 5, 'short_crossfade', 500),
       segment('b', 1, 10, 16, 'hard_cut', 0),
     ];
-    // Total = 5 + 6 - 0.5 = 10.5; B starts at 4.5
     expect(resolvePreviewSeek(xfade, 4.4)).toEqual({
       outputTime: 4.4,
       segmentIndex: 0,
       sourceTime: 4.4,
+      inPad: false,
     });
-    expect(resolvePreviewSeek(xfade, 4.5)).toEqual({
+    expect(resolvePreviewSeek(xfade, 4.5)).toMatchObject({
       outputTime: 4.5,
-      segmentIndex: 1,
-      sourceTime: 10,
+      segmentIndex: 0,
+      sourceTime: 4.5,
+      inPad: false,
+      xfade: {
+        fromIndex: 0,
+        toIndex: 1,
+        progress: 0,
+        duration: 0.5,
+        incomingSourceTime: 10,
+      },
     });
+    expect(resolvePreviewSeek(xfade, 4.75)?.xfade?.progress).toBeCloseTo(0.5, 5);
     expect(resolvePreviewSeek(xfade, 5)?.segmentIndex).toBe(1);
     expect(resolvePreviewSeek(xfade, 5)?.sourceTime).toBeCloseTo(10.5, 5);
+  });
+
+  it('treats time before a clip as a black pad, not a source seek', () => {
+    const padded = [
+      { ...segment('a', 0, 10, 15), pad_before_ms: 2000 },
+      { ...segment('b', 1, 40, 47), pad_before_ms: 500 },
+    ];
+    expect(resolvePreviewSeek(padded, 1)).toEqual({
+      outputTime: 1,
+      segmentIndex: 0,
+      sourceTime: 10,
+      inPad: true,
+    });
+    expect(resolvePreviewSeek(padded, 2)?.inPad).toBe(false);
+    expect(resolvePreviewSeek(padded, 7.2)?.inPad).toBe(true);
+    expect(resolvePreviewSeek(padded, 7.5)?.inPad).toBe(false);
   });
 });
 
@@ -86,6 +115,17 @@ describe('previewTimelineIdentity', () => {
     const responseAfterAudioSave = original.map((item) => ({ ...item }));
 
     expect(previewTimelineIdentity('reel-1', responseAfterAudioSave)).toBe(
+      previewTimelineIdentity('reel-1', original),
+    );
+  });
+
+  it('does not change when caption windows slide on the output clock', () => {
+    const original = [segment('a', 0, 10, 15), segment('b', 1, 40, 47)];
+    const moved = original.map((item, index) =>
+      index === 0 ? { ...item, caption_in_ms: 400, caption_out_ms: 2800 } : item,
+    );
+
+    expect(previewTimelineIdentity('reel-1', moved)).toBe(
       previewTimelineIdentity('reel-1', original),
     );
   });

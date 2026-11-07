@@ -105,25 +105,17 @@ def test_validate_incoherent_reel_and_dismiss(
     assert report.status_code == 200, report.text
     body = report.json()
     assert body["severity"] in {"warning", "blocked"}
-    # Warnings are reviewable; only *blocked* findings disable export.
-    assert body["can_render"] is (body["severity"] != "blocked")
+    assert body["can_render"] is True
     assert any(i["code"] == "DANGLING_CONNECTOR" for i in body["issues"])
     assert all("code" in i and "message" in i and "segment_id" in i for i in body["issues"])
 
     dangling = next(i for i in body["issues"] if i["code"] == "DANGLING_CONNECTOR")
-    if dangling["severity"] == "warning":
-        dismissed = client.post(
-            f"/api/projects/{project_id}/reels/{reel_id}/validate/dismiss",
-            json={"code": dangling["code"], "segment_id": dangling["segment_id"]},
-        )
-        assert dismissed.status_code == 200, dismissed.text
-        assert any(i["dismissed"] for i in dismissed.json()["issues"])
-    else:
-        blocked = client.post(
-            f"/api/projects/{project_id}/reels/{reel_id}/validate/dismiss",
-            json={"code": dangling["code"], "segment_id": dangling["segment_id"]},
-        )
-        assert blocked.status_code == 400
+    dismissed = client.post(
+        f"/api/projects/{project_id}/reels/{reel_id}/validate/dismiss",
+        json={"code": dangling["code"], "segment_id": dangling["segment_id"]},
+    )
+    assert dismissed.status_code == 200, dismissed.text
+    assert any(i["dismissed"] for i in dismissed.json()["issues"])
 
 
 def test_expand_context_widens_segment(

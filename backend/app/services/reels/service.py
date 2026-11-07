@@ -20,9 +20,11 @@ from app.schemas.reel import (
     ReelSegmentCreate,
     ReelSegmentReorderRequest,
     ReelSegmentResponse,
+    ReelSegmentSplitRequest,
     ReelSegmentUpdate,
     ReelUpdate,
 )
+from app.services.audio.volume_envelope import dump_keyframes, parse_keyframes
 from app.services import projects as projects_service
 from app.services.reels.validate import (
     SegmentTiming,
@@ -45,6 +47,7 @@ def _timing_view(segments: list[ReelSegment]) -> list[SegmentTiming]:
             source_end_seconds=s.source_end_seconds,
             transition_type=s.transition_type,
             transition_duration_ms=s.transition_duration_ms,
+            pad_before_ms=getattr(s, "pad_before_ms", 0) or 0,
         )
         for s in sorted(segments, key=lambda s: s.order)
     ]
@@ -69,6 +72,9 @@ def _segment_response(segment: ReelSegment) -> ReelSegmentResponse:
         narrative_category=getattr(segment, "narrative_category", None),
         caption_in_ms=getattr(segment, "caption_in_ms", None),
         caption_out_ms=getattr(segment, "caption_out_ms", None),
+        volume_keyframes=parse_keyframes(getattr(segment, "volume_keyframes_json", None)),
+        audio_offset_ms=getattr(segment, "audio_offset_ms", 0) or 0,
+        pad_before_ms=getattr(segment, "pad_before_ms", 0) or 0,
     )
 
 
@@ -104,10 +110,18 @@ def to_response(reel: Reel) -> ReelResponse:
         subtitle_opacity=reel.subtitle_opacity,
         subtitle_margin_bottom=reel.subtitle_margin_bottom,
         subtitle_bible_reference=reel.subtitle_bible_reference,
+        subtitle_font_family=getattr(reel, "subtitle_font_family", None),
+        subtitle_bold=bool(getattr(reel, "subtitle_bold", False)),
+        subtitle_italic=bool(getattr(reel, "subtitle_italic", False)),
+        subtitle_underline=bool(getattr(reel, "subtitle_underline", False)),
+        subtitle_strikethrough=bool(getattr(reel, "subtitle_strikethrough", False)),
+        subtitle_x=getattr(reel, "subtitle_x", None),
+        subtitle_y=getattr(reel, "subtitle_y", None),
         aspect_ratio=reel.aspect_ratio,
         status=reel.status,
         framing_mode=getattr(reel, "framing_mode", None) or "center_crop",
         audio_offset_ms=getattr(reel, "audio_offset_ms", 0) or 0,
+        voice_center=float(getattr(reel, "voice_center", 0.0) or 0.0),
         created_at=reel.created_at,
         updated_at=reel.updated_at,
         segments=[_segment_response(s) for s in ordered],
@@ -200,9 +214,17 @@ def create_reel(db: Session, project_id: UUID, payload: ReelCreate) -> Reel:
         subtitle_opacity=payload.subtitle_opacity,
         subtitle_margin_bottom=payload.subtitle_margin_bottom,
         subtitle_bible_reference=payload.subtitle_bible_reference,
+        subtitle_font_family=payload.subtitle_font_family,
+        subtitle_bold=payload.subtitle_bold,
+        subtitle_italic=payload.subtitle_italic,
+        subtitle_underline=payload.subtitle_underline,
+        subtitle_strikethrough=payload.subtitle_strikethrough,
+        subtitle_x=payload.subtitle_x,
+        subtitle_y=payload.subtitle_y,
         aspect_ratio=payload.aspect_ratio,
         status=payload.status,
         audio_offset_ms=payload.audio_offset_ms,
+        voice_center=payload.voice_center,
     )
 
     for index, seg in enumerate(payload.segments):
@@ -318,6 +340,8 @@ def update_segment(
     data = payload.model_dump(exclude_unset=True)
     if not data:
         raise ValidationAppError("No fields to update.", code="empty_update")
+    if "volume_keyframes" in data:
+        data["volume_keyframes_json"] = dump_keyframes(data.pop("volume_keyframes"))
 
     start = data.get("source_start_seconds", segment.source_start_seconds)
     end = data.get("source_end_seconds", segment.source_end_seconds)
@@ -357,6 +381,104 @@ def delete_segment(
     if segment is None:
         raise NotFoundError("Reel segment not found.", code="reel_segment_not_found")
     reel.segments.remove(segment)
+    _renumber(list(reel.segments))
+    _touch(reel)
+    db.commit()
+    return get_reel(db, reel_id)
+
+
+def split_segment(
+    db: Session,
+    project_id: UUID,
+    reel_id: UUID,
+    segment_id: UUID,
+    payload: ReelSegmentSplitRequest,
+) -> Reel:
+    reel = get_reel_for_project(db, project_id, reel_id)
+    segment = next((item for item in reel.segments if item.id == segment_id), None)
+    if segment is None:
+        raise NotFoundError("Reel segment not found.", code="reel_segment_not_found")
+    cut = float(payload.source_seconds)
+    start = segment.source_start_seconds
+    end = segment.source_end_seconds
+    if cut <= start + 0.2 or cut >= end - 0.2:
+        raise ValidationAppError(
+            "El corte debe quedar dentro del clip, con margen a ambos lados.",
+            code="split_out_of_range",
+        )
+    right = ReelSegment(
+        order=segment.order + 1,
+        source_start_seconds=cut,
+        source_end_seconds=end,
+        transcript_text=segment.transcript_text,
+        transition_type=segment.transition_type,
+        transition_duration_ms=segment.transition_duration_ms,
+        manual_crop_x=segment.manual_crop_x,
+        manual_crop_y=segment.manual_crop_y,
+        manual_crop_zoom=segment.manual_crop_zoom,
+        caption_in_ms=None,
+        caption_out_ms=None,
+        volume_keyframes_json=segment.volume_keyframes_json,
+        audio_offset_ms=getattr(segment, "audio_offset_ms", 0) or 0,
+        pad_before_ms=0,
+    )
+    segment.source_end_seconds = cut
+    segment.transition_type = TransitionType.hard_cut
+    segment.transition_duration_ms = 0
+    for other in reel.segments:
+        if other.id != segment.id and other.order >= right.order:
+            other.order += 1
+    reel.segments.append(right)
+    _renumber(list(reel.segments))
+    _touch(reel)
+    db.commit()
+    return get_reel(db, reel_id)
+
+
+def join_segment(
+    db: Session,
+    project_id: UUID,
+    reel_id: UUID,
+    segment_id: UUID,
+) -> Reel:
+    """Merge a clip with the next one on the output clock (undo a cut)."""
+    reel = get_reel_for_project(db, project_id, reel_id)
+    segment = next((item for item in reel.segments if item.id == segment_id), None)
+    if segment is None:
+        raise NotFoundError("Reel segment not found.", code="reel_segment_not_found")
+    nxt = next((item for item in reel.segments if item.order == segment.order + 1), None)
+    if nxt is None:
+        raise ValidationAppError(
+            "No hay un clip siguiente para unir.",
+            code="join_no_next",
+        )
+    if abs(segment.source_end_seconds - nxt.source_start_seconds) > 0.05:
+        raise ValidationAppError(
+            "Solo se pueden unir cortes que hayas partido tú en el editor.",
+            code="join_not_user_split",
+        )
+    project = projects_service.get_project(db, project_id)
+    new_start = min(segment.source_start_seconds, nxt.source_start_seconds)
+    new_end = max(segment.source_end_seconds, nxt.source_end_seconds)
+    validate_segment_timing(
+        start=new_start,
+        end=new_end,
+        video_duration=_video_duration(project),
+        label="Segment",
+    )
+    texts = [
+        part.strip()
+        for part in (segment.transcript_text or "", nxt.transcript_text or "")
+        if part and part.strip()
+    ]
+    segment.source_start_seconds = new_start
+    segment.source_end_seconds = new_end
+    segment.transcript_text = " ".join(texts) if texts else segment.transcript_text
+    segment.transition_type = nxt.transition_type
+    segment.transition_duration_ms = nxt.transition_duration_ms
+    if nxt.caption_out_ms is not None:
+        segment.caption_out_ms = nxt.caption_out_ms
+    reel.segments.remove(nxt)
     _renumber(list(reel.segments))
     _touch(reel)
     db.commit()

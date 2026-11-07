@@ -7,6 +7,9 @@ export interface FramingStatus {
   cache_segments: number;
   mediapipe: Record<string, unknown>;
   cleared: boolean;
+  tracking_status?: 'idle' | 'queued' | 'running' | 'completed' | 'failed';
+  tracking_error?: string | null;
+  tracking_report?: TrackingReport | null;
 }
 
 export interface TrackingSegmentResult {

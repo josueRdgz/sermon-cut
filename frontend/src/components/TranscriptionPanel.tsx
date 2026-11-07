@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { ApiError } from '../api/client';
+import { getAppSettings } from '../api/settings';
 import {
   cancelTranscriptionJob,
   getLatestTranscription,
@@ -61,6 +62,16 @@ export function TranscriptionPanel({ projectId, hasVideo, onCompleted }: Transcr
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const lastStatusRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    getAppSettings()
+      .then((settings) => {
+        if (settings.whisper_model) setModel(settings.whisper_model as WhisperModelName);
+      })
+      .catch(() => {
+        /* keep the panel default */
+      });
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -207,7 +218,6 @@ export function TranscriptionPanel({ projectId, hasVideo, onCompleted }: Transcr
             </div>
           )}
 
-          {job?.notice && <p className="notice">{job.notice}</p>}
 
           {job?.status === 'completed' && (
             <p className="muted">

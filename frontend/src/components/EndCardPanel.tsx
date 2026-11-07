@@ -154,33 +154,38 @@ export function EndCardPanel({
   if (!settings) {
     return (
       <div className="end-card-panel">
-        <div className="reel-editor__section-header">
-          <h4>Pantalla final</h4>
-        </div>
         {error ? <p className="error">{error}</p> : <p className="muted">Cargando…</p>}
       </div>
     );
   }
 
   const visibleMessage = settings.custom_message ?? DEFAULT_MESSAGE;
-  const selectedLayout = layouts.find((layout) => layout.id === settings.layout);
 
   return (
     <div className="end-card-panel">
       <div className="reel-editor__section-header">
-        <h4>Pantalla final</h4>
-        <span className="badge badge--required">Obligatoria</span>
+        <label className="field field--inline field--checkbox">
+          <input
+            type="checkbox"
+            checked={settings.enabled}
+            disabled={busy || coverBusy}
+            onChange={(event) =>
+              void patchSettings(
+                { enabled: event.target.checked },
+                'No se pudo guardar la pantalla final',
+              )
+            }
+          />
+          <span>Incluir pantalla final</span>
+        </label>
       </div>
 
-      <p className="muted">
-        Solo muestra la portada de la predicación y el mensaje inferior. No incluye título, nombre,
-        URL, identificador del canal, logo ni código QR.
-      </p>
+      {!settings.enabled && (
+        <p className="muted">El export terminará en el último corte, sin tarjeta de cierre.</p>
+      )}
 
-      {!hasCover && (
-        <p className="warning">
-          Sube una portada al proyecto para que la pantalla final pueda mostrar la imagen.
-        </p>
+      {settings.enabled && !hasCover && (
+        <p className="warning">Sube una imagen para la pantalla final.</p>
       )}
 
       <div className="end-card-panel__body">
@@ -192,9 +197,11 @@ export function EndCardPanel({
           />
         </div>
 
-        <div className="end-card-panel__controls">
+        <div
+          className="end-card-panel__controls"
+          style={settings.enabled ? undefined : { opacity: 0.55 }}
+        >
           <div className="end-card-panel__cover">
-            <span>Imagen de portada</span>
             <input
               ref={fileInputRef}
               type="file"
@@ -202,21 +209,18 @@ export function EndCardPanel({
               hidden
               onChange={(event) => void handleCoverFile(event.target.files?.[0] ?? null)}
             />
-            <div className="button-stack">
-              <button
-                type="button"
-                className="button button--inline"
-                disabled={busy || coverBusy}
-                onClick={() => fileInputRef.current?.click()}
-              >
-                {coverBusy
-                  ? `Subiendo… ${coverProgress}%`
-                  : hasCover
-                    ? 'Cambiar imagen'
-                    : 'Subir imagen'}
-              </button>
-            </div>
-            <p className="muted">JPEG, PNG o WebP. Sustituye la portada del proyecto.</p>
+            <button
+              type="button"
+              className="button button--inline"
+              disabled={busy || coverBusy}
+              onClick={() => fileInputRef.current?.click()}
+            >
+              {coverBusy
+                ? `Subiendo… ${coverProgress}%`
+                : hasCover
+                  ? 'Cambiar imagen'
+                  : 'Subir imagen'}
+            </button>
           </div>
 
           <label className="field">
@@ -229,15 +233,13 @@ export function EndCardPanel({
               {layouts.map((layout) => (
                 <option key={layout.id} value={layout.id}>
                   {layout.label}
-                  {layout.id === 'cover_full' ? ' (recomendado)' : ''}
                 </option>
               ))}
             </select>
           </label>
-          {selectedLayout && <p className="muted">{selectedLayout.description}</p>}
 
           <label className="field">
-            <span>Texto debajo de la imagen</span>
+            <span>Texto</span>
             <input
               type="text"
               value={visibleMessage}
@@ -253,7 +255,7 @@ export function EndCardPanel({
           </label>
 
           <label className="field">
-            <span>Posición del texto</span>
+            <span>Posición</span>
             <select
               value={settings.message_position ?? 'bottom'}
               disabled={busy || coverBusy}
@@ -271,17 +273,6 @@ export function EndCardPanel({
               ))}
             </select>
           </label>
-
-          {settings.custom_message && (
-            <button
-              type="button"
-              className="button--ghost"
-              disabled={busy || coverBusy}
-              onClick={() => void patchMessage(null)}
-            >
-              Restaurar texto predeterminado
-            </button>
-          )}
         </div>
       </div>
 

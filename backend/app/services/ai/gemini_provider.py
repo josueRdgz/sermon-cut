@@ -15,7 +15,7 @@ from typing import Any
 from app.core.exceptions import AppError, ValidationAppError
 from app.services.ai.base import AIProvider
 from app.services.ai.gemini_schema import serving_json_schema
-from app.services.ai.prompts import SYSTEM_PROMPT, build_merge_prompt, build_user_prompt
+from app.services.ai.prompts import build_merge_prompt, build_user_prompt, system_prompt
 from app.services.ai.schemas import (
     AnalysisRequest,
     AnalysisResponse,
@@ -82,7 +82,7 @@ class GeminiProvider(AIProvider):
 
     def analyze(self, request: AnalysisRequest) -> ProviderResult:
         return self._generate(
-            system=SYSTEM_PROMPT,
+            system=system_prompt(editorial_style=request.preferences.additional_instructions),
             user=build_user_prompt(request),
         )
 
@@ -104,7 +104,7 @@ class GeminiProvider(AIProvider):
             ]
         }
         return self._generate(
-            system=SYSTEM_PROMPT,
+            system=system_prompt(editorial_style=request.preferences.additional_instructions),
             user=build_merge_prompt(
                 request=request,
                 candidate_json=json.dumps(payload, ensure_ascii=False),
@@ -143,7 +143,7 @@ class GeminiProvider(AIProvider):
                 time.sleep(delay)
 
         raise GeminiProviderError(
-            f"Gemini analysis failed: {last_error}",
+            "Gemini no respondió. Configura Groq en Ajustes para usar un motor de respaldo.",
             code="gemini_request_failed",
         ) from last_error
 

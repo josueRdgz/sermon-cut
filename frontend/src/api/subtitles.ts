@@ -5,6 +5,10 @@ export function listSubtitleTemplates(): Promise<{ items: SubtitleTemplateInfo[]
   return apiGet('/api/subtitle-templates');
 }
 
+export function listSubtitleFonts(): Promise<{ items: { family: string }[] }> {
+  return apiGet('/api/subtitle-fonts');
+}
+
 export function getSubtitlePreview(projectId: string, reelId: string): Promise<SubtitlePreview> {
   return apiGet(`/api/projects/${projectId}/reels/${reelId}/subtitle-preview`);
 }

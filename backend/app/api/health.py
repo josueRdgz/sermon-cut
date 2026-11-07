@@ -7,7 +7,7 @@ from fastapi import APIRouter
 from app.core.config import get_settings
 from app.schemas.health import HealthResponse, StorageInfo, ToolInfo
 from app.services.ffmpeg import get_ffmpeg_status, get_ffprobe_status
-from app.services.system_stats import gemini_status, storage_usage, whisper_status
+from app.services.system_stats import gemini_status, groq_status, storage_usage, whisper_status
 
 router = APIRouter(tags=["health"])
 
@@ -20,6 +20,7 @@ def health() -> HealthResponse:
     ffprobe = get_ffprobe_status()
     whisper = whisper_status()
     gemini = gemini_status(settings)
+    groq = groq_status(settings)
     usage = storage_usage()
 
     return HealthResponse(
@@ -30,6 +31,7 @@ def health() -> HealthResponse:
         ffprobe=ToolInfo(available=ffprobe.available, version=ffprobe.version),
         whisper=ToolInfo(available=whisper.available, version=whisper.version),
         gemini=ToolInfo(available=gemini.available, version=gemini.version),
+        groq=ToolInfo(available=groq.available, version=groq.version),
         storage=StorageInfo(
             bytes_used=usage.bytes_used,
             project_count=usage.project_count,

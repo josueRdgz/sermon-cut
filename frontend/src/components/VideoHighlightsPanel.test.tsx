@@ -81,7 +81,7 @@ describe('VideoHighlightsPanel', () => {
     expect(screen.getByRole('tab', { name: /Revisión/ })).toBeInTheDocument();
     fireEvent.click(screen.getByRole('tab', { name: /Análisis/ }));
     expect(screen.getByRole('option', { name: '5 minutos' })).toBeVisible();
-    expect(screen.getByRole('option', { name: /IBSJ/ })).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: 'Iglesia en redes' })).toBeInTheDocument();
   });
 
   it('prepares an assembled preview before enabling play', async () => {

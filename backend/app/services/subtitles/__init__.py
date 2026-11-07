@@ -35,18 +35,33 @@ def options_for_reel(reel: Reel) -> SubtitleOptions:
         opacity=getattr(reel, "subtitle_opacity", None),
         margin_bottom=getattr(reel, "subtitle_margin_bottom", None),
         bible_reference=getattr(reel, "subtitle_bible_reference", None),
+        font_family=getattr(reel, "subtitle_font_family", None),
+        bold=getattr(reel, "subtitle_bold", None),
+        italic=getattr(reel, "subtitle_italic", None),
+        underline=getattr(reel, "subtitle_underline", None),
+        strikethrough=getattr(reel, "subtitle_strikethrough", None),
+        pos_x=getattr(reel, "subtitle_x", None),
+        pos_y=getattr(reel, "subtitle_y", None),
     )
 
 
 def caption_windows_for_segments(
     segments: list[ReelSegment],
 ) -> list[tuple[float, float] | None]:
+    """Per-cut caption placement on the output clock.
+
+    ``None`` means the cut has no stored window yet (keep generated cues).
+    ``(0.0, 0.0)`` (or any ``out <= in``) means the user omitted that strip:
+    drop cues that belong to that placement.
+    """
     windows: list[tuple[float, float] | None] = []
     for item in segments:
         inn = getattr(item, "caption_in_ms", None)
         out = getattr(item, "caption_out_ms", None)
-        if inn is None or out is None or out <= inn:
+        if inn is None or out is None:
             windows.append(None)
+        elif out <= inn:
+            windows.append((0.0, 0.0))
         else:
             windows.append((inn / 1000.0, out / 1000.0))
     return windows
@@ -127,7 +142,7 @@ def build_subtitle_artifacts(
         return None
 
     template = get_template(opts.style)
-    font = resolve_font(template.font_name, fonts_dir)
+    font = resolve_font(opts.font_family or template.font_name, fonts_dir)
     document = render_ass_document(
         cues=result.cues,
         options=opts,

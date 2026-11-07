@@ -1,6 +1,7 @@
-import { FolderOpen, Home, Plus, type LucideIcon } from 'lucide-react';
+import { FolderOpen, HelpCircle, Home, Info, Plus, Settings, type LucideIcon } from 'lucide-react';
 import { NavLink } from 'react-router-dom';
 
+import type { AppPanel } from '../AppModals';
 import styles from './Sidebar.module.css';
 
 interface NavItem {
@@ -13,7 +14,13 @@ interface NavItem {
 const NAV_ITEMS: NavItem[] = [
   { to: '/', label: 'Inicio', icon: Home, end: true },
   { to: '/projects', label: 'Proyectos', icon: FolderOpen },
-  { to: '/projects/new', label: 'Nuevo proyecto', icon: Plus },
+  { to: '/projects/new', label: 'Nuevo', icon: Plus },
+];
+
+const PANEL_ITEMS: { id: AppPanel; label: string; icon: LucideIcon }[] = [
+  { id: 'settings', label: 'Configuración', icon: Settings },
+  { id: 'help', label: 'Ayuda y atajos', icon: HelpCircle },
+  { id: 'about', label: 'Acerca de', icon: Info },
 ];
 
 export interface WorkspaceNavItem {
@@ -28,9 +35,11 @@ interface SidebarProps {
     activeId: string;
     onSelect: (id: string) => void;
   };
+  activePanel?: AppPanel | null;
+  onOpenPanel?: (panel: AppPanel) => void;
 }
 
-export function Sidebar({ workspace }: SidebarProps) {
+export function Sidebar({ workspace, activePanel, onOpenPanel }: SidebarProps) {
   return (
     <nav className={styles.root} aria-label="Navegación principal">
       {NAV_ITEMS.map(({ to, label, icon: Icon, end }) => (
@@ -46,6 +55,25 @@ export function Sidebar({ workspace }: SidebarProps) {
           <span className={styles.label}>{label}</span>
         </NavLink>
       ))}
+      {onOpenPanel ? (
+        <>
+          <div className={styles.divider} role="presentation" />
+          {PANEL_ITEMS.map(({ id, label, icon: Icon }) => (
+            <button
+              key={id}
+              type="button"
+              title={label}
+              aria-label={label}
+              aria-pressed={activePanel === id}
+              className={`${styles.item} ${activePanel === id ? styles.active : ''}`}
+              onClick={() => onOpenPanel(id)}
+            >
+              <Icon size={18} strokeWidth={2} aria-hidden />
+              <span className={styles.label}>{label}</span>
+            </button>
+          ))}
+        </>
+      ) : null}
       {workspace && workspace.items.length > 0 && (
         <>
           <div className={styles.divider} role="presentation" />

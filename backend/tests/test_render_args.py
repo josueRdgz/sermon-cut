@@ -133,6 +133,22 @@ def test_audio_normalized_to_stereo_48k_with_boundary_fades() -> None:
     assert graph.count("afade=t=in") == 2
     assert graph.count("afade=t=out") == 2
     assert graph.count("d=0.003") == 4
+    assert "pan=stereo" not in graph
+
+
+def test_per_segment_audio_offset_uses_that_clip_only() -> None:
+    plan = _build(
+        segments=[
+            RenderSegmentSpec(10.2, 10.42, audio_offset_ms=250),
+            RenderSegmentSpec(11.05, 11.29, audio_offset_ms=0),
+        ]
+    )
+    seek_values = [
+        plan.args[index + 1] for index, value in enumerate(plan.args) if value == "-ss"
+    ]
+    assert seek_values == ["10.2", "11.05", "9.95", "11.05"]
+    assert "[2:a]" in plan.filter_complex
+    assert "[3:a]" in plan.filter_complex
 
 
 def test_positive_audio_offset_uses_earlier_independent_audio_inputs() -> None:
@@ -195,6 +211,18 @@ def test_single_segment_needs_no_join() -> None:
     assert plan.expected_duration_seconds == pytest.approx(4.0)
 
 
+def test_leading_black_pad_extends_output_and_uses_tpad() -> None:
+    plan = _build(
+        segments=[
+            RenderSegmentSpec(10.0, 15.0, pad_before_ms=2000),
+            RenderSegmentSpec(40.0, 50.0, pad_before_ms=500),
+        ]
+    )
+    assert "tpad=start_duration=2:start_mode=add:color=black" in plan.filter_complex
+    assert "adelay=2000:all=1" in plan.filter_complex
+    assert plan.expected_duration_seconds == pytest.approx(5 + 2 + 10 + 0.5)
+
+
 def test_crossfade_keeps_audio_and_video_in_sync() -> None:
     plan = _build(
         segments=[
@@ -207,6 +235,50 @@ def test_crossfade_keeps_audio_and_video_in_sync() -> None:
     # Matching audio crossfade duration keeps both streams the same length.
     assert "acrossfade=d=0.5" in graph
     assert plan.expected_duration_seconds == pytest.approx(19.5)
+
+
+def test_wipe_and_slide_map_to_xfade() -> None:
+    plan = _build(
+        segments=[
+            RenderSegmentSpec(0.0, 5.0, "wipe_down", 400),
+            RenderSegmentSpec(20.0, 25.0, "slide_down", 350),
+            RenderSegmentSpec(40.0, 45.0),
+        ]
+    )
+    assert "xfade=transition=wipedown" in plan.filter_complex
+    assert "xfade=transition=slidedown" in plan.filter_complex
+
+
+def test_extra_audio_overlay_is_mixed(tmp_path: Path) -> None:
+    from app.services.render.args import OverlaySpec
+
+    source = tmp_path / "source.mp4"
+    source.write_bytes(b"\x00" * 64)
+    bed = tmp_path / "bed.mp3"
+    bed.write_bytes(b"\x00" * 64)
+    out = tmp_path / "out.mp4"
+    plan = build_render_command(
+        ffmpeg="ffmpeg",
+        source=source,
+        segments=[RenderSegmentSpec(0.0, 4.0)],
+        aspect_ratio="9:16",
+        layout=LAYOUT_CENTER_CROP,
+        output_path=out,
+        has_audio=True,
+        normalize_loudness=False,
+        overlays=[
+            OverlaySpec(
+                path=bed,
+                start_seconds=1.0,
+                duration_seconds=2.0,
+                kind="audio",
+                opacity=0.4,
+            )
+        ],
+    )
+    assert str(bed) in " ".join(plan.args)
+    assert "adelay=1000|1000" in plan.filter_complex
+    assert "amix=inputs=2" in plan.filter_complex
 
 
 def test_dip_to_black_uses_fadeblack() -> None:

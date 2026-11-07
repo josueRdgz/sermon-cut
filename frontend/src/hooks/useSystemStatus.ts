@@ -19,6 +19,7 @@ export interface SystemStatus {
   version: string;
   storageUsed: string;
   storageBytes: number;
+  refresh: () => void;
 }
 
 const OVERALL_LABELS: Record<StatusTone, string> = {
@@ -29,7 +30,7 @@ const OVERALL_LABELS: Record<StatusTone, string> = {
 };
 
 export function useSystemStatus(): SystemStatus {
-  const { status, data } = useHealth();
+  const { status, data, refresh } = useHealth();
 
   return useMemo(() => {
     const loading = status === 'loading';
@@ -70,6 +71,12 @@ export function useSystemStatus(): SystemStatus {
         tone: toolTone(data?.gemini?.available ?? false, true),
         detail: data?.gemini?.available ? 'Configurado' : 'Sin configurar',
       },
+      {
+        key: 'groq',
+        label: 'Groq',
+        tone: toolTone(data?.groq?.available ?? false, true),
+        detail: data?.groq?.available ? 'Configurado' : 'Sin configurar',
+      },
     ];
 
     let overall: StatusTone = 'ok';
@@ -85,6 +92,7 @@ export function useSystemStatus(): SystemStatus {
       version: data?.version ?? '—',
       storageUsed: formatBytes(data?.storage?.bytes_used),
       storageBytes: data?.storage?.bytes_used ?? 0,
+      refresh,
     };
-  }, [status, data]);
+  }, [status, data, refresh]);
 }

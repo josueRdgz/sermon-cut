@@ -158,12 +158,7 @@ class AnalysisManager:
             additional_instructions=additional_instructions,
             doctrinal_orientation=orientation,
             progress=0.0,
-            notice=(
-                None
-                if provider.name == "gemini"
-                else "Motor local de evaluación estructural activo. Configure "
-                "SERMON_CUT_GEMINI_API_KEY para habilitar el análisis semántico avanzado."
-            ),
+            notice=None,
         )
         db.add(job)
         project.status = ProjectStatus.analyzing
@@ -312,6 +307,10 @@ class AnalysisManager:
             job.progress = 0.8
             session.commit()
             merged = provider.merge_candidates(base_request, chunk_results)
+            notices = [item.notice for item in (*chunk_results, merged) if item.notice]
+            if notices:
+                unique = " ".join(dict.fromkeys(notices))
+                job.notice = ((job.notice + "\n") if job.notice else "") + unique
             if merged.usage:
                 prompt_tokens += merged.usage.prompt_tokens or 0
                 completion_tokens += merged.usage.completion_tokens or 0
@@ -342,13 +341,6 @@ class AnalysisManager:
             job.completion_tokens = completion_tokens or None
             job.total_tokens = total_tokens or None
             job.rejected_count = len(report.rejected)
-            if report.rejected:
-                job.notice = (
-                    (job.notice + "\n" if job.notice else "")
-                    + f"{len(report.rejected)} candidato(s) rechazados por falta "
-                    "de evidencia, duración insuficiente, exceso de cortes o "
-                    "intervalos inválidos."
-                )
             job.status = AnalysisJobStatus.completed
             job.stage = "completed"
             job.progress = 1.0
@@ -358,7 +350,16 @@ class AnalysisManager:
             session.commit()
         except Exception as exc:  # noqa: BLE001 — persist failure for the UI
             session.rollback()
-            self._mark_failed(session, job_id, str(exc))
+            from app.core.exceptions import AppError
+
+            message = exc.detail if isinstance(exc, AppError) else str(exc)
+            lowered = message.lower()
+            if any(token in lowered for token in ("503", "unavailable", "overloaded")):
+                message = (
+                    "El análisis no está disponible ahora. Configura Groq en Ajustes "
+                    "o inténtalo más tarde."
+                )
+            self._mark_failed(session, job_id, message)
         finally:
             self._discard(job_id)
             session.close()

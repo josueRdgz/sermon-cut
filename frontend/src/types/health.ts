@@ -16,5 +16,6 @@ export interface HealthResponse {
   ffprobe: ToolInfo;
   whisper: ToolInfo;
   gemini: ToolInfo;
+  groq: ToolInfo;
   storage: StorageInfo;
 }

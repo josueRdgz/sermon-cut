@@ -1,7 +1,8 @@
 """Serve a WebKit-playable audio track for in-app preview.
 
 WKWebView often stays silent on HEVC ``<video>`` and cannot use the same MP4 as
-an ``<audio>`` source. Preview therefore needs a dedicated AAC/WAV file.
+an ``<audio>`` source. Preview therefore needs a dedicated AAC file when the
+cut uses an explicit audio offset.
 """
 
 from __future__ import annotations
@@ -31,7 +32,17 @@ def preview_audio_path(project_id: UUID, video_filename: str) -> Path:
     source = storage.resolve_inside_project(project_id, video_filename)
     if not source.is_file():
         raise NotFoundError("Video file is missing on disk.", code="video_not_found")
+    return _ensure_extract(project_dir, source)
 
+
+def clear_preview_audio_cache(project_dir: Path) -> None:
+    """Drop extracted preview tracks after the source changes."""
+    (project_dir / _PREVIEW_NAME).unlink(missing_ok=True)
+    for path in project_dir.glob("preview-audio-vc*.m4a"):
+        path.unlink(missing_ok=True)
+
+
+def _ensure_extract(project_dir: Path, source: Path) -> Path:
     cached = project_dir / _PREVIEW_NAME
     if (
         cached.is_file()
@@ -40,11 +51,12 @@ def preview_audio_path(project_id: UUID, video_filename: str) -> Path:
     ):
         return cached
 
+    clear_preview_audio_cache(project_dir)
     ffmpeg = locate_ffmpeg() or shutil.which("ffmpeg")
     if ffmpeg is None:
         raise AppError("FFmpeg is not available.", code="ffmpeg_missing", status_code=503)
 
-    temp = cached.with_name(f".{cached.name}.tmp")
+    temp = cached.with_name(f"{cached.stem}.extract{cached.suffix}")
     log_path = project_dir / "preview-audio.log"
     try:
         try:
@@ -70,6 +82,8 @@ def _extract(ffmpeg: str, source: Path, destination: Path, log_path: Path, *, co
             "-map",
             "0:a:0",
             *audio_args,
+            "-f",
+            "ipod",
             "-movflags",
             "+faststart",
             str(destination),
@@ -77,7 +91,12 @@ def _extract(ffmpeg: str, source: Path, destination: Path, log_path: Path, *, co
         cancel_event=threading.Event(),
         log_path=log_path,
     )
-    if result.cancelled:
+    _check_ffmpeg_audio(result, destination)
+
+
+def _check_ffmpeg_audio(result: object, destination: Path) -> None:
+    cancelled = getattr(result, "cancelled", False)
+    if cancelled:
         raise AppError("Audio preview extraction was cancelled.", code="audio_preview_cancelled")
     if not destination.is_file() or destination.stat().st_size < 1024:
         raise AppError("FFmpeg produced an empty preview audio file.", code="audio_preview_empty")

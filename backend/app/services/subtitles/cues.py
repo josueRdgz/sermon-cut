@@ -86,8 +86,8 @@ def sanitize_caption_text(text: str, *, allow_emoji: bool = False) -> str:
     return cleaned
 
 
-def _caption_tokens(text: str) -> list[str]:
-    return [token for token in sanitize_caption_text(text).split() if token]
+def _caption_tokens(text: str, *, allow_emoji: bool = False) -> list[str]:
+    return [token for token in sanitize_caption_text(text, allow_emoji=allow_emoji).split() if token]
 
 
 def _synthesize_mapped_words(tokens: list[str], start: float, end: float) -> list[MappedWord]:
@@ -198,6 +198,10 @@ def remap_cues_to_caption_windows(
             if mid < src0 - 0.02 or mid > src1 + 0.02:
                 continue
             dst0, dst1 = window
+            if dst1 <= dst0 + 1e-6:
+                # User omitted this fragment: drop its cues, keep the rest.
+                placed = True
+                break
             span = max(src1 - src0, 0.01)
             scale = max(0.0, dst1 - dst0) / span
             start = dst0 + (cue.start - src0) * scale
@@ -290,7 +294,7 @@ def _mapped_words_for_placement(
             out_start, out_end = mapped_interval
             mapped.append(MappedWord(text=text, start=out_start, end=out_end))
 
-    fallback_tokens = _caption_tokens(fallback or "")
+    fallback_tokens = _caption_tokens(fallback or "", allow_emoji=True)
     output_start = placement.output_start
     output_end = placement.output_start + placement.content_duration
 
@@ -372,7 +376,7 @@ def _cues_from_phrases(
         start = group[0].start
         end = max(w.end for w in group)
         raw = " ".join(w.text for w in group)
-        display = _case(sanitize_caption_text(raw), options.uppercase)
+        display = _case(sanitize_caption_text(raw, allow_emoji=True), options.uppercase)
         cues.extend(
             _cues_from_caption_blocks(
                 display,
@@ -400,7 +404,7 @@ def _cues_from_segments(
         window_start = placement.output_start
         window_end = placement.output_start + placement.content_duration
         if mapped:
-            raw = sanitize_caption_text(" ".join(word.text for word in mapped))
+            raw = sanitize_caption_text(" ".join(word.text for word in mapped), allow_emoji=True)
             if raw:
                 cues.extend(
                     _cues_from_caption_blocks(
@@ -413,7 +417,7 @@ def _cues_from_segments(
                 )
             continue
 
-        raw_fallback = sanitize_caption_text(fallback or "")
+        raw_fallback = sanitize_caption_text(fallback or "", allow_emoji=True)
         if raw_fallback:
             cues.extend(
                 _cues_from_caption_blocks(
@@ -498,7 +502,7 @@ def split_caption_blocks(text: str, *, max_lines: int, max_chars: int) -> list[s
     Long captions become several blocks of at most ``max_lines`` each so nothing
     is truncated with an ellipsis mid-word.
     """
-    cleaned = sanitize_caption_text(text)
+    cleaned = sanitize_caption_text(text, allow_emoji=True)
     words = [token for token in _WORD_SPLIT.split(cleaned) if token]
     if not words:
         return []

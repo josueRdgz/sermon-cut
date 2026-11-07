@@ -52,6 +52,21 @@ _XFADE_TRANSITIONS: dict[str, str] = {
     "dip_to_black": "fadeblack",
     "fade": "fade",
     "flash": "fadewhite",
+    "light_change": "fadegrays",
+    "dissolve": "dissolve",
+    "wipe_down": "wipedown",
+    "wipe_left": "wipeleft",
+    "wipe_right": "wiperight",
+    "wipe_up": "wipeup",
+    "slide_down": "slidedown",
+    "slide_left": "slideleft",
+    "slide_right": "slideright",
+    "slide_up": "slideup",
+    "circle_open": "circleopen",
+    "circle_close": "circleclose",
+    "pixelize": "pixelize",
+    "radial": "radial",
+    "zoom_in": "zoomin",
 }
 
 TARGET_SAMPLE_RATE = 48000
@@ -79,10 +94,21 @@ class RenderSegmentSpec:
     crop_y: float | None = None
     crop_x_expr: str | None = None
     crop_y_expr: str | None = None
+    volume_keyframes: tuple[tuple[float, float], ...] = ()
+    audio_offset_ms: int = 0
+    pad_before_ms: int = 0
 
     @property
     def duration(self) -> float:
         return max(0.0, self.end - self.start)
+
+    @property
+    def pad_before_seconds(self) -> float:
+        return max(0, self.pad_before_ms) / 1000.0
+
+    @property
+    def output_duration(self) -> float:
+        return self.duration + self.pad_before_seconds
 
 
 @dataclass(frozen=True)
@@ -102,6 +128,7 @@ class OverlaySpec:
     scale: float = 0.4
     opacity: float = 1.0
     kind: str = "image"
+    source_start: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -190,7 +217,7 @@ def _video_chain(
         effective = segment.layout_override
 
     if effective == LAYOUT_BLURRED_BACKGROUND:
-        return [
+        lines = [
             f"[{index}:v]split=2[bgsrc{index}][fgsrc{index}]",
             (
                 f"[bgsrc{index}]scale={width}:{height}"
@@ -203,15 +230,17 @@ def _video_chain(
             ),
             (f"[bg{index}][fg{index}]overlay=(W-w)/2:(H-h)/2:shortest=1,{common}[v{index}]"),
         ]
+        return _with_leading_black(lines, index, segment)
 
     crop = _crop_filter(width=width, height=height, segment=segment)
-    return [
+    lines = [
         (
             f"[{index}:v]scale={width}:{height}"
             f":force_original_aspect_ratio=increase,"
             f"{crop},{common}[v{index}]"
         )
     ]
+    return _with_leading_black(lines, index, segment)
 
 
 def _crop_filter(
@@ -232,12 +261,35 @@ def _crop_filter(
     return f"crop={width}:{height}"
 
 
+def _with_leading_black(
+    lines: list[str],
+    index: int,
+    segment: RenderSegmentSpec | None,
+) -> list[str]:
+    """Pad black frames at the start of a normalized clip (leading gap)."""
+    pad = 0.0 if segment is None else segment.pad_before_seconds
+    if pad <= 0 or not lines:
+        return lines
+    label = f"[v{index}]"
+    last = lines[-1]
+    if not last.endswith(label):
+        return lines
+    lines[-1] = last[: -len(label)] + f"[vpre{index}]"
+    lines.append(
+        f"[vpre{index}]tpad=start_duration={_fmt(pad)}:start_mode=add:color=black,"
+        f"setpts=PTS-STARTPTS{label}"
+    )
+    return lines
+
+
 def _audio_chain(
     stream: str,
     index: int,
     duration: float,
     *,
     delay_seconds: float = 0.0,
+    volume_keyframes: tuple[tuple[float, float], ...] = (),
+    pad_seconds: float = 0.0,
 ) -> str:
     """Per-segment audio normalization chain, ending in label ``[a{index}]``.
 
@@ -261,6 +313,20 @@ def _audio_chain(
         parts.append(f"afade=t=in:st=0:d={_fmt(fade)}")
         fade_out_start = max(0.0, duration - fade)
         parts.append(f"afade=t=out:st={_fmt(fade_out_start)}:d={_fmt(fade)}")
+    if volume_keyframes:
+        from app.services.audio.volume_envelope import ffmpeg_volume_filter
+
+        envelope = ffmpeg_volume_filter(
+            [{"t_ms": t_ms, "gain": gain} for t_ms, gain in volume_keyframes],
+            duration,
+        )
+        if envelope:
+            parts.append(envelope)
+    if pad_seconds > 0:
+        output_duration = duration + pad_seconds
+        parts.append(f"adelay={round(pad_seconds * 1000)}:all=1")
+        parts.append(f"apad=whole_dur={_fmt(output_duration)}")
+        parts.append(f"atrim=0:{_fmt(output_duration)}")
     return ",".join(parts) + f"[a{index}]"
 
 
@@ -274,7 +340,7 @@ def _join_chain(segments: list[RenderSegmentSpec]) -> tuple[list[str], str, str,
     lines: list[str] = []
     current_v = "v0"
     current_a = "a0"
-    total = segments[0].duration
+    total = segments[0].output_duration
 
     for index in range(1, len(segments)):
         previous = segments[index - 1]
@@ -286,7 +352,7 @@ def _join_chain(segments: list[RenderSegmentSpec]) -> tuple[list[str], str, str,
         usable = min(
             requested,
             total - _MIN_XFADE_SLACK,
-            segment.duration - _MIN_XFADE_SLACK,
+            segment.output_duration - _MIN_XFADE_SLACK,
         )
 
         if transition is None or usable <= 0:
@@ -294,7 +360,7 @@ def _join_chain(segments: list[RenderSegmentSpec]) -> tuple[list[str], str, str,
                 f"[{current_v}][{current_a}][v{index}][a{index}]"
                 f"concat=n=2:v=1:a=1[cv{index}][ca{index}]"
             )
-            total += segment.duration
+            total += segment.output_duration
         else:
             offset = total - usable
             lines.append(
@@ -304,7 +370,7 @@ def _join_chain(segments: list[RenderSegmentSpec]) -> tuple[list[str], str, str,
             lines.append(
                 f"[{current_a}][a{index}]acrossfade=d={_fmt(usable)}:c1=tri:c2=tri[ca{index}]"
             )
-            total += segment.duration - usable
+            total += segment.output_duration - usable
 
         current_v = f"cv{index}"
         current_a = f"ca{index}"
@@ -458,10 +524,12 @@ def escape_filter_path(path: Path) -> str:
 
 
 def _overlay_inputs(overlays: list[OverlaySpec], *, fps: float) -> list[str]:
-    """FFmpeg ``-i`` arguments for overlay stills and B-roll clips."""
+    """FFmpeg ``-i`` arguments for overlay stills, B-roll and extra audio."""
     args: list[str] = []
     for spec in overlays:
-        if spec.kind == "video":
+        if spec.kind in {"video", "audio"}:
+            if spec.source_start > 0:
+                args += ["-ss", _fmt(spec.source_start)]
             args += ["-i", str(spec.path)]
             continue
         hold = max(spec.start_seconds + spec.duration_seconds + 0.25, 0.5)
@@ -485,15 +553,18 @@ def _overlay_filters(
     base_label: str,
     canvas_width: int,
 ) -> tuple[list[str], str]:
-    """Composite overlays onto ``base_label`` in z-order. Video audio is ignored."""
+    """Composite visual overlays onto ``base_label`` in z-order. Audio clips are skipped."""
     lines: list[str] = []
     current = base_label
+    visual_index = 0
     for index, spec in enumerate(overlays):
+        if spec.kind == "audio":
+            continue
         src = input_start + index
         start = max(0.0, spec.start_seconds)
         duration = max(0.05, spec.duration_seconds)
-        width_px = max(8, int(round(canvas_width * min(max(spec.scale, 0.05), 3.0))))
-        opacity = min(1.0, max(0.05, spec.opacity))
+        width_px = max(8, int(round(canvas_width * min(max(spec.scale, 0.05), 4.0))))
+        opacity = min(1.0, max(0.0, spec.opacity))
         chain: list[str] = []
         if spec.kind == "video":
             chain.append(f"trim=duration={_fmt(duration)}")
@@ -502,16 +573,49 @@ def _overlay_filters(
         chain.append("format=yuva420p")
         if opacity < 0.999:
             chain.append(f"colorchannelmixer=aa={_fmt(opacity)}")
-        lines.append(f"[{src}:v]{','.join(chain)}[ov{index}]")
+        lines.append(f"[{src}:v]{','.join(chain)}[ov{visual_index}]")
         x_expr = f"main_w*{_fmt(spec.x)}-overlay_w/2"
         y_expr = f"main_h*{_fmt(spec.y)}-overlay_h/2"
         enable = f"between(t,{_fmt(start)},{_fmt(start + duration)})"
         lines.append(
-            f"[{current}][ov{index}]overlay=x='{x_expr}':y='{y_expr}'"
-            f":enable='{enable}':repeatlast=0[ol{index}]"
+            f"[{current}][ov{visual_index}]overlay=x='{x_expr}':y='{y_expr}'"
+            f":enable='{enable}':repeatlast=0[ol{visual_index}]"
         )
-        current = f"ol{index}"
+        current = f"ol{visual_index}"
+        visual_index += 1
     return lines, current
+
+
+def _mix_audio_overlays(
+    overlays: list[OverlaySpec],
+    *,
+    input_start: int,
+    voice_label: str,
+) -> tuple[list[str], str]:
+    """Mix extra audio clips onto the assembled voice bed."""
+    lines: list[str] = []
+    mix_labels = [voice_label]
+    audio_index = 0
+    for index, spec in enumerate(overlays):
+        if spec.kind != "audio":
+            continue
+        src = input_start + index
+        start_ms = max(0, int(round(spec.start_seconds * 1000)))
+        duration = max(0.05, spec.duration_seconds)
+        volume = min(1.0, max(0.0, spec.opacity))
+        lines.append(
+            f"[{src}:a]atrim=0:{_fmt(duration)},asetpts=PTS-STARTPTS,"
+            f"adelay={start_ms}|{start_ms}:all=1,volume={_fmt(volume)}[ax{audio_index}]"
+        )
+        mix_labels.append(f"ax{audio_index}")
+        audio_index += 1
+    if audio_index == 0:
+        return [], voice_label
+    joined = "".join(f"[{label}]" for label in mix_labels)
+    lines.append(
+        f"{joined}amix=inputs={len(mix_labels)}:duration=first:dropout_transition=0[amixov]"
+    )
+    return lines, "amixov"
 
 
 def build_render_command(
@@ -606,12 +710,17 @@ def build_render_command(
             str(source),
         ]
 
-    audio_offset_seconds = audio_offset_ms / 1000.0
-    separate_audio_inputs = has_audio and audio_offset_ms != 0
+    segment_offsets = (
+        [segment.audio_offset_ms for segment in segments]
+        if any(segment.audio_offset_ms != 0 for segment in segments)
+        else [audio_offset_ms] * len(segments)
+    )
+    separate_audio_inputs = has_audio and any(offset != 0 for offset in segment_offsets)
     audio_input_delays: list[float] = [0.0] * len(segments)
     if separate_audio_inputs:
         for index, segment in enumerate(segments):
-            desired_start = segment.start - audio_offset_seconds
+            offset_seconds = segment_offsets[index] / 1000.0
+            desired_start = segment.start - offset_seconds
             audio_start = max(0.0, desired_start)
             audio_input_delays[index] = max(0.0, -desired_start)
             args += [
@@ -678,12 +787,14 @@ def build_render_command(
                 index,
                 segment.duration,
                 delay_seconds=audio_input_delays[index],
+                volume_keyframes=segment.volume_keyframes,
+                pad_seconds=segment.pad_before_seconds,
             )
         )
 
     if count == 1:
         video_label, audio_label = "v0", "a0"
-        expected = segments[0].duration
+        expected = segments[0].output_duration
     else:
         join_lines, video_label, audio_label, expected = _join_chain(segments)
         filters += join_lines
@@ -703,6 +814,12 @@ def build_render_command(
             canvas_width=width,
         )
         filters += overlay_lines
+        extra_audio_lines, audio_label = _mix_audio_overlays(
+            overlay_list,
+            input_start=overlay_input_start,
+            voice_label=audio_label,
+        )
+        filters += extra_audio_lines
 
     if full_reel_music is not None and music_input_index is not None:
         mix_lines, audio_label = build_background_music_graph(

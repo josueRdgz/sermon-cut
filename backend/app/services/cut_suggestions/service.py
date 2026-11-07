@@ -111,17 +111,24 @@ def _save_suggestions(db: Session, reel: Reel, suggestions: list[CutSuggestion])
     db.commit()
 
 
+_INTENSITY_ES = {
+    CutIntensity.conservative: "conservadora",
+    CutIntensity.balanced: "equilibrada",
+    CutIntensity.aggressive: "agresiva",
+}
+
+
 def _report(intensity: CutIntensity, suggestions: list[CutSuggestion]) -> CutSuggestionsReport:
     pending = [s for s in suggestions if s.status == CutSuggestionStatus.pending]
+    label = _INTENSITY_ES.get(intensity, intensity.value)
     return CutSuggestionsReport(
         intensity=intensity,
         suggestions=suggestions,
         pending_count=len(pending),
         summary=(
-            f"{len(pending)} sugerencia(s) pendiente(s) "
-            f"(intensidad {intensity.value}). Ninguna se aplica sola."
+            f"{len(pending)} sugerencia(s) pendiente(s) (intensidad {label}). Ninguna se aplica sola."
             if pending
-            else f"Sin sugerencias pendientes (intensidad {intensity.value})."
+            else ""
         ),
         auto_applied=False,
     )

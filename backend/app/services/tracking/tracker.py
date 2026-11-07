@@ -9,11 +9,31 @@ from __future__ import annotations
 
 import logging
 from abc import ABC, abstractmethod
+from pathlib import Path
 from typing import Any
 
 from app.services.tracking.types import BoundingBox
 
 logger = logging.getLogger(__name__)
+
+
+def _haar_cascade_path(cv2: Any) -> str:
+    """Resolve haarcascade_frontalface_default.xml for OpenCV 4.x wheels."""
+    name = "haarcascade_frontalface_default.xml"
+    base = getattr(getattr(cv2, "data", None), "haarcascades", None)
+    if base:
+        candidate = Path(base) / name
+        if candidate.is_file():
+            return str(candidate)
+    package = Path(getattr(cv2, "__file__", "")).resolve().parent
+    for folder in (package / "data", package / "data" / "haarcascades"):
+        candidate = folder / name
+        if candidate.is_file():
+            return str(candidate)
+    raise RuntimeError(
+        "No está el clasificador Haar de OpenCV. "
+        "Instala OpenCV 4: pip install 'opencv-python-headless>=4.9,<5'"
+    )
 
 
 class SubjectTracker(ABC):
@@ -43,9 +63,17 @@ class OpenCVSubjectTracker(SubjectTracker):
                 "OpenCV is required for subject tracking. "
                 "Install with: pip install -e '.[tracking]'"
             ) from exc
+        if not hasattr(cv2, "CascadeClassifier") or not hasattr(cv2, "HOGDescriptor"):
+            raise RuntimeError(
+                "Esta versión de OpenCV ya no incluye Haar/HOG "
+                f"(cv2 {getattr(cv2, '__version__', '?')}). "
+                "Usa OpenCV 4: pip install 'opencv-python-headless>=4.9,<5'"
+            )
+        cascade_path = _haar_cascade_path(cv2)
         self._cv2 = cv2
-        cascade_path = cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
         self._face = cv2.CascadeClassifier(cascade_path)
+        if self._face.empty():
+            raise RuntimeError(f"No se pudo cargar el clasificador Haar: {cascade_path}")
         self._hog = cv2.HOGDescriptor()
         self._hog.setSVMDetector(cv2.HOGDescriptor_getDefaultPeopleDetector())
 
@@ -73,14 +101,15 @@ class OpenCVSubjectTracker(SubjectTracker):
                 confidence=0.85,
             ).clamp(frame_w, frame_h)
 
-        people, weights = self._hog.detectMultiScale(
+        hog_result = self._hog.detectMultiScale(
             frame_bgr, winStride=(8, 8), padding=(8, 8), scale=1.05
         )
-        if len(people) == 0:
+        people, weights = hog_result if isinstance(hog_result, tuple) else (hog_result, ())
+        if people is None or len(people) == 0:
             return None
         best_idx = int(max(range(len(people)), key=lambda i: people[i][2] * people[i][3]))
         x, y, w, h = people[best_idx]
-        conf = float(weights[best_idx]) if len(weights) > best_idx else 0.5
+        conf = float(weights[best_idx]) if weights is not None and len(weights) > best_idx else 0.5
         frame_h, frame_w = frame_bgr.shape[:2]
         return BoundingBox(
             x=float(x),

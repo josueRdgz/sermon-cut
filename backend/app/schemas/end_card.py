@@ -1,4 +1,4 @@
-"""Pydantic schemas for the mandatory end card."""
+"""Pydantic schemas for the optional end card."""
 
 from __future__ import annotations
 
@@ -16,6 +16,7 @@ from app.models.end_card import (
 class EndCardSettingsUpdate(BaseModel):
     """Partial update for the global or per-project end card configuration."""
 
+    enabled: bool | None = None
     layout: EndCardLayout | None = None
     duration_seconds: float | None = Field(
         default=None, ge=MIN_END_CARD_SECONDS, le=MAX_END_CARD_SECONDS
@@ -37,6 +38,7 @@ class EndCardSettingsResponse(BaseModel):
 
     model_config = ConfigDict(from_attributes=True)
 
+    enabled: bool = True
     layout: EndCardLayout
     duration_seconds: float
     fade_in_ms: int
@@ -53,8 +55,7 @@ class EndCardSettingsResponse(BaseModel):
     message_position: EndCardMessagePosition
     # False when the project inherits the global configuration.
     is_project_override: bool
-    # The end card cannot be disabled; surfaced so the UI can say so.
-    is_mandatory: bool = True
+    is_mandatory: bool = False
     min_duration_seconds: float = MIN_END_CARD_SECONDS
     max_duration_seconds: float = MAX_END_CARD_SECONDS
 

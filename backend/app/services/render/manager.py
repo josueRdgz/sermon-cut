@@ -152,7 +152,7 @@ class RenderManager:
         burn_subtitles: bool = True,
         profile_id: UUID | None = None,
         quality: str | ExportQuality = ExportQuality.standard,
-        acknowledge_coherence: bool = False,
+        acknowledge_coherence: bool = True,
     ) -> RenderJob:
         project = db.get(Project, project_id)
         if project is None:
@@ -182,8 +182,8 @@ class RenderManager:
         if burn_subtitles and not self._filter_checker(ffmpeg, "ass"):
             raise ValidationAppError(
                 "El FFmpeg instalado no incluye el filtro ASS/libass necesario para "
-                "quemar subtítulos. En macOS instala «ffmpeg-full» o desmarca "
-                "«Quemar subtítulos» para exportar sin ellos.",
+                "incluir subtítulos. En macOS instala «ffmpeg-full» o desactiva "
+                "«Incluir en el video» en Subtítulos.",
                 code="ffmpeg_ass_filter_missing",
             )
 
@@ -218,8 +218,10 @@ class RenderManager:
             max(0.0, seg.source_end_seconds - seg.source_start_seconds)
             for seg in reel.segments
         )
-        # Approximate end-card pad for the profile duration gate.
-        assert_duration_allowed(profile, content_duration + 5.0)
+        end_card_preview = resolve_end_card(db, project_id)
+        assert_duration_allowed(
+            profile, content_duration + end_card_preview.effective_duration_seconds()
+        )
 
         job = RenderJob(
             project_id=project_id,
@@ -420,12 +422,20 @@ class RenderManager:
             has_audio = bool(getattr(metadata, "audio_codec", None))
             probed_fps = getattr(metadata, "fps", None)
 
+            from app.services.audio.volume_envelope import parse_keyframes
+
             segments = [
                 RenderSegmentSpec(
                     start=item.source_start_seconds,
                     end=item.source_end_seconds,
                     transition_type=item.transition_type.value,
                     transition_duration_ms=item.transition_duration_ms,
+                    volume_keyframes=tuple(
+                        (point["t_ms"], point["gain"])
+                        for point in parse_keyframes(getattr(item, "volume_keyframes_json", None))
+                    ),
+                    audio_offset_ms=getattr(item, "audio_offset_ms", 0) or 0,
+                    pad_before_ms=getattr(item, "pad_before_ms", 0) or 0,
                 )
                 for item in sorted(reel.segments, key=lambda s: s.order)
             ]
@@ -467,6 +477,9 @@ class RenderManager:
                             crop_y=crop_y,
                             crop_x_expr=x_expr,
                             crop_y_expr=y_expr,
+                            volume_keyframes=spec.volume_keyframes,
+                            audio_offset_ms=spec.audio_offset_ms,
+                            pad_before_ms=spec.pad_before_ms,
                         )
                     )
                 segments = enriched
@@ -546,19 +559,20 @@ class RenderManager:
             if artifacts is not None:
                 ass_file, _font, _cues = artifacts
 
-            # The end card is mandatory: every render closes with it.
-            job.stage = "end_card"
-            session.commit()
             end_card_config = resolve_end_card(session, job.project_id)
-            end_card_spec = build_end_card_spec(
-                project=project,
-                config=end_card_config,
-                width=preview_w,
-                height=preview_h,
-                image_path=end_card_image,
-                main_content_end_seconds=segments[-1].end,
-                source_duration_seconds=getattr(metadata, "duration_seconds", None),
-            )
+            end_card_spec = None
+            if end_card_config.enabled:
+                job.stage = "end_card"
+                session.commit()
+                end_card_spec = build_end_card_spec(
+                    project=project,
+                    config=end_card_config,
+                    width=preview_w,
+                    height=preview_h,
+                    image_path=end_card_image,
+                    main_content_end_seconds=segments[-1].end,
+                    source_duration_seconds=getattr(metadata, "duration_seconds", None),
+                )
 
             # Optional user-provided background music (off unless preset ≠ none).
             from dataclasses import replace
@@ -582,7 +596,8 @@ class RenderManager:
             )
 
             if (
-                music_spec is not None
+                end_card_spec is not None
+                and music_spec is not None
                 and music_spec.scope == BackgroundMusicScope.end_card_only
                 and end_card_spec.music_path is None
             ):
@@ -605,47 +620,11 @@ class RenderManager:
                 else None
             )
 
-            from app.models.asset import ProjectAsset, ReelOverlayKind
-            from app.services.overlays import list_overlays_for_render
-            from app.services.overlays_render import render_title_card
-            from app.services.render.args import OverlaySpec
+            from app.services.overlays import specs_for_render
 
-            overlay_rows = list_overlays_for_render(session, job.reel_id)
-            overlay_specs: list[OverlaySpec] = []
-            for row_index, row in enumerate(overlay_rows):
-                path: Path | None = None
-                if row.kind == ReelOverlayKind.image and row.asset_id is not None:
-                    from app.models.asset import ProjectAsset
-
-                    asset = session.get(ProjectAsset, row.asset_id)
-                    if asset is not None:
-                        candidate = storage.resolve_inside_project(
-                            job.project_id, asset.storage_path
-                        )
-                        if candidate.is_file():
-                            path = candidate
-                elif row.kind == ReelOverlayKind.text:
-                    title_path = temp_dir / f"overlay-title-{job_id}-{row_index}.png"
-                    render_title_card(
-                        row.text or "",
-                        title_path,
-                        width=max(320, preview_w),
-                        height=max(180, preview_h // 4),
-                    )
-                    path = title_path
-                if path is None:
-                    continue
-                overlay_specs.append(
-                    OverlaySpec(
-                        path=path,
-                        start_seconds=max(0.0, row.start_ms / 1000.0),
-                        duration_seconds=max(0.2, row.duration_ms / 1000.0),
-                        x=row.x,
-                        y=row.y,
-                        scale=row.scale,
-                        opacity=row.opacity,
-                    )
-                )
+            overlay_specs = specs_for_render(
+                session, job.project_id, job.reel_id, temp_dir=temp_dir
+            )
 
             # FPS: profile may force 30; otherwise keep the source rate.
             encode_fps = encode.fps_override if encode.fps_override is not None else probed_fps

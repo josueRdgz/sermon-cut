@@ -1,7 +1,6 @@
 """Resolve, persist and materialize end card settings.
 
-Resolution order: per-project row → global row → hardcoded defaults. The end
-card itself is mandatory, so a project always resolves to a usable config.
+Resolution order: per-project row → global row → hardcoded defaults.
 """
 
 from __future__ import annotations
@@ -38,6 +37,7 @@ from app.services.endcard.layout import clamp_duration
 class ResolvedEndCard:
     """Effective end card configuration for one project."""
 
+    enabled: bool
     layout: EndCardLayout
     duration_seconds: float
     fade_in_ms: int
@@ -54,6 +54,9 @@ class ResolvedEndCard:
     message_position: EndCardMessagePosition
     # True when a project-specific row exists.
     is_project_override: bool
+
+    def effective_duration_seconds(self) -> float:
+        return self.duration_seconds if self.enabled else 0.0
 
 
 def get_global_settings(db: Session) -> EndCardSettings | None:
@@ -83,6 +86,7 @@ def resolve_global(db: Session) -> ResolvedEndCard:
 def _from_row(row: EndCardSettings | None, *, is_override: bool) -> ResolvedEndCard:
     if row is None:
         return ResolvedEndCard(
+            enabled=True,
             layout=EndCardLayout.cover_full,
             duration_seconds=DEFAULT_END_CARD_SECONDS,
             fade_in_ms=DEFAULT_FADE_IN_MS,
@@ -101,6 +105,7 @@ def _from_row(row: EndCardSettings | None, *, is_override: bool) -> ResolvedEndC
         )
 
     return ResolvedEndCard(
+        enabled=bool(getattr(row, "enabled", True)),
         layout=row.layout,
         duration_seconds=clamp_duration(
             row.duration_seconds, minimum=MIN_END_CARD_SECONDS, maximum=MAX_END_CARD_SECONDS

@@ -37,6 +37,21 @@ class TransitionType(enum.StrEnum):
     dip_to_black = "dip_to_black"
     fade = "fade"
     flash = "flash"
+    light_change = "light_change"
+    dissolve = "dissolve"
+    wipe_down = "wipe_down"
+    wipe_left = "wipe_left"
+    wipe_right = "wipe_right"
+    wipe_up = "wipe_up"
+    slide_down = "slide_down"
+    slide_left = "slide_left"
+    slide_right = "slide_right"
+    slide_up = "slide_up"
+    circle_open = "circle_open"
+    circle_close = "circle_close"
+    pixelize = "pixelize"
+    radial = "radial"
+    zoom_in = "zoom_in"
 
 
 class SubtitleStyle(enum.StrEnum):
@@ -128,6 +143,13 @@ class Reel(Base):
     subtitle_opacity: Mapped[float] = mapped_column(Float, nullable=False, default=1.0)
     subtitle_margin_bottom: Mapped[int] = mapped_column(Integer, nullable=False, default=120)
     subtitle_bible_reference: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    subtitle_font_family: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    subtitle_bold: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    subtitle_italic: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    subtitle_underline: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    subtitle_strikethrough: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    subtitle_x: Mapped[float | None] = mapped_column(Float, nullable=True)
+    subtitle_y: Mapped[float | None] = mapped_column(Float, nullable=True)
 
     aspect_ratio: Mapped[AspectRatio] = mapped_column(
         Enum(AspectRatio, name="aspect_ratio", native_enum=False, length=16),
@@ -150,6 +172,8 @@ class Reel(Base):
     )
     # Positive values delay audio; negative values advance it.
     audio_offset_ms: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    # Mix the right channel (pulpit mic) toward the stereo center. 0 = original.
+    voice_center: Mapped[float] = mapped_column(Float, nullable=False, default=0.35)
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=_utc_now
@@ -212,5 +236,10 @@ class ReelSegment(Base):
     # Independent subtitle window on the output clock (ms). None = follow the video clip.
     caption_in_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
     caption_out_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    volume_keyframes_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Per-cut voice sync: positive delays audio, negative advances it.
+    audio_offset_ms: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    # Silent black before this clip on the output clock (leading gap / intro).
+    pad_before_ms: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
 
     reel: Mapped[Reel] = relationship(back_populates="segments")

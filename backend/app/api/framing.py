@@ -17,7 +17,6 @@ from app.schemas.tracking import (
     FramingStatusResponse,
     ManualCropUpdate,
     TrackingComputeRequest,
-    TrackingReport,
 )
 from app.services.tracking import cache as tracking_cache
 from app.services.tracking import service as tracking_service
@@ -54,19 +53,21 @@ def set_framing_mode(
 
 @router.post(
     "/projects/{project_id}/reels/{reel_id}/framing/track",
-    response_model=TrackingReport,
+    response_model=FramingStatusResponse,
+    status_code=202,
 )
 def compute_subject_tracking(
     project_id: UUID,
     reel_id: UUID,
     payload: TrackingComputeRequest = TrackingComputeRequest(),
     db: Session = Depends(get_db),
-) -> TrackingReport:
-    """Sample frames sparsely, track the preacher, cache crop keyframes.
+) -> FramingStatusResponse:
+    """Queue sparse tracking. Poll GET framing until tracking_status is completed."""
+    from app.services.tracking.jobs import get_tracking_job_manager
 
-    Does not render the final video with OpenCV — only analysis stills.
-    """
-    return tracking_service.compute_tracking(db, project_id, reel_id, payload)
+    tracking_service.status(db, project_id, reel_id)
+    get_tracking_job_manager().start(project_id, reel_id, payload)
+    return tracking_service.status(db, project_id, reel_id)
 
 
 @router.delete(

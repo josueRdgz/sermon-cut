@@ -5,7 +5,7 @@ from __future__ import annotations
 from app.services.ai.house_style import TITLE_PACKAGING, context_block, with_house_style
 from app.services.ai.schemas import AnalysisRequest
 
-SYSTEM_PROMPT = with_house_style("""\
+_BASE_SYSTEM = """\
 Actúa como editor de contenido cristiano reformado. Selecciona momentos que \
 sean fieles al sermón, comprensibles fuera de contexto y apropiados para Shorts. \
 Prioriza un único fragmento continuo y de ritmo natural por Reel. Solo une \
@@ -47,8 +47,13 @@ transcripción (sin inventar ni parafrasear).
 2. `start` y `end` son segundos absolutos del video original.
 3. Prioriza 1 segmento continuo por Reel. Si hacen falta cortes, usa la menor \
 cantidad posible y nunca más de 3 segmentos; ordénalos cronológicamente.
-4. La duración total del Reel (suma de segmentos) debe caer entre el mínimo y \
-el máximo pedidos.
+4. La duración total del Reel (suma de segmentos) DEBE quedar entre el mínimo \
+y el máximo pedidos. No superes el máximo. Prefiere 25–60 s para Shorts, con \
+gancho en los primeros 2 s, una sola idea y un cierre con aplicación. Si la \
+idea no cabe, recorta rodeos; no alargues el clip. El video publicado, con \
+pantalla final si aplica, no puede pasar de 180 segundos (límite de YouTube \
+Shorts). Si un candidato no cumple duración, evidencia literal o continuidad, \
+omítelo: no lo propongas.
 5. No inventes hashtags sensacionalistas ni títulos que el predicador no \
 sostuvo.
 6. Si un corte elimina contexto necesario, rellénalo en \
@@ -59,7 +64,17 @@ sostuvo.
 clave. No atribuyas al predicador frases ausentes.
 9. `hook` debe ser la primera frase real del clip. `title` y `recommended` \
 deben sonar a Reel de iglesia: cortos, citables, no un encabezado de sermón.
-""")
+10. Empieza el recorte en una tesis, contraste o pregunta; nunca en un saludo \
+ni en “el siguiente punto”. Cierra cuando la idea ya se aplicó, no a media \
+frase.
+"""
+
+
+def system_prompt(*, editorial_style: str | None = None) -> str:
+    return with_house_style(_BASE_SYSTEM, editorial_style=editorial_style)
+
+
+SYSTEM_PROMPT = system_prompt()
 
 
 def build_user_prompt(request: AnalysisRequest) -> str:
@@ -77,14 +92,15 @@ def build_user_prompt(request: AnalysisRequest) -> str:
         "",
         "## Preferencias",
         f"- Máximo de Reels a sugerir: {prefs.max_reels}",
-        f"- Duración deseada por Reel: {prefs.min_duration_seconds:.0f}"
-        f"–{prefs.max_duration_seconds:.0f} s",
+        f"- Duración obligatoria por Reel: {prefs.min_duration_seconds:.0f}"
+        f"–{prefs.max_duration_seconds:.0f} s. No superes {prefs.max_duration_seconds:.0f} s.",
         f"- Máximo de fragmentos/cortes por Reel: {prefs.max_segments_per_reel}",
         f"- Duración mínima por fragmento: {prefs.min_segment_seconds:.0f} s",
         "- Ritmo: conserva intervenciones continuas largas; no cortes por cada "
         "frase ni por cada línea de subtítulos.",
         f"- Orientación doctrinal/editorial: {prefs.doctrinal_orientation}",
-        "- Ritmo de redes: 25–45 s suele funcionar mejor, salvo que el usuario pida otra duración.",
+        "- Respeta el formato pedido en el contexto (Shorts/Reels cortos o Highlights más largos).",
+        "- Sigue el estilo editorial del system prompt; no lo diluyas con otro tono.",
         TITLE_PACKAGING.strip(),
     ]
     extra = context_block(
@@ -114,7 +130,7 @@ def build_user_prompt(request: AnalysisRequest) -> str:
         "Devuelve un objeto JSON con la clave `clips`. Cada clip debe preferir "
         "un solo `segment` continuo y nunca superar el máximo indicado. "
         "`exact_text` debe coincidir con el texto real de la transcripción en "
-        "ese intervalo.",
+        "ese intervalo. No incluyas clips dudosos: solo momentos publicables.",
     ]
     return "\n".join(lines)
 
@@ -133,11 +149,14 @@ def build_merge_prompt(
             "Recibes candidatos generados por bloques de la misma predicación.",
             "Combínalos en una lista final de Reels únicos, sin duplicar ideas,",
             "respetando la duración y el máximo pedidos. Conserva solo fragmentos",
-            "reales (no inventes texto ni tiempos).",
+            "reales (no inventes texto ni tiempos). Descarta cualquier clip que",
+            f"supere {prefs.max_duration_seconds:.0f} s, carezca de evidencia o",
+            "empiece en un saludo. No dejes candidatos inválidos en la lista.",
             "",
             f"- Sermón: {meta.title} ({meta.duration_seconds:.1f} s)",
             f"- Máximo de Reels: {prefs.max_reels}",
-            f"- Duración: {prefs.min_duration_seconds:.0f}–{prefs.max_duration_seconds:.0f} s",
+            f"- Duración obligatoria: {prefs.min_duration_seconds:.0f}–"
+            f"{prefs.max_duration_seconds:.0f} s (no hay holgura)",
             f"- Máximo de fragmentos/cortes por Reel: {prefs.max_segments_per_reel}",
             f"- Duración mínima por fragmento: {prefs.min_segment_seconds:.0f} s",
             "- Prioriza continuidad: conserva 1 segmento siempre que sea posible y no "

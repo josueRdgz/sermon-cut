@@ -29,4 +29,5 @@ class HealthResponse(BaseModel):
     ffprobe: ToolInfo
     whisper: ToolInfo
     gemini: ToolInfo
+    groq: ToolInfo
     storage: StorageInfo

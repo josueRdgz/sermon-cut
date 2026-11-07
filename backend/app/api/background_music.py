@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 from app.core.exceptions import NotFoundError
 from app.db.session import get_db
 from app.schemas.background_music import (
+    BackgroundMusicFromAssetRequest,
     BackgroundMusicMetersResponse,
     BackgroundMusicPresetListResponse,
     BackgroundMusicResponse,
@@ -90,6 +91,20 @@ async def upload_background_music(
         content_type=file.content_type,
         chunks=_upload_chunks(file),
     )
+    return bgm_service.to_response(row)
+
+
+@router.post(
+    "/projects/{project_id}/background-music/from-asset",
+    response_model=BackgroundMusicResponse,
+)
+def assign_background_music_from_asset(
+    project_id: UUID,
+    payload: BackgroundMusicFromAssetRequest,
+    db: Session = Depends(get_db),
+) -> BackgroundMusicResponse:
+    projects_service.get_project(db, project_id)
+    row = bgm_service.assign_from_asset(db, project_id, payload.asset_id)
     return bgm_service.to_response(row)
 
 

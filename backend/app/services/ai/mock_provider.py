@@ -42,6 +42,9 @@ class MockAIProvider(AIProvider):
 
         # Walk the transcript building non-overlapping candidates.
         cursor = 0
+        extra = prefs.additional_instructions or ""
+        if "Sustituye este candidato" in extra and len(timed) > 1:
+            cursor = 1
         while cursor < len(timed) and len(clips) < prefs.max_reels:
             primary = timed[cursor]
             collected = [primary]

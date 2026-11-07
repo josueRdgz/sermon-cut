@@ -5,20 +5,32 @@ import { Link } from 'react-router-dom';
 import { projectCoverUrl } from '../api/projects';
 import type { Project } from '../types/project';
 import { formatDuration, formatRelativeTime, statusLabel } from '../utils/format';
+import { NleContextMenu } from './nle/NleContextMenu';
+import { ProjectInfoDialog } from './ProjectInfoDialog';
 import styles from './ProjectCard.module.css';
 
 interface ProjectCardProps {
   project: Project;
   onDelete?: (project: Project) => void;
+  onUpdated?: (project: Project) => void;
 }
 
-export function ProjectCard({ project, onDelete }: ProjectCardProps) {
+export function ProjectCard({ project, onDelete, onUpdated }: ProjectCardProps) {
   const [coverFailed, setCoverFailed] = useState(false);
+  const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
+  const [infoOpen, setInfoOpen] = useState(false);
   const showCover = project.has_cover && !coverFailed;
   const subtitle = [project.church_name, project.preacher_name].filter(Boolean).join(' · ');
 
   return (
-    <article className={styles.card}>
+    <article
+      className={styles.card}
+      onContextMenu={(event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        setMenu({ x: event.clientX, y: event.clientY });
+      }}
+    >
       <div className={styles.thumb}>
         {showCover ? (
           <img
@@ -73,6 +85,29 @@ export function ProjectCard({ project, onDelete }: ProjectCardProps) {
         >
           <Trash2 size={15} strokeWidth={2} aria-hidden />
         </button>
+      ) : null}
+
+      {menu ? (
+        <NleContextMenu
+          x={menu.x}
+          y={menu.y}
+          items={[
+            {
+              id: 'info',
+              label: 'Información',
+              onSelect: () => setInfoOpen(true),
+            },
+          ]}
+          onClose={() => setMenu(null)}
+        />
+      ) : null}
+
+      {infoOpen ? (
+        <ProjectInfoDialog
+          project={project}
+          onClose={() => setInfoOpen(false)}
+          onUpdated={onUpdated}
+        />
       ) : null}
     </article>
   );

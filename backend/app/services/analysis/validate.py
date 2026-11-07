@@ -260,7 +260,7 @@ def _validate_clip(
         raise ValueError(
             f"clip shorter than {min_clip_seconds}s ({total_duration:.2f}s)"
         )
-    if max_clip_seconds is not None and total_duration > max_clip_seconds:
+    if max_clip_seconds is not None and total_duration > max_clip_seconds + 0.25:
         raise ValueError(
             f"clip longer than {max_clip_seconds}s ({total_duration:.2f}s)"
         )

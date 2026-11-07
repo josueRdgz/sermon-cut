@@ -10,8 +10,8 @@ from pydantic import BaseModel, ConfigDict, Field
 
 class AnalysisStartRequest(BaseModel):
     max_reels: int = Field(default=5, ge=1, le=20)
-    min_duration_seconds: float = Field(default=25.0, ge=5.0, le=120.0)
-    max_duration_seconds: float = Field(default=45.0, ge=10.0, le=180.0)
+    min_duration_seconds: float = Field(default=25.0, ge=5.0, le=600.0)
+    max_duration_seconds: float = Field(default=45.0, ge=10.0, le=900.0)
     additional_instructions: str | None = Field(default=None, max_length=2000)
     doctrinal_orientation: str | None = Field(
         default=None,
@@ -96,9 +96,19 @@ class AnalysisProviderStatusResponse(BaseModel):
     gemini_configured: bool
     gemini_sdk_installed: bool
     gemini_model: str
+    groq_configured: bool = False
+    groq_model: str = "llama-3.3-70b-versatile"
     optional: bool = True
 
 
 class AnalysisAcceptResponse(BaseModel):
     candidate: AnalysisCandidateResponse
     reel_id: UUID
+
+
+class AnalysisMergeRequest(BaseModel):
+    candidate_ids: list[UUID] = Field(min_length=2, max_length=8)
+
+
+class AnalysisReplaceRequest(BaseModel):
+    instruction: str = Field(min_length=3, max_length=800)
