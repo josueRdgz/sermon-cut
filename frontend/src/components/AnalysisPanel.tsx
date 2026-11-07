@@ -8,14 +8,17 @@ import {
   startAnalysis,
 } from '../api/analysis';
 import { ApiError } from '../api/client';
+import { getProjectEndCardSettings } from '../api/endCard';
 import { getTranscript } from '../api/transcripts';
 import type { AnalysisJob, AnalysisProviderStatus } from '../types/analysis';
 import { ACTIVE_ANALYSIS_STATUSES } from '../types/analysis';
 import {
   ANALYSIS_OUTPUT_PRESETS,
+  DEFAULT_END_CARD_SECONDS,
   EDITORIAL_PRESETS,
   YOUTH_CONTEXT,
   buildAnalysisInstructions,
+  shortsContentMaxSeconds,
   type AnalysisOutputKind,
   type EditorialPresetId,
 } from '../utils/editorialPresets';
@@ -47,6 +50,22 @@ function isActive(job: AnalysisJob | null): boolean {
   return job != null && ACTIVE_ANALYSIS_STATUSES.includes(job.status);
 }
 
+function visibleAnalysisNotice(notice: string | null | undefined): string | null {
+  if (!notice) return null;
+  const cleaned = notice
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(
+      (line) =>
+        line.length > 0 &&
+        !/candidato\(s\) rechazados/i.test(line) &&
+        !/descartados automáticamente/i.test(line),
+    )
+    .join('\n')
+    .trim();
+  return cleaned || null;
+}
+
 export function AnalysisPanel({
   projectId,
   transcriptRevision = 0,
@@ -60,6 +79,7 @@ export function AnalysisPanel({
   const [maxReels, setMaxReels] = useState(5);
   const [minDuration, setMinDuration] = useState(ANALYSIS_OUTPUT_PRESETS.shorts.minDuration);
   const [maxDuration, setMaxDuration] = useState(ANALYSIS_OUTPUT_PRESETS.shorts.maxDuration);
+  const [endCardPad, setEndCardPad] = useState(DEFAULT_END_CARD_SECONDS);
   const [preset, setPreset] = useState<EditorialPresetId>('youth');
   const [instructions, setInstructions] = useState(YOUTH_CONTEXT);
   const [busy, setBusy] = useState(false);
@@ -70,6 +90,28 @@ export function AnalysisPanel({
       .then(setProvider)
       .catch(() => setProvider(null));
   }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    getProjectEndCardSettings(projectId)
+      .then((data) => {
+        if (!cancelled) {
+          setEndCardPad(data.enabled ? data.duration_seconds : 0);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setEndCardPad(DEFAULT_END_CARD_SECONDS);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [projectId]);
+
+  useEffect(() => {
+    if (outputKind !== 'shorts') return;
+    const cap = shortsContentMaxSeconds(endCardPad);
+    setMaxDuration((current) => Math.min(current, cap));
+  }, [endCardPad, outputKind]);
 
   useEffect(() => {
     let cancelled = false;
@@ -122,6 +164,10 @@ export function AnalysisPanel({
     return () => window.clearInterval(timer);
   }, [job]);
 
+  const shortsMax = shortsContentMaxSeconds(endCardPad);
+  const contentMax =
+    outputKind === 'shorts' ? shortsMax : ANALYSIS_OUTPUT_PRESETS.highlights.maxDuration;
+
   const handleStart = useCallback(async () => {
     setBusy(true);
     setError(null);
@@ -129,7 +175,7 @@ export function AnalysisPanel({
       const started = await startAnalysis(projectId, {
         max_reels: maxReels,
         min_duration_seconds: minDuration,
-        max_duration_seconds: maxDuration,
+        max_duration_seconds: Math.min(maxDuration, contentMax),
         additional_instructions: buildAnalysisInstructions({
           outputKind,
           sourceKind,
@@ -142,7 +188,7 @@ export function AnalysisPanel({
     } finally {
       setBusy(false);
     }
-  }, [projectId, maxReels, minDuration, maxDuration, instructions, outputKind, sourceKind]);
+  }, [projectId, maxReels, minDuration, maxDuration, contentMax, instructions, outputKind, sourceKind]);
 
   const handleCancel = useCallback(async () => {
     if (!job) return;
@@ -185,6 +231,7 @@ export function AnalysisPanel({
           Motor de análisis:{' '}
           <strong>{provider.active === 'mock' ? 'local' : provider.active}</strong>
           {provider.gemini_configured ? ` · ${provider.gemini_model}` : ''}
+          {provider.groq_configured ? ` · Groq ${provider.groq_model}` : ''}
         </p>
       )}
 
@@ -210,7 +257,11 @@ export function AnalysisPanel({
                       onChange={() => {
                         setOutputKind(kind);
                         setMinDuration(presetInfo.minDuration);
-                        setMaxDuration(presetInfo.maxDuration);
+                        setMaxDuration(
+                          kind === 'shorts'
+                            ? Math.min(presetInfo.maxDuration, shortsMax)
+                            : presetInfo.maxDuration,
+                        );
                       }}
                     />
                     <span>
@@ -255,10 +306,12 @@ export function AnalysisPanel({
                 <input
                   type="number"
                 min={10}
-                max={900}
+                max={contentMax}
                   value={maxDuration}
                   disabled={active || busy}
-                  onChange={(e) => setMaxDuration(Number(e.target.value))}
+                  onChange={(e) =>
+                    setMaxDuration(Math.min(Number(e.target.value), contentMax))
+                  }
                 />
                 <span className="muted">s</span>
               </div>
@@ -297,7 +350,8 @@ export function AnalysisPanel({
               }}
             />
             <small className="muted">
-              Cambia al elegir el estilo. Edítalo libremente; eso es lo que recibe el modelo.
+              Este texto es el brief editorial del modelo. El estilo lo rellena; ajústalo si el
+              culto pide otro tono.
             </small>
           </label>
 
@@ -329,15 +383,11 @@ export function AnalysisPanel({
             </div>
           )}
 
-          {job?.notice && <p className="warning">{job.notice}</p>}
+          {visibleAnalysisNotice(job?.notice) && (
+            <p className="warning">{visibleAnalysisNotice(job?.notice)}</p>
+          )}
           {job?.status === 'failed' && (
             <p className="error">Error: {job.error_message ?? 'falló el análisis'}</p>
-          )}
-          {job?.status === 'completed' && job.rejected_count > 0 && (
-            <p className="muted">
-              {job.rejected_count} candidato(s) descartados automáticamente por falta de evidencia
-              en la transcripción.
-            </p>
           )}
 
           {candidates.length > 0 && (

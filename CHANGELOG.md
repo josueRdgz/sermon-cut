@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.4.23] — 2026-11-06
+
+### Added
+
+- Groq como motor de análisis (y respaldo automático cuando Gemini responde 503).
+- Clic derecho → Información en las tarjetas de proyecto (Inicio y Proyectos).
+- La pantalla final se puede desactivar para exportar solo la edición.
+
+### Changed
+
+- YouTube Shorts admite hasta 180 s, pantalla final incluida.
+- Los prompts de IA exigen el tope de duración y usan el estilo elegido (Juvenil, Meditación, etc.).
+- La portada se elige en Pantalla final, no en la ficha de proyecto.
+- En Predicación, Culto completo desaparece al recortar; desde culto completo sí se puede pasar a recortar.
+
+### Fixed
+
+- El tamaño y la tipografía de subtítulos se ven en la vista previa.
+- Los emojis escritos con el teclado ya no se borran al guardar el recuadro.
+
+### Removed
+
+- Sección Proyecto del workspace.
+- Chips de emojis predefinidos bajo el texto de subtítulos.
+
 ## [0.4.22] — 2026-11-04
 
 ### Removed

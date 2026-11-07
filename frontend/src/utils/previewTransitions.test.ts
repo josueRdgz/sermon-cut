@@ -29,6 +29,18 @@ describe('previewTransitions', () => {
     expect(end.inClipPath).toBe('inset(0 0 0.000% 0)');
   });
 
+  it('opens a circle for circle_open', () => {
+    const start = previewXfadeStyle('circle_open', 0);
+    const end = previewXfadeStyle('circle_open', 1);
+    expect(start.inClipPath).toContain('0.00%');
+    expect(end.inClipPath).toContain('75.00%');
+  });
+
+  it('slides the incoming clip from the right', () => {
+    const start = previewXfadeStyle('slide_right', 0);
+    expect(start.inTransform).toContain('-100');
+  });
+
   it('mixes audio with a triangular acrossfade', () => {
     expect(xfadeAudioWeights(0)).toEqual({ out: 1, in: 0 });
     expect(xfadeAudioWeights(1)).toEqual({ out: 0, in: 1 });

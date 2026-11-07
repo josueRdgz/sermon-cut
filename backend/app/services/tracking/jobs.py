@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
@@ -10,6 +11,8 @@ from uuid import UUID
 from app.db.session import SessionLocal
 from app.schemas.tracking import TrackingComputeRequest, TrackingReport
 from app.services.tracking import service as tracking_service
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -53,6 +56,7 @@ class TrackingJobManager:
                 state.report = report
                 state.error = None
         except Exception as exc:  # noqa: BLE001
+            logger.exception("Tracking job failed for reel %s", reel_id)
             with self._lock:
                 state = self._jobs.setdefault(reel_id, TrackingJobState())
                 state.status = "failed"

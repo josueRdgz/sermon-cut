@@ -1,15 +1,27 @@
 export type AspectRatio = '9:16' | '1:1' | '16:9';
-export type TransitionType =
-  | 'hard_cut'
-  | 'short_crossfade'
-  | 'dip_to_black'
-  | 'fade'
-  | 'flash'
-  | 'light_change'
-  | 'wipe_down'
-  | 'wipe_left'
-  | 'slide_down'
-  | 'dissolve';
+export const XFADE_TRANSITION_TYPES = [
+  'short_crossfade',
+  'dip_to_black',
+  'fade',
+  'flash',
+  'light_change',
+  'dissolve',
+  'wipe_left',
+  'wipe_right',
+  'wipe_up',
+  'wipe_down',
+  'slide_left',
+  'slide_right',
+  'slide_up',
+  'slide_down',
+  'circle_open',
+  'circle_close',
+  'pixelize',
+  'radial',
+  'zoom_in',
+] as const;
+
+export type TransitionType = 'hard_cut' | (typeof XFADE_TRANSITION_TYPES)[number];
 export type SubtitleStyle =
   'reformed_sober' | 'modern_highlight' | 'clear_reading' | 'sermon_quote';
 export type SubtitleGranularity = 'auto' | 'segment' | 'phrase' | 'word';
@@ -56,6 +68,10 @@ export interface Reel {
   subtitle_margin_bottom: number;
   subtitle_bible_reference: string | null;
   subtitle_font_family?: string | null;
+  subtitle_bold?: boolean;
+  subtitle_italic?: boolean;
+  subtitle_underline?: boolean;
+  subtitle_strikethrough?: boolean;
   subtitle_x?: number | null;
   subtitle_y?: number | null;
   aspect_ratio: AspectRatio;
@@ -112,6 +128,10 @@ export interface ReelUpdatePayload {
   subtitle_margin_bottom?: number;
   subtitle_bible_reference?: string | null;
   subtitle_font_family?: string | null;
+  subtitle_bold?: boolean;
+  subtitle_italic?: boolean;
+  subtitle_underline?: boolean;
+  subtitle_strikethrough?: boolean;
   subtitle_x?: number | null;
   subtitle_y?: number | null;
   aspect_ratio?: AspectRatio;

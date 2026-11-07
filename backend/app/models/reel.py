@@ -38,10 +38,20 @@ class TransitionType(enum.StrEnum):
     fade = "fade"
     flash = "flash"
     light_change = "light_change"
+    dissolve = "dissolve"
     wipe_down = "wipe_down"
     wipe_left = "wipe_left"
+    wipe_right = "wipe_right"
+    wipe_up = "wipe_up"
     slide_down = "slide_down"
-    dissolve = "dissolve"
+    slide_left = "slide_left"
+    slide_right = "slide_right"
+    slide_up = "slide_up"
+    circle_open = "circle_open"
+    circle_close = "circle_close"
+    pixelize = "pixelize"
+    radial = "radial"
+    zoom_in = "zoom_in"
 
 
 class SubtitleStyle(enum.StrEnum):
@@ -133,7 +143,11 @@ class Reel(Base):
     subtitle_opacity: Mapped[float] = mapped_column(Float, nullable=False, default=1.0)
     subtitle_margin_bottom: Mapped[int] = mapped_column(Integer, nullable=False, default=120)
     subtitle_bible_reference: Mapped[str | None] = mapped_column(String(200), nullable=True)
-    subtitle_font_family: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    subtitle_font_family: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    subtitle_bold: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    subtitle_italic: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    subtitle_underline: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    subtitle_strikethrough: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     subtitle_x: Mapped[float | None] = mapped_column(Float, nullable=True)
     subtitle_y: Mapped[float | None] = mapped_column(Float, nullable=True)
 

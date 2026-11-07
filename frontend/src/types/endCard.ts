@@ -10,6 +10,7 @@ export interface EndCardLayoutInfo {
 }
 
 export interface EndCardSettings {
+  enabled: boolean;
   layout: EndCardLayout;
   duration_seconds: number;
   fade_in_ms: number;
@@ -26,7 +27,6 @@ export interface EndCardSettings {
   message_position: EndCardMessagePosition;
   /** False when the project inherits the global configuration. */
   is_project_override: boolean;
-  /** The end card cannot be turned off. */
   is_mandatory: boolean;
   min_duration_seconds: number;
   max_duration_seconds: number;
@@ -35,6 +35,7 @@ export interface EndCardSettings {
 export type EndCardSettingsPayload = Partial<
   Pick<
     EndCardSettings,
+    | 'enabled'
     | 'layout'
     | 'duration_seconds'
     | 'fade_in_ms'

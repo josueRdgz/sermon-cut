@@ -18,10 +18,20 @@ _XFADE_TRANSITIONS: frozenset[str] = frozenset(
         "fade",
         "flash",
         "light_change",
+        "dissolve",
         "wipe_down",
         "wipe_left",
+        "wipe_right",
+        "wipe_up",
         "slide_down",
-        "dissolve",
+        "slide_left",
+        "slide_right",
+        "slide_up",
+        "circle_open",
+        "circle_close",
+        "pixelize",
+        "radial",
+        "zoom_in",
     }
 )
 _MIN_XFADE_SLACK = 0.05

@@ -11,6 +11,8 @@ export interface AnalysisProviderStatus {
   gemini_configured: boolean;
   gemini_sdk_installed: boolean;
   gemini_model: string;
+  groq_configured?: boolean;
+  groq_model?: string;
   optional: boolean;
 }
 

@@ -29,7 +29,7 @@ function seg(id: string, duration: number, order: number): ReelSegment {
 }
 
 describe('reelTimelineStrip', () => {
-  it('builds proportional spans on the output clock', () => {
+  it('builds proportional spans on the sequential edit timeline', () => {
     const spans = buildClipSpans([seg('a', 2, 0), seg('b', 6, 1), seg('c', 2, 2)]);
     expect(spans).toHaveLength(3);
     expect(spans[0].leftRatio).toBeCloseTo(0);
@@ -79,7 +79,7 @@ describe('reelTimelineStrip', () => {
     expect(playheadPercent(100, 20)).toBe(100);
   });
 
-  it('overlaps clip spans when a crossfade shortens the output clock', () => {
+  it('keeps clips sequential when a crossfade shortens the output clock', () => {
     const spans = buildClipSpans([
       {
         ...seg('a', 5, 0),
@@ -94,7 +94,10 @@ describe('reelTimelineStrip', () => {
         source_end_seconds: 16,
       },
     ]);
-    expect(spans[1].leftRatio).toBeLessThan(spans[0].leftRatio + spans[0].widthRatio);
+    expect(spans[0].start).toBeCloseTo(0, 5);
+    expect(spans[0].duration).toBeCloseTo(5, 5);
+    expect(spans[1].start).toBeCloseTo(5, 5);
+    expect(spans[1].leftRatio).toBeCloseTo(spans[0].leftRatio + spans[0].widthRatio, 5);
   });
 });
 
@@ -116,6 +119,12 @@ describe('shiftCaptionWindow', () => {
     const next = shiftCaptionWindow(0, 3000, 1500, 'move', 30_000);
     expect(next.inMs).toBe(1500);
     expect(next.outMs).toBe(4500);
+  });
+
+  it('lets a caption that fills the timeline slide past the video', () => {
+    const next = shiftCaptionWindow(0, 30_000, 1500, 'move', 30_000);
+    expect(next.inMs).toBe(1500);
+    expect(next.outMs).toBe(31_500);
   });
 });
 

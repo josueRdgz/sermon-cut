@@ -6,28 +6,33 @@ export interface PreviewXfadeStyle {
   veilOpacity: number;
   veilColor: string;
   inClipPath: string;
+  outClipPath: string;
   inTransform: string;
+  inFilter: string;
 }
 
 function clamp01(value: number): number {
   return Math.max(0, Math.min(1, value));
 }
 
+const BASE: PreviewXfadeStyle = {
+  outOpacity: 1,
+  inOpacity: 1,
+  veilOpacity: 0,
+  veilColor: '#000',
+  inClipPath: 'inset(0)',
+  outClipPath: 'inset(0)',
+  inTransform: 'none',
+  inFilter: 'none',
+};
+
 /** CSS mix for live preview; names match FFmpeg xfade filters used on export. */
 export function previewXfadeStyle(type: TransitionType | string, progress: number): PreviewXfadeStyle {
   const p = clamp01(progress);
-  const base: PreviewXfadeStyle = {
-    outOpacity: 1,
-    inOpacity: 1,
-    veilOpacity: 0,
-    veilColor: '#000',
-    inClipPath: 'inset(0)',
-    inTransform: 'none',
-  };
   switch (type) {
     case 'dip_to_black':
       return {
-        ...base,
+        ...BASE,
         outOpacity: clamp01(1 - p * 2),
         inOpacity: clamp01(p * 2 - 1),
         veilOpacity: 1 - Math.abs(p * 2 - 1),
@@ -35,7 +40,7 @@ export function previewXfadeStyle(type: TransitionType | string, progress: numbe
       };
     case 'flash':
       return {
-        ...base,
+        ...BASE,
         outOpacity: clamp01(1 - p * 2),
         inOpacity: clamp01(p * 2 - 1),
         veilOpacity: 1 - Math.abs(p * 2 - 1),
@@ -43,24 +48,58 @@ export function previewXfadeStyle(type: TransitionType | string, progress: numbe
       };
     case 'light_change':
       return {
-        ...base,
+        ...BASE,
         outOpacity: 1 - p,
         inOpacity: p,
         veilOpacity: 1 - Math.abs(p * 2 - 1),
         veilColor: '#8a8a8a',
       };
     case 'wipe_down':
-      return { ...base, inClipPath: `inset(0 0 ${((1 - p) * 100).toFixed(3)}% 0)` };
+      return { ...BASE, inClipPath: `inset(0 0 ${((1 - p) * 100).toFixed(3)}% 0)` };
+    case 'wipe_up':
+      return { ...BASE, inClipPath: `inset(${((1 - p) * 100).toFixed(3)}% 0 0 0)` };
     case 'wipe_left':
-      return { ...base, inClipPath: `inset(0 ${((1 - p) * 100).toFixed(3)}% 0 0)` };
+      return { ...BASE, inClipPath: `inset(0 ${((1 - p) * 100).toFixed(3)}% 0 0)` };
+    case 'wipe_right':
+      return { ...BASE, inClipPath: `inset(0 0 0 ${((1 - p) * 100).toFixed(3)}%)` };
     case 'slide_down':
-      return { ...base, inTransform: `translateY(${((p - 1) * 100).toFixed(3)}%)` };
+      return { ...BASE, inTransform: `translateY(${((p - 1) * 100).toFixed(3)}%)` };
+    case 'slide_up':
+      return { ...BASE, inTransform: `translateY(${((1 - p) * 100).toFixed(3)}%)` };
+    case 'slide_left':
+      return { ...BASE, inTransform: `translateX(${((1 - p) * 100).toFixed(3)}%)` };
+    case 'slide_right':
+      return { ...BASE, inTransform: `translateX(${((p - 1) * 100).toFixed(3)}%)` };
+    case 'circle_open':
+    case 'radial':
+      return { ...BASE, inClipPath: `circle(${(p * 75).toFixed(2)}% at 50% 50%)` };
+    case 'circle_close':
+      return {
+        ...BASE,
+        outClipPath: `circle(${((1 - p) * 75).toFixed(2)}% at 50% 50%)`,
+        inOpacity: p,
+      };
+    case 'pixelize': {
+      const blur = (0.5 - Math.abs(p - 0.5)) * 10;
+      return {
+        ...BASE,
+        outOpacity: 1 - p,
+        inOpacity: p,
+        inFilter: `blur(${blur.toFixed(2)}px) contrast(1.15)`,
+      };
+    }
+    case 'zoom_in':
+      return {
+        ...BASE,
+        inOpacity: p,
+        inTransform: `scale(${(0.35 + p * 0.65).toFixed(3)})`,
+      };
     case 'short_crossfade':
     case 'fade':
     case 'dissolve':
-      return { ...base, outOpacity: 1 - p, inOpacity: p };
+      return { ...BASE, outOpacity: 1 - p, inOpacity: p };
     default:
-      return { ...base, outOpacity: 1 - p, inOpacity: p };
+      return { ...BASE, outOpacity: 1 - p, inOpacity: p };
   }
 }
 

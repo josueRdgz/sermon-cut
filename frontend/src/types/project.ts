@@ -60,6 +60,6 @@ export interface ProjectCreatePayload {
 }
 
 export interface ApiErrorBody {
-  detail: string;
+  detail?: unknown;
   code?: string;
 }

@@ -143,3 +143,6 @@ def test_transition_type_enum_includes_fade_flash() -> None:
     assert TransitionType.wipe_down.value == "wipe_down"
     assert TransitionType.slide_down.value == "slide_down"
     assert TransitionType.light_change.value == "light_change"
+    assert TransitionType.circle_open.value == "circle_open"
+    assert TransitionType.zoom_in.value == "zoom_in"
+    assert 14 <= len(TransitionType) <= 20

@@ -1,11 +1,20 @@
 import type { ReelSegment } from '../types/reel';
 import { buildOutputClock, outputTimeForSource } from './reelOutputClock';
 
+export interface PreviewXfadeSeek {
+  fromIndex: number;
+  toIndex: number;
+  progress: number;
+  duration: number;
+  incomingSourceTime: number;
+}
+
 export interface PreviewSeekTarget {
   outputTime: number;
   segmentIndex: number;
   sourceTime: number;
   inPad: boolean;
+  xfade?: PreviewXfadeSeek;
 }
 
 function segmentSignature(segments: ReelSegment[]): string {
@@ -60,10 +69,31 @@ export function resolvePreviewSeek(
       }
       continue;
     }
+    const contentEnd = placement.outputStart + placement.contentDuration;
+    const overlap = placement.overlapSeconds;
+    if (next && overlap > 0 && outputTime >= contentEnd - overlap && outputTime < contentEnd) {
+      const mixLocal = outputTime - (contentEnd - overlap);
+      const incomingSourceTime =
+        outputTime >= next.outputStart
+          ? next.sourceStart + (outputTime - next.outputStart)
+          : next.sourceStart;
+      return {
+        outputTime,
+        segmentIndex: index,
+        sourceTime: placement.sourceStart + (outputTime - placement.outputStart),
+        inPad: false,
+        xfade: {
+          fromIndex: index,
+          toIndex: index + 1,
+          progress: mixLocal / overlap,
+          duration: overlap,
+          incomingSourceTime,
+        },
+      };
+    }
     if (next && outputTime >= next.outputStart) {
       continue;
     }
-    const contentEnd = placement.outputStart + placement.contentDuration;
     if (next && outputTime >= contentEnd && outputTime < next.outputStart) {
       return {
         outputTime,

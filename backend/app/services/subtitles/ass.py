@@ -68,7 +68,8 @@ def build_style_line(
     return (
         f"Style: Default,{font.family_name},{options.font_size},"
         f"{primary},{secondary},{outline},{back},"
-        f"{-1 if template.bold else 0},{-1 if template.italic else 0},0,0,"
+        f"{-1 if options.bold else 0},{-1 if options.italic else 0},"
+        f"{-1 if options.underline else 0},{-1 if options.strikethrough else 0},"
         f"100,100,0,0,"
         f"{template.border_style},{template.outline},{template.shadow},"
         f"{alignment},{margin_l},{margin_r},{margin_v},1"

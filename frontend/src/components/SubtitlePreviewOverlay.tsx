@@ -1,6 +1,7 @@
 import { useCallback, useRef, type PointerEvent, type WheelEvent } from 'react';
 
-import type { SubtitlePosition, SubtitleStyle } from '../types/reel';
+import type { AspectRatio, SubtitlePosition, SubtitleStyle } from '../types/reel';
+import { previewFontSizeCqh } from '../utils/previewTypography';
 
 export interface SubtitleLayoutPatch {
   subtitle_margin_bottom?: number;
@@ -8,6 +9,7 @@ export interface SubtitleLayoutPatch {
   subtitle_position?: SubtitlePosition;
   subtitle_x?: number | null;
   subtitle_y?: number | null;
+  subtitle_opacity?: number;
 }
 
 interface SubtitlePreviewOverlayProps {
@@ -19,6 +21,11 @@ interface SubtitlePreviewOverlayProps {
   marginBottom: number;
   uppercase: boolean;
   fontFamily?: string | null;
+  bold?: boolean;
+  italic?: boolean;
+  underline?: boolean;
+  strikethrough?: boolean;
+  aspectRatio?: AspectRatio | null;
   posX?: number | null;
   posY?: number | null;
   interactive: boolean;
@@ -27,8 +34,8 @@ interface SubtitlePreviewOverlayProps {
 
 const MARGIN_MIN = 40;
 const MARGIN_MAX = 500;
-const FONT_MIN = 24;
-const FONT_MAX = 120;
+const FONT_MIN = 20;
+const FONT_MAX = 240;
 
 function marginToBottomPercent(marginBottom: number): number {
   const ratio = (marginBottom - MARGIN_MIN) / (MARGIN_MAX - MARGIN_MIN);
@@ -54,6 +61,11 @@ export function SubtitlePreviewOverlay({
   opacity,
   uppercase,
   fontFamily,
+  bold = false,
+  italic = false,
+  underline = false,
+  strikethrough = false,
+  aspectRatio,
   posX,
   posY,
   interactive,
@@ -143,8 +155,13 @@ export function SubtitlePreviewOverlay({
         top: `${origin.y * 100}%`,
         bottom: 'auto',
         transform: 'translate(-50%, -50%)',
-        fontSize: `min(6.5cqh, ${Math.max(10, fontSize * 0.022 * 100)}cqh)`,
+        fontSize: previewFontSizeCqh(fontSize, aspectRatio),
         fontFamily: fontFamily ? `"${fontFamily}", sans-serif` : undefined,
+        fontWeight: bold ? 700 : undefined,
+        fontStyle: italic ? 'italic' : undefined,
+        textDecoration: [underline ? 'underline' : '', strikethrough ? 'line-through' : '']
+          .filter(Boolean)
+          .join(' ') || undefined,
         opacity,
         paddingBottom: 0,
         margin: 0,
@@ -165,7 +182,12 @@ export function SubtitlePreviewOverlay({
       }
     >
       {interactive && <span className="subtitle-overlay__handle" aria-hidden />}
-      <span className="subtitle-overlay__text">{text}</span>
+      <span
+        className="subtitle-overlay__text"
+        style={fontFamily ? { fontFamily: `"${fontFamily}", sans-serif` } : undefined}
+      >
+        {text}
+      </span>
     </div>
   );
 }

@@ -31,6 +31,10 @@ export function SermonRangePanel({ project, onUpdated }: Props) {
     setEnd(project.sermon_end_seconds ?? duration);
   }, [duration, project.sermon_end_seconds, project.sermon_start_seconds]);
 
+  useEffect(() => {
+    setScope(project.source_kind === 'full_service' ? 'full' : 'sermon');
+  }, [project.source_kind]);
+
   if (!project.has_video) {
     return (
       <section className="card">
@@ -41,6 +45,7 @@ export function SermonRangePanel({ project, onUpdated }: Props) {
 
   const windowDuration = Math.max(0, end - start);
   const alreadySermon = project.source_kind === 'sermon_only' && project.sermon_range_confirmed;
+  const showFullOption = !alreadySermon;
 
   function clampRange(nextStart: number, nextEnd: number) {
     const max = duration || nextEnd;
@@ -108,7 +113,9 @@ export function SermonRangePanel({ project, onUpdated }: Props) {
     setMessage(null);
     try {
       const nextKind = scope === 'full' ? 'full_service' : 'sermon_only';
-      if (project.source_kind !== nextKind) {
+      if (scope === 'sermon' && project.source_kind !== 'sermon_only') {
+        await updateProject(project.id, { source_kind: 'sermon_only' });
+      } else if (scope === 'full' && project.source_kind !== nextKind) {
         await updateProject(project.id, { source_kind: nextKind });
       }
       const rangeStart = scope === 'full' ? 0 : start;
@@ -150,6 +157,7 @@ export function SermonRangePanel({ project, onUpdated }: Props) {
               <small>Marca inicio y final; el resto del culto se descarta.</small>
             </span>
           </label>
+          {showFullOption ? (
           <label className="source-toggle__option">
             <input
               type="radio"
@@ -163,6 +171,7 @@ export function SermonRangePanel({ project, onUpdated }: Props) {
               <small>El análisis y la edición usan todo el archivo.</small>
             </span>
           </label>
+          ) : null}
         </div>
       </fieldset>
       <p className="muted">

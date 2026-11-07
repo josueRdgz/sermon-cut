@@ -15,11 +15,13 @@ from app.schemas.settings import (
     AppSettingsUpdate,
 )
 from app.services.ffmpeg import get_ffmpeg_status, get_ffprobe_status
-from app.services.system_stats import gemini_status, whisper_status
+from app.services.system_stats import gemini_status, groq_status, whisper_status
 
 _EDITABLE_KEYS = (
     "SERMON_CUT_GEMINI_API_KEY",
     "SERMON_CUT_GEMINI_MODEL",
+    "SERMON_CUT_GROQ_API_KEY",
+    "SERMON_CUT_GROQ_MODEL",
     "SERMON_CUT_AI_PROVIDER",
     "SERMON_CUT_WHISPER_MODEL",
 )
@@ -90,6 +92,7 @@ def to_response(settings: Settings | None = None) -> AppSettingsResponse:
     ffprobe = get_ffprobe_status()
     whisper = whisper_status()
     gemini = gemini_status(current)
+    groq = groq_status(current)
     return AppSettingsResponse(
         whisper_model=current.whisper_model,
         whisper_models=list(WHISPER_MODELS),
@@ -98,10 +101,14 @@ def to_response(settings: Settings | None = None) -> AppSettingsResponse:
         gemini_model=current.gemini_model,
         gemini_configured=bool(current.gemini_api_key) and current.ai_provider != "mock",
         gemini_api_key_masked=mask_secret(current.gemini_api_key),
+        groq_model=current.groq_model,
+        groq_configured=bool(current.groq_api_key) and current.ai_provider != "mock",
+        groq_api_key_masked=mask_secret(current.groq_api_key),
         ffmpeg=ToolInfo(available=ffmpeg.available, version=ffmpeg.version),
         ffprobe=ToolInfo(available=ffprobe.available, version=ffprobe.version),
         whisper=ToolInfo(available=whisper.available, version=whisper.version),
         gemini=ToolInfo(available=gemini.available, version=gemini.version),
+        groq=ToolInfo(available=groq.available, version=groq.version),
     )
 
 
@@ -118,6 +125,16 @@ def update_settings(payload: AppSettingsUpdate) -> AppSettingsResponse:
 
     if "gemini_model" in data and data["gemini_model"]:
         updates["SERMON_CUT_GEMINI_MODEL"] = data["gemini_model"].strip()
+
+    if data.get("clear_groq_api_key"):
+        updates["SERMON_CUT_GROQ_API_KEY"] = None
+    elif "groq_api_key" in data and data["groq_api_key"] is not None:
+        groq_key = data["groq_api_key"].strip()
+        if groq_key:
+            updates["SERMON_CUT_GROQ_API_KEY"] = groq_key
+
+    if "groq_model" in data and data["groq_model"]:
+        updates["SERMON_CUT_GROQ_MODEL"] = data["groq_model"].strip()
 
     if "ai_provider" in data and data["ai_provider"] is not None:
         provider = data["ai_provider"].strip().lower()

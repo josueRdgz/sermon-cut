@@ -1,32 +1,17 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Clapperboard, FileText, FolderOpen, Mic, Sparkles } from 'lucide-react';
-import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
+import { Clapperboard, FileText, Mic, Sparkles } from 'lucide-react';
+import { Link, useParams, useSearchParams } from 'react-router-dom';
 
-import {
-  deleteProject,
-  deleteProjectVideo,
-  getProject,
-  projectCoverUrl,
-  uploadProjectCover,
-} from '../api/projects';
+import { getProject } from '../api/projects';
 import { AnalysisPanel } from '../components/AnalysisPanel';
-import { ConfirmDialog } from '../components/ConfirmDialog';
 import { AppChrome } from '../components/layout/AppChrome';
 import { ReelEditor } from '../components/ReelEditor';
 import { SermonRangePanel } from '../components/SermonRangePanel';
-import { StatusRow } from '../components/StatusRow';
 import { TranscriptEditor } from '../components/TranscriptEditor';
 import { useProjects } from '../hooks/useProjects';
 import type { Project } from '../types/project';
-import { formatDate, formatDuration, statusLabel } from '../utils/format';
 
 const WORKSPACE_SECTIONS = [
-  {
-    id: 'project',
-    label: 'Proyecto',
-    description: 'Archivo y datos',
-    icon: FolderOpen,
-  },
   {
     id: 'sermon',
     label: 'Predicación',
@@ -61,27 +46,18 @@ function isWorkspaceSection(value: string | null): value is WorkspaceSection {
 
 export function ProjectDetailPage() {
   const { projectId } = useParams<{ projectId: string }>();
-  const navigate = useNavigate();
   const { projects } = useProjects();
   const [searchParams, setSearchParams] = useSearchParams();
   const workspaceRef = useRef<HTMLDivElement>(null);
   const [project, setProject] = useState<Project | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [confirmOpen, setConfirmOpen] = useState(false);
-  const [confirmVideoDelete, setConfirmVideoDelete] = useState(false);
-  const [deleting, setDeleting] = useState(false);
-  const [deletingVideo, setDeletingVideo] = useState(false);
   const [transcriptRevision, setTranscriptRevision] = useState(0);
   const [reelRevision, setReelRevision] = useState(0);
-  const [coverBusy, setCoverBusy] = useState(false);
-  const [coverProgress, setCoverProgress] = useState(0);
-  const [coverError, setCoverError] = useState<string | null>(null);
-  const coverInputRef = useRef<HTMLInputElement>(null);
   const requestedSection = searchParams.get('section');
   const requestedWorkspaceSection: WorkspaceSection = isWorkspaceSection(requestedSection)
     ? requestedSection
-    : 'project';
+    : 'sermon';
   const activeSection: WorkspaceSection = requestedWorkspaceSection;
   const visibleSections = WORKSPACE_SECTIONS;
 
@@ -128,55 +104,8 @@ export function ProjectDetailPage() {
     };
   }, [projectId]);
 
-  async function handleDelete() {
-    if (!project) return;
-    setDeleting(true);
-    try {
-      await deleteProject(project.id);
-      navigate('/projects');
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'No se pudo eliminar');
-      setConfirmOpen(false);
-    } finally {
-      setDeleting(false);
-    }
-  }
-
-  async function handleDeleteVideo() {
-    if (!project) return;
-    setDeletingVideo(true);
-    setError(null);
-    try {
-      const updated = await deleteProjectVideo(project.id);
-      setProject(updated);
-      setConfirmVideoDelete(false);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'No se pudo eliminar el video');
-    } finally {
-      setDeletingVideo(false);
-    }
-  }
-
   function handleCoverUpdated(updated: Project) {
     setProject(updated);
-    setCoverError(null);
-  }
-
-  async function handleCoverFile(file: File | null) {
-    if (!project || !file) return;
-    setCoverBusy(true);
-    setCoverProgress(0);
-    setCoverError(null);
-    try {
-      const updated = await uploadProjectCover(project.id, file, setCoverProgress);
-      setProject(updated);
-    } catch (err) {
-      setCoverError(err instanceof Error ? err.message : 'No se pudo subir la portada');
-    } finally {
-      setCoverBusy(false);
-      setCoverProgress(0);
-      if (coverInputRef.current) coverInputRef.current.value = '';
-    }
   }
 
   if (loading) {
@@ -239,104 +168,6 @@ export function ProjectDetailPage() {
       )}
 
       <div
-        id="workspace-panel-project"
-        role="tabpanel"
-        aria-labelledby="workspace-tab-project"
-        hidden={activeSection !== 'project'}
-      >
-        <section className="card">
-          <h2>Detalles</h2>
-          <StatusRow
-            label="Estado"
-            value={statusLabel(project.status)}
-            ok={project.status !== 'failed'}
-          />
-          <StatusRow
-            label="Grabación"
-            value={project.source_kind === 'full_service' ? 'Culto completo' : 'Solo el sermón'}
-          />
-          <StatusRow
-            label="Predicación"
-            value={
-              project.sermon_range_confirmed
-                ? 'Intervalo confirmado'
-                : project.source_kind === 'full_service'
-                  ? 'Pendiente de marcar'
-                  : 'Todo el archivo'
-            }
-          />
-          <StatusRow label="Duración" value={formatDuration(project.duration_seconds)} />
-          <StatusRow label="Resolución" value={project.resolution ?? '—'} />
-          <StatusRow label="FPS" value={project.fps != null ? String(project.fps) : '—'} />
-          <StatusRow label="Códec video" value={project.video_codec ?? '—'} />
-          <StatusRow label="Códec audio" value={project.audio_codec ?? '—'} />
-          <StatusRow
-            label="Video"
-            value={project.has_video ? (project.video_filename ?? 'Sí') : 'No'}
-          />
-          <StatusRow
-            label="Portada"
-            value={project.has_cover ? (project.cover_filename ?? 'Sí') : 'No'}
-          />
-          <div className="project-cover-actions">
-            {project.has_cover && (
-              <img
-                className="project-cover-actions__thumb"
-                src={projectCoverUrl(project.id, project.updated_at)}
-                alt="Portada del proyecto"
-              />
-            )}
-            <input
-              ref={coverInputRef}
-              type="file"
-              accept=".jpg,.jpeg,.png,.webp,image/jpeg,image/png,image/webp"
-              hidden
-              onChange={(event) => void handleCoverFile(event.target.files?.[0] ?? null)}
-            />
-            <button
-              type="button"
-              className="button button--inline"
-              disabled={coverBusy}
-              onClick={() => coverInputRef.current?.click()}
-            >
-              {coverBusy
-                ? `Subiendo… ${coverProgress}%`
-                : project.has_cover
-                  ? 'Cambiar portada'
-                  : 'Subir portada'}
-            </button>
-            {coverError && <p className="error">{coverError}</p>}
-          </div>
-          <StatusRow label="Referencia" value={project.bible_reference ?? '—'} />
-          <StatusRow label="Canal YouTube" value={project.youtube_channel} />
-          <StatusRow label="Creado" value={formatDate(project.created_at)} />
-          <StatusRow label="Modificado" value={formatDate(project.updated_at)} />
-          {project.full_sermon_url && (
-            <StatusRow label="Sermón completo" value={project.full_sermon_url} />
-          )}
-          {project.error_message && (
-            <StatusRow label="Error" value={project.error_message} ok={false} />
-          )}
-          {project.has_video && (
-            <button
-              type="button"
-              className="button button--danger button--inline"
-              onClick={() => setConfirmVideoDelete(true)}
-            >
-              Eliminar video original
-            </button>
-          )}
-        </section>
-        <button
-          type="button"
-          className="button button--danger"
-          onClick={() => setConfirmOpen(true)}
-        >
-          Eliminar proyecto
-        </button>
-      </div>
-
-      <div
         id="workspace-panel-sermon"
         role="tabpanel"
         aria-labelledby="workspace-tab-sermon"
@@ -395,27 +226,6 @@ export function ProjectDetailPage() {
           onCoverUpdated={handleCoverUpdated}
         />
       </div>
-
-      {confirmOpen && (
-        <ConfirmDialog
-          title="Eliminar proyecto"
-          message={`¿Seguro que quieres eliminar «${project.title}»? Esta acción no se puede deshacer.`}
-          busy={deleting}
-          onConfirm={() => void handleDelete()}
-          onCancel={() => !deleting && setConfirmOpen(false)}
-        />
-      )}
-
-      {confirmVideoDelete && (
-        <ConfirmDialog
-          title="Eliminar video original"
-          message="Se borrará el archivo original para liberar espacio. La transcripción, los cortes, la portada y los Reels ya exportados se conservarán."
-          confirmLabel="Eliminar video"
-          busy={deletingVideo}
-          onConfirm={() => void handleDeleteVideo()}
-          onCancel={() => !deletingVideo && setConfirmVideoDelete(false)}
-        />
-      )}
     </div>
     </AppChrome>
   );

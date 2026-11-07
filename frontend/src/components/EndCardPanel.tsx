@@ -154,9 +154,6 @@ export function EndCardPanel({
   if (!settings) {
     return (
       <div className="end-card-panel">
-        <div className="reel-editor__section-header">
-          <h4>Pantalla final</h4>
-        </div>
         {error ? <p className="error">{error}</p> : <p className="muted">Cargando…</p>}
       </div>
     );
@@ -167,10 +164,27 @@ export function EndCardPanel({
   return (
     <div className="end-card-panel">
       <div className="reel-editor__section-header">
-        <h4>Pantalla final</h4>
+        <label className="field field--inline field--checkbox">
+          <input
+            type="checkbox"
+            checked={settings.enabled}
+            disabled={busy || coverBusy}
+            onChange={(event) =>
+              void patchSettings(
+                { enabled: event.target.checked },
+                'No se pudo guardar la pantalla final',
+              )
+            }
+          />
+          <span>Incluir pantalla final</span>
+        </label>
       </div>
 
-      {!hasCover && (
+      {!settings.enabled && (
+        <p className="muted">El export terminará en el último corte, sin tarjeta de cierre.</p>
+      )}
+
+      {settings.enabled && !hasCover && (
         <p className="warning">Sube una imagen para la pantalla final.</p>
       )}
 
@@ -183,7 +197,10 @@ export function EndCardPanel({
           />
         </div>
 
-        <div className="end-card-panel__controls">
+        <div
+          className="end-card-panel__controls"
+          style={settings.enabled ? undefined : { opacity: 0.55 }}
+        >
           <div className="end-card-panel__cover">
             <input
               ref={fileInputRef}

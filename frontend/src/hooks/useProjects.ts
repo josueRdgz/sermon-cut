@@ -8,6 +8,7 @@ interface UseProjectsResult {
   loading: boolean;
   error: string | null;
   refresh: () => Promise<void>;
+  replace: (project: Project) => void;
   remove: (id: string) => Promise<void>;
 }
 
@@ -33,10 +34,16 @@ export function useProjects(): UseProjectsResult {
     void refresh();
   }, [refresh]);
 
+  const replace = useCallback((project: Project) => {
+    setProjects((current) =>
+      current.map((item) => (item.id === project.id ? project : item)),
+    );
+  }, []);
+
   const remove = useCallback(async (id: string) => {
     await deleteProject(id);
     setProjects((current) => current.filter((project) => project.id !== id));
   }, []);
 
-  return { projects, loading, error, refresh, remove };
+  return { projects, loading, error, refresh, replace, remove };
 }

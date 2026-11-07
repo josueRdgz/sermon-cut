@@ -81,7 +81,8 @@ def extract_still(
         "-y",
         str(output),
     ]
-    acquired = _extract_lock.acquire(timeout=None if wait else 0.05)
+    # Python 3.13+ rejects timeout=None; blocking acquire() waits forever.
+    acquired = _extract_lock.acquire() if wait else _extract_lock.acquire(timeout=0.05)
     if not acquired:
         raise RuntimeError("preview still busy")
     try:

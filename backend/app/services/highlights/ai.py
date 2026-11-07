@@ -155,19 +155,22 @@ class HighlightResult:
 
 
 class HighlightProvider:
-    """Gemini-only provider: production analysis never fabricates offline output."""
+    """Gemini with Groq fallback; production analysis never fabricates offline output."""
 
     name = "gemini"
 
     def __init__(self, settings: Settings | None = None) -> None:
         self.settings = settings or get_settings()
         self.api_key = (self.settings.gemini_api_key or "").strip()
-        if not self.api_key:
+        self.groq_key = (self.settings.groq_api_key or "").strip()
+        if not self.api_key and not self.groq_key:
             raise ValidationAppError(
-                "Configure SERMON_CUT_GEMINI_API_KEY para analizar Video Highlights.",
+                "Configure Gemini o Groq en Ajustes para analizar Video Highlights.",
                 code="highlight_ai_not_configured",
             )
         self._client: Any | None = None
+        if not self.api_key:
+            self.name = "groq"
 
     def analyze(
         self,
@@ -205,7 +208,11 @@ class HighlightProvider:
             target_duration_seconds=target_duration_seconds,
             editorial_style=editorial_style,
         )
-        response, usage = self._generate(prompt)
+        response, usage = self._generate(
+            prompt,
+            editorial_style=editorial_style,
+            editorial_context=editorial_context,
+        )
         validated = validate_highlight_response(
             response,
             transcript=eligible,
@@ -232,7 +239,35 @@ class HighlightProvider:
         )
         return self._client
 
-    def _generate(self, prompt: str) -> tuple[HighlightAIResponse, HighlightUsage]:
+    def _generate(
+        self,
+        prompt: str,
+        *,
+        editorial_style: str,
+        editorial_context: str | None,
+    ) -> tuple[HighlightAIResponse, HighlightUsage]:
+        system = with_house_style(
+            _BASE_SYSTEM,
+            editorial_style=editorial_context or editorial_style,
+        )
+        if self.api_key:
+            try:
+                return self._generate_gemini(prompt, system)
+            except Exception as exc:  # noqa: BLE001
+                if self.groq_key and _retryable(exc):
+                    logger.warning("Gemini no respondió en Highlights (%s); se usa Groq.", exc)
+                    self.name = "groq"
+                    return self._generate_groq(prompt, system)
+                raise AppError(
+                    "Gemini no respondió. Configura Groq en Ajustes para continuar.",
+                    code="highlight_ai_failed",
+                    status_code=502,
+                ) from exc
+        return self._generate_groq(prompt, system)
+
+    def _generate_gemini(
+        self, prompt: str, system: str
+    ) -> tuple[HighlightAIResponse, HighlightUsage]:
         last_error: Exception | None = None
         attempts = max(1, min(self.settings.gemini_max_attempts, 3))
         for attempt in range(attempts):
@@ -241,7 +276,7 @@ class HighlightProvider:
                     model=self.settings.gemini_model,
                     contents=prompt,
                     config={
-                        "system_instruction": _SYSTEM_PROMPT,
+                        "system_instruction": system,
                         "response_mime_type": "application/json",
                         "response_json_schema": serving_json_schema(HighlightAIResponse),
                         "temperature": 0.28,
@@ -268,10 +303,34 @@ class HighlightProvider:
                     break
                 time.sleep((1.0, 2.0, 4.0)[attempt])
         raise AppError(
-            f"No se pudo completar el análisis de Highlights: {last_error}",
+            "Gemini no respondió. Configura Groq en Ajustes para continuar.",
             code="highlight_ai_failed",
             status_code=502,
         ) from last_error
+
+    def _generate_groq(
+        self, prompt: str, system: str
+    ) -> tuple[HighlightAIResponse, HighlightUsage]:
+        from app.services.ai.groq_client import chat_json
+
+        text, usage = chat_json(
+            api_key=self.groq_key,
+            model=self.settings.groq_model,
+            system=system,
+            user=prompt,
+            timeout_seconds=self.settings.groq_timeout_seconds,
+            max_attempts=self.settings.groq_max_attempts,
+            temperature=0.28,
+        )
+        try:
+            parsed = HighlightAIResponse.model_validate_json(text)
+        except Exception:
+            parsed = HighlightAIResponse.model_validate(json.loads(text))
+        return parsed, HighlightUsage(
+            prompt_tokens=usage.prompt_tokens if usage else None,
+            completion_tokens=usage.completion_tokens if usage else None,
+            total_tokens=usage.total_tokens if usage else None,
+        )
 
 
 def validate_highlight_response(
@@ -470,7 +529,7 @@ _STYLE_GUIDANCE = {
 }
 
 
-_SYSTEM_PROMPT = with_house_style("""\
+_BASE_SYSTEM = """\
 Actúa como editor senior de contenido cristiano para YouTube. Tu trabajo no es \
 resumir el sermón entero: es extraer las mejores frases, la tesis y las \
 aplicaciones que un oyente citaría o pondría en práctica. Sé fiel al mensaje \
@@ -478,7 +537,9 @@ original y a la doctrina; no inventes palabras, referencias bíblicas, temas o \
 promesas. Devuelve únicamente JSON válido conforme al esquema estricto. Los \
 tiempos siempre pertenecen al video fuente y los fragmentos deben conservar \
 orden cronológico salvo una razón editorial indispensable que no cambie el sentido.
-""")
+"""
+
+_SYSTEM_PROMPT = with_house_style(_BASE_SYSTEM)
 
 
 def _retryable(exc: Exception) -> bool:

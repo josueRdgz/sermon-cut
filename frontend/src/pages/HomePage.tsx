@@ -17,7 +17,7 @@ const RECENT_LIMIT = 8;
 
 export function HomePage() {
   const navigate = useNavigate();
-  const { projects, loading, error } = useProjects();
+  const { projects, loading, error, replace } = useProjects();
 
   const recentProjects = useMemo(
     () =>
@@ -122,7 +122,9 @@ export function HomePage() {
           />
         ) : null}
 
-        {recentProjects.length > 0 ? <ProjectGrid projects={recentProjects} /> : null}
+        {recentProjects.length > 0 ? (
+          <ProjectGrid projects={recentProjects} onUpdated={replace} />
+        ) : null}
       </section>
     </AppChrome>
   );

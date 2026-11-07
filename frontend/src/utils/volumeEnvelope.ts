@@ -75,6 +75,17 @@ export function removeKeyframe(
   return next.length > 0 ? next : [{ t_ms: 0, gain: 1 }];
 }
 
+/** Raise or lower every point by the same amount. */
+export function shiftEnvelopeGain(
+  points: VolumeKeyframe[] | null | undefined,
+  delta: number,
+): VolumeKeyframe[] {
+  return normalizeKeyframes(points).map((point) => ({
+    ...point,
+    gain: Math.max(0, Math.min(1, point.gain + delta)),
+  }));
+}
+
 /** Scale the whole envelope so the gain at `tMs` becomes `nextGain`. */
 export function scaleEnvelopeToGain(
   points: VolumeKeyframe[] | null | undefined,
@@ -114,6 +125,24 @@ export function upsertKeyframe(
   );
 }
 
+/** Vertical inset so handles stay inside the waveform; the curve still starts at x=0. */
+const ENVELOPE_Y0 = 3.6;
+const ENVELOPE_Y_SPAN = 28.8;
+
+export function envelopeDotStyle(
+  tMs: number,
+  durationMs: number,
+  gain: number,
+): { left: string; top: string } {
+  const dur = Math.max(1, durationMs);
+  const x = Math.max(0, Math.min(1, tMs / dur)) * 100;
+  const y = 1 - Math.max(0, Math.min(1, gain));
+  return {
+    left: `clamp(4px, ${x.toFixed(3)}%, calc(100% - 4px))`,
+    top: `${((ENVELOPE_Y0 + y * ENVELOPE_Y_SPAN) / 36) * 100}%`,
+  };
+}
+
 export function envelopePolyline(
   points: VolumeKeyframe[] | null | undefined,
   durationMs: number,
@@ -124,7 +153,7 @@ export function envelopePolyline(
   for (let index = 0; index <= samples; index += 1) {
     const tMs = (index / samples) * dur;
     const x = (tMs / dur) * 100;
-    const y = (1 - interpolateGain(points, tMs)) * 36;
+    const y = ENVELOPE_Y0 + (1 - interpolateGain(points, tMs)) * ENVELOPE_Y_SPAN;
     coords.push(`${x.toFixed(2)},${y.toFixed(2)}`);
   }
   return coords.join(' ');

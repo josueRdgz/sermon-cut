@@ -41,7 +41,8 @@ def test_defaults_are_five_seconds_with_the_documented_fades(client: TestClient)
     assert body["duration_seconds"] == 5.0
     assert body["fade_in_ms"] == 300
     assert body["audio_fade_out_ms"] == 500
-    assert body["is_mandatory"] is True
+    assert body["is_mandatory"] is False
+    assert body["enabled"] is True
     assert body["min_duration_seconds"] == 3.0
     assert body["max_duration_seconds"] == 8.0
 

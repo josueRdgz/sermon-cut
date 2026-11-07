@@ -26,7 +26,7 @@ def test_health_returns_ok() -> None:
 def test_health_reports_tools_shape() -> None:
     body = client.get("/api/health").json()
 
-    for tool in ("ffmpeg", "ffprobe", "whisper", "gemini"):
+    for tool in ("ffmpeg", "ffprobe", "whisper", "gemini", "groq"):
         assert tool in body
         assert isinstance(body[tool]["available"], bool)
         # version is either a string or null.

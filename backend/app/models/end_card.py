@@ -1,8 +1,7 @@
 """ORM model for end card settings (global default + per-project override).
 
-Every Reel render ends with a mandatory end card. A single row with
-``project_id IS NULL`` holds the global defaults; a row with a ``project_id``
-overrides them for that project.
+A single row with ``project_id IS NULL`` holds the global defaults; a row with
+a ``project_id`` overrides them for that project. The card can be turned off.
 """
 
 from __future__ import annotations
@@ -56,7 +55,7 @@ class EndCardMessagePosition(enum.StrEnum):
 
 
 class EndCardSettings(Base):
-    """Configuration for the mandatory end card.
+    """Configuration for the optional end card.
 
     ``project_id`` is ``NULL`` for the global default row.
     """
@@ -73,6 +72,7 @@ class EndCardSettings(Base):
         index=True,
     )
 
+    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     layout: Mapped[EndCardLayout] = mapped_column(
         Enum(EndCardLayout, name="end_card_layout", native_enum=False, length=32),
         nullable=False,

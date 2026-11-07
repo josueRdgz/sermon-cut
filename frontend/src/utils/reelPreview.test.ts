@@ -63,24 +63,31 @@ describe('resolvePreviewSeek', () => {
     expect(resolvePreviewSeek([], 1)).toBeNull();
   });
 
-  it('respects crossfade overlap on the output clock', () => {
+  it('keeps both clips during the crossfade overlap', () => {
     const xfade = [
       segment('a', 0, 0, 5, 'short_crossfade', 500),
       segment('b', 1, 10, 16, 'hard_cut', 0),
     ];
-    // Total = 5 + 6 - 0.5 = 10.5; B starts at 4.5
     expect(resolvePreviewSeek(xfade, 4.4)).toEqual({
       outputTime: 4.4,
       segmentIndex: 0,
       sourceTime: 4.4,
       inPad: false,
     });
-    expect(resolvePreviewSeek(xfade, 4.5)).toEqual({
+    expect(resolvePreviewSeek(xfade, 4.5)).toMatchObject({
       outputTime: 4.5,
-      segmentIndex: 1,
-      sourceTime: 10,
+      segmentIndex: 0,
+      sourceTime: 4.5,
       inPad: false,
+      xfade: {
+        fromIndex: 0,
+        toIndex: 1,
+        progress: 0,
+        duration: 0.5,
+        incomingSourceTime: 10,
+      },
     });
+    expect(resolvePreviewSeek(xfade, 4.75)?.xfade?.progress).toBeCloseTo(0.5, 5);
     expect(resolvePreviewSeek(xfade, 5)?.segmentIndex).toBe(1);
     expect(resolvePreviewSeek(xfade, 5)?.sourceTime).toBeCloseTo(10.5, 5);
   });

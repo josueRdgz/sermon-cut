@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { Scissors } from 'lucide-react';
 
 import {
   acceptCutSuggestion,
@@ -23,7 +24,7 @@ interface CutSuggestionsPanelProps {
 }
 
 const INTENSITY_OPTIONS: { value: CutIntensity; label: string }[] = [
-  { value: 'conservative', label: 'Conservadora (sermones)' },
+  { value: 'conservative', label: 'Conservadora' },
   { value: 'balanced', label: 'Equilibrada' },
   { value: 'aggressive', label: 'Agresiva' },
 ];
@@ -130,18 +131,16 @@ export function CutSuggestionsPanel({
   return (
     <div className="cut-suggestions">
       <div className="reel-editor__section-header">
-        <h4>Cortes técnicos (opcionales)</h4>
+        <h4>Cortes técnicos</h4>
         {report && (
           <span className="badge badge--cut">{report.pending_count} pendientes</span>
         )}
       </div>
-      <p className="muted">
-        Detecta silencios, pausas y posibles muletillas. Nada se aplica solo: acepta o rechaza
-        cada sugerencia. Por defecto usa intensidad conservadora para no forzar la respiración
-        del predicador.
+      <p className="muted cut-suggestions__hint">
+        Detecta silencios, pausas y muletillas. Nada se aplica solo.
       </p>
-      <div className="transcript-toolbar">
-        <label className="field field--inline">
+      <div className="cut-suggestions__toolbar">
+        <label className="field field--inline cut-suggestions__intensity">
           <span>Intensidad</span>
           <select
             value={intensity}
@@ -155,11 +154,16 @@ export function CutSuggestionsPanel({
             ))}
           </select>
         </label>
-        <button type="button" onClick={() => void handleGenerate()} disabled={busy}>
+        <button
+          type="button"
+          className="button button--secondary cut-suggestions__analyze"
+          onClick={() => void handleGenerate()}
+          disabled={busy}
+        >
+          <Scissors size={14} strokeWidth={2.1} aria-hidden />
           {busy ? 'Analizando…' : 'Analizar cortes'}
         </button>
       </div>
-      {report && <p className="muted">{report.summary}</p>}
       {pending.length > 0 && (
         <ul className="cut-suggestions__list">
           {pending.map((suggestion) => (
@@ -190,12 +194,17 @@ export function CutSuggestionsPanel({
                 </p>
               )}
               <div className="button-stack">
-                <button type="button" onClick={() => void handleAccept(suggestion)} disabled={busy}>
+                <button
+                  type="button"
+                  className="button button--secondary button--inline"
+                  onClick={() => void handleAccept(suggestion)}
+                  disabled={busy}
+                >
                   Aceptar
                 </button>
                 <button
                   type="button"
-                  className="button--ghost"
+                  className="button button--secondary button--inline"
                   onClick={() => void handleReject(suggestion)}
                   disabled={busy}
                 >

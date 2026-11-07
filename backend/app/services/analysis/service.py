@@ -468,8 +468,7 @@ def replace_candidate(
         max_segments_per_clip=preferences.max_segments_per_reel,
         merge_gap_seconds=settings.ai_merge_gap_seconds,
         min_clip_seconds=preferences.min_duration_seconds,
-        max_clip_seconds=preferences.max_duration_seconds
-        + max(0.0, settings.ai_duration_slack_seconds),
+        max_clip_seconds=preferences.max_duration_seconds,
     )
     if not report.accepted:
         raise ValidationAppError(

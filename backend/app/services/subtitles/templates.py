@@ -36,6 +36,10 @@ class SubtitleOptions:
     margin_bottom: int = 120
     bible_reference: str | None = None
     font_family: str | None = None
+    bold: bool = False
+    italic: bool = False
+    underline: bool = False
+    strikethrough: bool = False
     pos_x: float | None = None
     pos_y: float | None = None
 
@@ -214,6 +218,10 @@ def options_from_reel(
     margin_bottom: int | None = None,
     bible_reference: str | None = None,
     font_family: str | None = None,
+    bold: bool | None = None,
+    italic: bool | None = None,
+    underline: bool | None = None,
+    strikethrough: bool | None = None,
     pos_x: float | None = None,
     pos_y: float | None = None,
 ) -> SubtitleOptions:
@@ -233,6 +241,10 @@ def options_from_reel(
         ),
         bible_reference=bible_reference,
         font_family=font_family,
+        bold=template.bold if bold is None else bold,
+        italic=template.italic if italic is None else italic,
+        underline=bool(underline),
+        strikethrough=bool(strikethrough),
         pos_x=pos_x,
         pos_y=pos_y,
     )

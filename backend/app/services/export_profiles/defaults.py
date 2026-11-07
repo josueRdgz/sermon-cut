@@ -35,14 +35,14 @@ BUILTIN_PROFILES: tuple[dict[str, Any], ...] = (
         "slug": "youtube-short",
         "name": "YouTube Shorts",
         "description": (
-            "1080×1920 · 9:16 · H.264 + AAC. Duración máxima 60 s "
-            "(configurable hasta 180). FPS del original o 30."
+            "1080×1920 · 9:16 · H.264 + AAC. Duración máxima 180 s "
+            "(límite de YouTube Shorts, pantalla final incluida). FPS del original o 30."
         ),
         "platform": ExportPlatform.youtube_shorts,
         "width": 1080,
         "height": 1920,
         "aspect_ratio": "9:16",
-        "max_duration_seconds": 60,
+        "max_duration_seconds": 180,
         "fps_mode": FpsMode.original,
         "safe_margin_x": 0.08,
         "safe_top": 0.10,

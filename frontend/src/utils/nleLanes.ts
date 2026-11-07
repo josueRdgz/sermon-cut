@@ -90,7 +90,10 @@ export function saveLaneLayout(reelId: string, layout: NleLaneLayout): void {
 export function laneForCaption(layout: NleLaneLayout, segmentId: string): number {
   const assigned = layout.captionLanes[segmentId];
   if (typeof assigned === 'number') return clampLane(assigned, layout.laneCount);
-  return clampLane(layout.videoLane + 1, layout.laneCount);
+  const video = clampLane(layout.videoLane, layout.laneCount);
+  if (video + 1 < layout.laneCount) return video + 1;
+  if (video > 0) return video - 1;
+  return 0;
 }
 
 export function laneForSegment(layout: NleLaneLayout, segmentId: string): number {
@@ -147,4 +150,22 @@ export function assignLanes(
     next[id] = clamped;
   });
   return { ...layout, [field]: next };
+}
+
+/** New clips (a split, an add) stay on the same line as the previous fragment. */
+export function inheritSegmentLanes(layout: NleLaneLayout, orderedIds: string[]): NleLaneLayout {
+  if (orderedIds.length === 0) return layout;
+  const next = { ...layout.segmentLanes };
+  let changed = false;
+  let previousLane = clampLane(layout.videoLane, layout.laneCount);
+  for (const id of orderedIds) {
+    const assigned = next[id];
+    if (typeof assigned === 'number' && Number.isFinite(assigned)) {
+      previousLane = clampLane(assigned, layout.laneCount);
+      continue;
+    }
+    next[id] = previousLane;
+    changed = true;
+  }
+  return changed ? { ...layout, segmentLanes: next } : layout;
 }

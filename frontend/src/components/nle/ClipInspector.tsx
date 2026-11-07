@@ -2,7 +2,13 @@ import type { CutSuggestion } from '../../types/cutSuggestions';
 import type { ReelSegment, TransitionType } from '../../types/reel';
 import { formatDuration, formatTimecode } from '../../utils/format';
 import { CutSuggestionMarkers } from '../CutSuggestionsPanel';
-import { ADJUST_STEPS, sourceGapSeconds, TRANSITION_OPTIONS } from './clipConstants';
+import {
+  ADJUST_STEPS,
+  MAX_TRANSITION_MS,
+  MIN_TRANSITION_MS,
+  sourceGapSeconds,
+  TRANSITION_OPTIONS,
+} from './clipConstants';
 
 interface ClipInspectorProps {
   segment: ReelSegment;
@@ -26,6 +32,8 @@ interface ClipInspectorProps {
   onAcceptCut: (suggestion: CutSuggestion) => void;
   onRejectCut: (suggestion: CutSuggestion) => void;
   compact?: boolean;
+  canRemove?: boolean;
+  removeTitle?: string;
 }
 
 export function ClipInspector({
@@ -45,6 +53,8 @@ export function ClipInspector({
   onAcceptCut,
   onRejectCut,
   compact = false,
+  canRemove = true,
+  removeTitle,
 }: ClipInspectorProps) {
   const gap = nextSegment
     ? sourceGapSeconds(segment.source_end_seconds, nextSegment.source_start_seconds)
@@ -57,12 +67,6 @@ export function ClipInspector({
         compact ? ' reel-nle__selected-clip--compact' : ''
       }`}
     >
-      {!compact && (
-      <p className="muted">
-        Selecciona el corte en la línea temporal. Ajusta segundos al inicio o al final. Los
-        subtítulos se editan en Subtítulos; aquí solo se recorta el video.
-      </p>
-      )}
       <div className="reel-nle__selected-clip-header">
         <div>
           <h4>Fragmento {index + 1}</h4>
@@ -84,7 +88,7 @@ export function ClipInspector({
         <div className="button-stack">
           <button
             type="button"
-            className="button button--inline"
+            className="button button--secondary button--inline"
             disabled={busy || index === 0}
             onClick={() => onMove(-1)}
           >
@@ -92,7 +96,7 @@ export function ClipInspector({
           </button>
           <button
             type="button"
-            className="button button--inline"
+            className="button button--secondary button--inline"
             disabled={busy || index === total - 1}
             onClick={() => onMove(1)}
           >
@@ -100,9 +104,10 @@ export function ClipInspector({
           </button>
           <button
             type="button"
-            className="button button--inline button--danger"
+            className="button button--danger button--inline"
             onClick={onRemove}
-            disabled={busy}
+            disabled={busy || !canRemove}
+            title={removeTitle}
           >
             Quitar
           </button>
@@ -110,81 +115,37 @@ export function ClipInspector({
       </div>
 
       <div className="reel-segment-edit reel-segment-edit--roomy">
-        <div className="reel-adjust">
-          <span>Inicio</span>
-          <input
-            type="number"
-            step="0.01"
-            defaultValue={segment.source_start_seconds}
-            key={`start-${segment.id}-${segment.source_start_seconds}`}
-            onBlur={(event) => {
-              const nextVal = Number(event.target.value);
-              if (Number.isFinite(nextVal) && nextVal !== segment.source_start_seconds) {
-                onField({ source_start_seconds: nextVal });
-              }
-            }}
-          />
-          {ADJUST_STEPS.map((step) => (
-            <button
-              key={`start-${step}`}
-              type="button"
-              className="button button--inline"
-              disabled={busy}
-              onClick={() => onAdjustEdge('start', step)}
-            >
-              {step > 0 ? `+${step}` : step}s
-            </button>
-          ))}
-        </div>
-        <div className="reel-adjust">
-          <span>Fin</span>
-          <input
-            type="number"
-            step="0.01"
-            defaultValue={segment.source_end_seconds}
-            key={`end-${segment.id}-${segment.source_end_seconds}`}
-            onBlur={(event) => {
-              const nextVal = Number(event.target.value);
-              if (Number.isFinite(nextVal) && nextVal !== segment.source_end_seconds) {
-                onField({ source_end_seconds: nextVal });
-              }
-            }}
-          />
-          {ADJUST_STEPS.map((step) => (
-            <button
-              key={`end-${step}`}
-              type="button"
-              className="button button--inline"
-              disabled={busy}
-              onClick={() => onAdjustEdge('end', step)}
-            >
-              {step > 0 ? `+${step}` : step}s
-            </button>
-          ))}
-        </div>
-        <label className="field field--inline">
-          <span>Transición al siguiente</span>
-          <select
-            value={segment.transition_type}
-            disabled={busy || !nextSegment}
-            onChange={(event) =>
-              onField({ transition_type: event.target.value as TransitionType })
-            }
-          >
-            {TRANSITION_OPTIONS.map((option) => (
-              <option key={option.value} value={option.value}>
-                {option.label}
-              </option>
-            ))}
-          </select>
-        </label>
+        <TrimRow
+          label="Inicio"
+          value={segment.source_start_seconds}
+          disabled={busy}
+          onCommit={(next) => onField({ source_start_seconds: next })}
+          onAdjust={(delta) => onAdjustEdge('start', delta)}
+        />
+        <TrimRow
+          label="Fin"
+          value={segment.source_end_seconds}
+          disabled={busy}
+          onCommit={(next) => onField({ source_end_seconds: next })}
+          onAdjust={(delta) => onAdjustEdge('end', delta)}
+        />
+        <p className="muted">
+          {nextSegment
+            ? segment.transition_type === 'hard_cut'
+              ? 'Arrastra un efecto desde Transiciones y suéltalo en este corte.'
+              : `Transición: ${
+                  TRANSITION_OPTIONS.find((option) => option.value === segment.transition_type)
+                    ?.label ?? segment.transition_type
+                }. Arrastra otra para reemplazarla.`
+            : 'No hay clip siguiente para una transición.'}
+        </p>
         {segment.transition_type !== 'hard_cut' && (
           <label className="field field--inline">
             <span>Duración (ms)</span>
             <input
               type="number"
-              min={1}
-              max={5000}
+              min={MIN_TRANSITION_MS}
+              max={MAX_TRANSITION_MS}
               value={segment.transition_duration_ms}
               disabled={busy || !nextSegment}
               onChange={(event) =>
@@ -204,6 +165,62 @@ export function ClipInspector({
         onReject={onRejectCut}
       />
       )}
+    </div>
+  );
+}
+
+function TrimRow({
+  label,
+  value,
+  disabled,
+  onCommit,
+  onAdjust,
+}: {
+  label: string;
+  value: number;
+  disabled: boolean;
+  onCommit: (next: number) => void;
+  onAdjust: (delta: number) => void;
+}) {
+  const negatives = ADJUST_STEPS.filter((step) => step < 0);
+  const positives = ADJUST_STEPS.filter((step) => step > 0);
+  return (
+    <div className="reel-adjust">
+      <span>{label}</span>
+      {negatives.map((step) => (
+        <button
+          key={step}
+          type="button"
+          className="button button--secondary button--inline reel-adjust__step"
+          disabled={disabled}
+          onClick={() => onAdjust(step)}
+        >
+          {step}s
+        </button>
+      ))}
+      <input
+        type="number"
+        step="0.01"
+        defaultValue={value}
+        key={`${label}-${value}`}
+        aria-label={label}
+        disabled={disabled}
+        onBlur={(event) => {
+          const nextVal = Number(event.target.value);
+          if (Number.isFinite(nextVal) && nextVal !== value) onCommit(nextVal);
+        }}
+      />
+      {positives.map((step) => (
+        <button
+          key={step}
+          type="button"
+          className="button button--secondary button--inline reel-adjust__step"
+          disabled={disabled}
+          onClick={() => onAdjust(step)}
+        >
+          +{step}s
+        </button>
+      ))}
     </div>
   );
 }

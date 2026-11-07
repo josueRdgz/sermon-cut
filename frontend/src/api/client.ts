@@ -1,4 +1,5 @@
 import type { ApiErrorBody } from '../types/project';
+import { formatApiErrorDetail } from './errorDetail';
 
 // Base URL for the backend API. In browser/Vite development the empty string
 // uses the Vite proxy for "/api". In the Tauri desktop shell it is set to
@@ -43,7 +44,11 @@ export class ApiError extends Error {
 async function parseError(response: Response): Promise<ApiError> {
   try {
     const body = (await response.json()) as ApiErrorBody;
-    return new ApiError(body.detail || response.statusText, response.status, body.code ?? null);
+    return new ApiError(
+      formatApiErrorDetail(body.detail, response.statusText || 'Request failed'),
+      response.status,
+      body.code ?? null,
+    );
   } catch {
     return new ApiError(response.statusText || 'Request failed', response.status);
   }
@@ -219,7 +224,7 @@ export function uploadWithProgress<T>(
       const body = xhr.response as ApiErrorBody | null;
       reject(
         new ApiError(
-          body?.detail || xhr.statusText || 'Upload failed',
+          formatApiErrorDetail(body?.detail, xhr.statusText || 'Upload failed'),
           xhr.status,
           body?.code ?? null,
         ),

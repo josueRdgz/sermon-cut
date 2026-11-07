@@ -1,17 +1,7 @@
-import type { ReelSegment } from '../types/reel';
+import { XFADE_TRANSITION_TYPES, type ReelSegment } from '../types/reel';
 
 /** Keep in sync with backend ``services.subtitles.timeline``. */
-const XFADE_TRANSITIONS = new Set([
-  'short_crossfade',
-  'dip_to_black',
-  'fade',
-  'flash',
-  'light_change',
-  'wipe_down',
-  'wipe_left',
-  'slide_down',
-  'dissolve',
-]);
+const XFADE_TRANSITIONS = new Set<string>(XFADE_TRANSITION_TYPES);
 const MIN_XFADE_SLACK = 0.05;
 
 export interface OutputPlacement {
@@ -25,9 +15,12 @@ export interface OutputPlacement {
   padSeconds: number;
   /** Usable xfade after this clip; 0 for the last clip or a hard cut. */
   overlapSeconds: number;
+  /** Start on the sequential edit timeline (clips never overlap). */
+  editStart: number;
 }
 
 export const MAX_PAD_BEFORE_MS = 120_000;
+export const DEFAULT_TRANSITION_MS = 350;
 
 export function clampPadBeforeMs(value: number): number {
   if (!Number.isFinite(value)) return 0;
@@ -40,7 +33,19 @@ export function padBeforeSeconds(segment: { pad_before_ms?: number | null }): nu
 
 export interface OutputClock {
   placements: OutputPlacement[];
+  /** Program duration after xfade overlap. */
   totalDuration: number;
+  /** Visual timeline duration; clips stay sequential and do not slide. */
+  editDuration: number;
+}
+
+export interface TransitionBand {
+  leftRatio: number;
+  widthRatio: number;
+  centerRatio: number;
+  type: string;
+  overlapSeconds: number;
+  segmentId: string;
 }
 
 function usableTransitionSeconds(
@@ -59,14 +64,21 @@ function usableTransitionSeconds(
   return usable > 0 ? usable : 0;
 }
 
+function clampTime(value: number, max: number): number {
+  if (!(max > 0)) return 0;
+  const finite = Number.isFinite(value) ? value : 0;
+  return Math.max(0, Math.min(finite, max));
+}
+
 /** Place source windows on the assembled output clock (xfade-aware). */
 export function buildOutputClock(segments: ReelSegment[]): OutputClock {
   if (segments.length === 0) {
-    return { placements: [], totalDuration: 0 };
+    return { placements: [], totalDuration: 0, editDuration: 0 };
   }
 
   const placements: OutputPlacement[] = [];
   let total = 0;
+  let editCursor = 0;
 
   for (let index = 0; index < segments.length; index += 1) {
     const segment = segments[index];
@@ -87,6 +99,7 @@ export function buildOutputClock(segments: ReelSegment[]): OutputClock {
       streamStart = usable > 0 ? total - usable : total;
       total = streamStart + streamDuration;
     }
+    const editStart = editCursor + pad;
     const placement: OutputPlacement = {
       id: segment.id,
       index,
@@ -96,8 +109,10 @@ export function buildOutputClock(segments: ReelSegment[]): OutputClock {
       contentDuration: duration,
       padSeconds: pad,
       overlapSeconds: 0,
+      editStart,
     };
     placements.push(placement);
+    editCursor = editStart + duration;
 
     if (index + 1 < segments.length) {
       const next = segments[index + 1];
@@ -111,7 +126,7 @@ export function buildOutputClock(segments: ReelSegment[]): OutputClock {
     }
   }
 
-  return { placements, totalDuration: total };
+  return { placements, totalDuration: total, editDuration: editCursor };
 }
 
 export function outputTimeForSource(
@@ -151,24 +166,101 @@ export function outputTimeAtSource(clock: OutputClock, sourceTime: number): numb
   return null;
 }
 
+/**
+ * Map program time onto the sequential edit timeline.
+ * During an xfade the needle covers both clip ends (2×) so fragments do not slide.
+ */
+export function editTimeFromOutput(clock: OutputClock, outputTime: number): number {
+  if (!(clock.editDuration > 0)) return 0;
+  const t = clampTime(outputTime, clock.totalDuration);
+  const { placements } = clock;
+  for (let index = 0; index < placements.length; index += 1) {
+    const placement = placements[index];
+    const next = placements[index + 1];
+    const overlap = placement.overlapSeconds;
+    const uniqueEnd = placement.outputStart + placement.contentDuration - overlap;
+    const contentEnd = placement.outputStart + placement.contentDuration;
+    const padStart = Math.max(0, placement.outputStart - placement.padSeconds);
+
+    if (t < padStart) continue;
+
+    if (next && overlap > 0 && t >= uniqueEnd && t < contentEnd) {
+      const progress = (t - uniqueEnd) / overlap;
+      return (
+        placement.editStart + placement.contentDuration - overlap + progress * 2 * overlap
+      );
+    }
+
+    if (next && t >= contentEnd && t >= next.outputStart - next.padSeconds) {
+      continue;
+    }
+
+    if (t < placement.outputStart) {
+      return placement.editStart - (placement.outputStart - t);
+    }
+    return placement.editStart + (t - placement.outputStart);
+  }
+  return clock.editDuration;
+}
+
+/** Inverse of ``editTimeFromOutput``: a click on the sequential board maps to program time. */
+export function outputTimeFromEdit(clock: OutputClock, editTime: number): number {
+  if (!(clock.totalDuration > 0)) return 0;
+  const t = clampTime(editTime, clock.editDuration);
+  const { placements } = clock;
+  for (let index = 0; index < placements.length; index += 1) {
+    const placement = placements[index];
+    const next = placements[index + 1];
+    const overlap = placement.overlapSeconds;
+    const uniqueEditEnd = placement.editStart + placement.contentDuration - overlap;
+    const mixEditEnd = uniqueEditEnd + 2 * overlap;
+    const padEditStart = placement.editStart - placement.padSeconds;
+    const uniqueOutEnd = placement.outputStart + placement.contentDuration - overlap;
+
+    if (t < padEditStart) continue;
+
+    if (t < placement.editStart) {
+      return placement.outputStart - (placement.editStart - t);
+    }
+
+    if (next && overlap > 0 && t >= uniqueEditEnd && t < mixEditEnd) {
+      const progress = (t - uniqueEditEnd) / (2 * overlap);
+      return uniqueOutEnd + progress * overlap;
+    }
+
+    if (next && t >= placement.editStart + placement.contentDuration && t >= next.editStart - next.padSeconds) {
+      continue;
+    }
+
+    return placement.outputStart + (t - placement.editStart);
+  }
+  return clock.totalDuration;
+}
+
+/** Transition sits on the cut, covering the end of A and the start of B. */
 export function transitionMarkerAt(
-  placements: OutputPlacement[],
+  clock: OutputClock,
   segments: ReelSegment[],
-): { leftRatio: number; type: string }[] {
-  const total = placements.reduce(
-    (max, item) => Math.max(max, item.outputStart + item.contentDuration),
-    0,
-  );
+): TransitionBand[] {
+  const total = clock.editDuration;
   if (!(total > 0)) return [];
-  const markers: { leftRatio: number; type: string }[] = [];
-  for (let i = 0; i < segments.length - 1; i += 1) {
-    const segment = segments[i];
-    if (segment.transition_type === 'hard_cut') continue;
-    const next = placements[i + 1];
-    if (!next) continue;
+  const markers: TransitionBand[] = [];
+  for (let index = 0; index < segments.length - 1; index += 1) {
+    const segment = segments[index];
+    const placement = clock.placements[index];
+    if (!placement || segment.transition_type === 'hard_cut' || placement.overlapSeconds <= 0) {
+      continue;
+    }
+    const overlap = placement.overlapSeconds;
+    const cut = placement.editStart + placement.contentDuration;
+    const left = Math.max(0, cut - overlap);
     markers.push({
-      leftRatio: next.outputStart / total,
+      leftRatio: left / total,
+      widthRatio: (overlap * 2) / total,
+      centerRatio: cut / total,
       type: segment.transition_type,
+      overlapSeconds: overlap,
+      segmentId: segment.id,
     });
   }
   return markers;

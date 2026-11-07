@@ -48,7 +48,7 @@ export function AppModals({ panel, system, onClose }: AppModalsProps) {
 
   if (panel === 'settings') {
     return (
-      <Modal title="Configuración" icon={Settings} onClose={onClose}>
+      <Modal title="Configuración" icon={Settings} size="lg" onClose={onClose}>
         <SettingsForm onSaved={() => system.refresh?.()} />
       </Modal>
     );
@@ -99,13 +99,13 @@ export function AppModals({ panel, system, onClose }: AppModalsProps) {
               </span>
             </div>
             <div className={styles.shortcut}>
-              <span>Partir en el cursor</span>
+              <span>Cortar</span>
               <span className={styles.keys}>
                 <kbd className={styles.key}>C</kbd>
               </span>
             </div>
             <div className={styles.shortcut}>
-              <span>Unir el corte que partiste</span>
+              <span>Unir corte</span>
               <span className={styles.keys}>
                 <kbd className={styles.key}>U</kbd>
               </span>

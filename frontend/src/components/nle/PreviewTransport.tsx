@@ -1,4 +1,4 @@
-import { Pause, Play } from 'lucide-react';
+import { Pause, Play, Volume2, VolumeX } from 'lucide-react';
 
 import { formatDuration } from '../../utils/format';
 
@@ -7,20 +7,13 @@ interface PreviewTransportProps {
   totalDuration: number;
   previewing: boolean;
   previewMuted: boolean;
-  voiceVolume: number;
-  musicVolume: number;
-  musicVolumeSaving: boolean;
-  musicSliderDisabled: boolean;
-  dualMonitors: boolean;
+  previewVolume: number;
   onTogglePlay: () => void;
   onSeek: (seconds: number) => void;
   onScrubStart: () => void;
   onScrubEnd: () => void;
   onToggleMute: () => void;
-  onVoiceVolume: (value: number) => void;
-  onMusicVolume: (value: number) => void;
-  onMusicVolumeCommit: (value: number) => void;
-  onDualMonitors: (enabled: boolean) => void;
+  onPreviewVolume: (value: number) => void;
 }
 
 export function PreviewTransport({
@@ -28,22 +21,17 @@ export function PreviewTransport({
   totalDuration,
   previewing,
   previewMuted,
-  voiceVolume,
-  musicVolume,
-  musicVolumeSaving,
-  musicSliderDisabled,
-  dualMonitors,
+  previewVolume,
   onTogglePlay,
   onSeek,
   onScrubStart,
   onScrubEnd,
   onToggleMute,
-  onVoiceVolume,
-  onMusicVolume,
-  onMusicVolumeCommit,
-  onDualMonitors,
+  onPreviewVolume,
 }: PreviewTransportProps) {
   const duration = Math.max(totalDuration, 0.01);
+  const silent = previewMuted || previewVolume <= 0;
+  const heard = silent ? 0 : previewVolume;
   return (
     <div className="reel-nle__dock">
       <div className="reel-nle__transport">
@@ -52,13 +40,14 @@ export function PreviewTransport({
           className="reel-nle__play"
           onClick={onTogglePlay}
           aria-label={previewing ? 'Pausar' : 'Reproducir'}
+          aria-pressed={previewing}
+          title={previewing ? 'Pausar' : 'Reproducir'}
         >
           {previewing ? (
-            <Pause size={16} strokeWidth={2.2} aria-hidden />
+            <Pause size={15} strokeWidth={2.2} aria-hidden />
           ) : (
-            <Play size={16} strokeWidth={2.2} aria-hidden />
+            <Play size={15} strokeWidth={2.2} aria-hidden />
           )}
-          <span>{previewing ? 'Pausar' : 'Reproducir'}</span>
         </button>
         <input
           type="range"
@@ -77,60 +66,34 @@ export function PreviewTransport({
         <span className="reel-nle__time">
           {formatDuration(outputTime)} / {formatDuration(totalDuration)}
         </span>
-        <button
-          type="button"
-          className="button button--secondary"
-          aria-pressed={previewMuted}
-          onClick={onToggleMute}
-        >
-          {previewMuted ? 'Audio' : 'Silenciar'}
-        </button>
-        <button
-          type="button"
-          className="button button--secondary"
-          aria-pressed={dualMonitors}
-          onClick={() => onDualMonitors(!dualMonitors)}
-        >
-          {dualMonitors ? 'Un visor' : 'Fuente'}
-        </button>
       </div>
       <div className="reel-nle__mix">
-        <label className="reel-nle__mix-slider">
-          <span>Voz</span>
+        <div className="reel-nle__mix-slider">
+          <button
+            type="button"
+            className="reel-nle__mute"
+            aria-label={silent ? 'Activar audio' : 'Silenciar'}
+            aria-pressed={silent}
+            title={silent ? 'Activar audio' : 'Silenciar'}
+            onClick={onToggleMute}
+          >
+            {silent ? (
+              <VolumeX size={16} strokeWidth={2.2} aria-hidden />
+            ) : (
+              <Volume2 size={16} strokeWidth={2.2} aria-hidden />
+            )}
+          </button>
           <input
             type="range"
             min={0}
             max={1}
             step={0.01}
-            value={previewMuted ? 0 : voiceVolume}
-            aria-label="Volumen de la voz"
-            onChange={(event) => onVoiceVolume(Number(event.target.value))}
+            value={heard}
+            aria-label="Volumen de la vista previa"
+            onChange={(event) => onPreviewVolume(Number(event.target.value))}
           />
-          <em>{Math.round((previewMuted ? 0 : voiceVolume) * 100)}%</em>
-        </label>
-        <label
-          className={`reel-nle__mix-slider${musicSliderDisabled ? ' reel-nle__mix-slider--disabled' : ''}`}
-        >
-          <span>Música</span>
-          <input
-            type="range"
-            min={0}
-            max={1}
-            step={0.01}
-            value={musicVolume}
-            disabled={musicSliderDisabled}
-            aria-label="Volumen de la música"
-            onChange={(event) => onMusicVolume(Number(event.target.value))}
-            onPointerUp={(event) =>
-              onMusicVolumeCommit(Number((event.target as HTMLInputElement).value))
-            }
-          />
-          <em>
-            {musicSliderDisabled
-              ? '—'
-              : `${Math.round(musicVolume * 100)}%${musicVolumeSaving ? '…' : ''}`}
-          </em>
-        </label>
+          <em>{Math.round(heard * 100)}%</em>
+        </div>
       </div>
     </div>
   );

@@ -14,11 +14,12 @@ from app.services.subtitles.cues import (
     SourceWord,
     SubtitleCue,
     build_cues_for_reel,
+    remap_cues_to_caption_windows,
     sanitize_caption_text,
     split_caption_blocks,
     wrap_lines,
 )
-from app.services.subtitles.fonts import resolve_font
+from app.services.subtitles.fonts import list_available_fonts, resolve_font
 from app.services.subtitles.templates import (
     SubtitleGranularity,
     SubtitleOptions,
@@ -339,6 +340,10 @@ def test_emoji_stripped_from_sober_styles() -> None:
     assert sanitize_caption_text("Gracia 🙏 Dios") == "Gracia Dios"
 
 
+def test_user_caption_keeps_typed_emoji() -> None:
+    assert sanitize_caption_text("Gracia 🙏 Dios", allow_emoji=True) == "Gracia 🙏 Dios"
+
+
 def test_ass_document_contains_remapped_times(tmp_path: Path) -> None:
     options = options_from_reel(style="clear_reading")
     font = resolve_font("Helvetica Neue", tmp_path / "fonts")
@@ -573,6 +578,22 @@ def test_long_caption_splits_into_multiple_cues() -> None:
     assert result.cues[-1].end == pytest.approx(20.0, abs=1e-3)
 
 
+def test_omitted_caption_window_drops_only_that_placement() -> None:
+    timeline = build_output_timeline(
+        [TimelineSegment(0.0, 10.0), TimelineSegment(20.0, 30.0)]
+    )
+    cues = [
+        SubtitleCue(start=2.0, end=4.0, text="A"),
+        SubtitleCue(start=12.0, end=14.0, text="B"),
+    ]
+    remapped = remap_cues_to_caption_windows(
+        cues,
+        timeline.placements,
+        [(0.0, 0.0), (10.0, 20.0)],
+    )
+    assert [cue.text for cue in remapped] == ["B"]
+
+
 def test_split_caption_blocks_keeps_overlong_token_intact() -> None:
     blocks = split_caption_blocks(
         "supercalifragilistico y corto",
@@ -582,3 +603,30 @@ def test_split_caption_blocks_keeps_overlong_token_intact() -> None:
     assert blocks[0] == "supercalifragilistico"
     assert "corto" in " ".join(blocks)
     assert all("…" not in block for block in blocks)
+
+
+def test_list_available_fonts_includes_word_like_faces() -> None:
+    families = list_available_fonts()
+    assert families
+    lowered = {name.lower() for name in families}
+    assert lowered & {"helvetica neue", "helvetica", "arial", "georgia", "times new roman"}
+    assert len(families) >= 7
+
+
+def test_ass_style_line_uses_text_decorations(tmp_path: Path) -> None:
+    options = options_from_reel(
+        style="reformed_sober",
+        bold=True,
+        italic=True,
+        underline=True,
+        strikethrough=True,
+    )
+    font = resolve_font("Helvetica Neue", tmp_path / "fonts")
+    doc = render_ass_document(
+        cues=[SubtitleCue(start=1.0, end=2.0, text="hola")],
+        options=options,
+        font=font,
+        play_res_x=1080,
+        play_res_y=1920,
+    )
+    assert ",-1,-1,-1,-1," in doc

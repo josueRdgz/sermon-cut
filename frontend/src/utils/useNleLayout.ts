@@ -2,14 +2,13 @@ import { useCallback, useEffect, useState } from 'react';
 
 import {
   clampNleLayout,
-  DEFAULT_NLE_LAYOUT,
   loadNleLayout,
   saveNleLayout,
   type NleLayout,
 } from './nleLayout';
 
 export function useNleLayout() {
-  const [layout, setLayout] = useState<NleLayout>(DEFAULT_NLE_LAYOUT);
+  const [layout, setLayout] = useState<NleLayout>(() => loadNleLayout());
 
   useEffect(() => {
     setLayout(loadNleLayout());

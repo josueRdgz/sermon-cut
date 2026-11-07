@@ -182,8 +182,8 @@ class RenderManager:
         if burn_subtitles and not self._filter_checker(ffmpeg, "ass"):
             raise ValidationAppError(
                 "El FFmpeg instalado no incluye el filtro ASS/libass necesario para "
-                "quemar subtítulos. En macOS instala «ffmpeg-full» o desmarca "
-                "«Quemar subtítulos» para exportar sin ellos.",
+                "incluir subtítulos. En macOS instala «ffmpeg-full» o desactiva "
+                "«Incluir en el video» en Subtítulos.",
                 code="ffmpeg_ass_filter_missing",
             )
 
@@ -218,8 +218,10 @@ class RenderManager:
             max(0.0, seg.source_end_seconds - seg.source_start_seconds)
             for seg in reel.segments
         )
-        # Approximate end-card pad for the profile duration gate.
-        assert_duration_allowed(profile, content_duration + 5.0)
+        end_card_preview = resolve_end_card(db, project_id)
+        assert_duration_allowed(
+            profile, content_duration + end_card_preview.effective_duration_seconds()
+        )
 
         job = RenderJob(
             project_id=project_id,
@@ -557,19 +559,20 @@ class RenderManager:
             if artifacts is not None:
                 ass_file, _font, _cues = artifacts
 
-            # The end card is mandatory: every render closes with it.
-            job.stage = "end_card"
-            session.commit()
             end_card_config = resolve_end_card(session, job.project_id)
-            end_card_spec = build_end_card_spec(
-                project=project,
-                config=end_card_config,
-                width=preview_w,
-                height=preview_h,
-                image_path=end_card_image,
-                main_content_end_seconds=segments[-1].end,
-                source_duration_seconds=getattr(metadata, "duration_seconds", None),
-            )
+            end_card_spec = None
+            if end_card_config.enabled:
+                job.stage = "end_card"
+                session.commit()
+                end_card_spec = build_end_card_spec(
+                    project=project,
+                    config=end_card_config,
+                    width=preview_w,
+                    height=preview_h,
+                    image_path=end_card_image,
+                    main_content_end_seconds=segments[-1].end,
+                    source_duration_seconds=getattr(metadata, "duration_seconds", None),
+                )
 
             # Optional user-provided background music (off unless preset ≠ none).
             from dataclasses import replace
@@ -593,7 +596,8 @@ class RenderManager:
             )
 
             if (
-                music_spec is not None
+                end_card_spec is not None
+                and music_spec is not None
                 and music_spec.scope == BackgroundMusicScope.end_card_only
                 and end_card_spec.music_path is None
             ):

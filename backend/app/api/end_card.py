@@ -1,4 +1,4 @@
-"""Endpoints for the mandatory end card: settings, assets and preview."""
+"""Endpoints for the optional end card: settings, assets and preview."""
 
 from __future__ import annotations
 
@@ -57,6 +57,7 @@ async def _upload_chunks(upload: UploadFile) -> AsyncIterator[bytes]:
 
 def _response(config: end_card_service.ResolvedEndCard) -> EndCardSettingsResponse:
     return EndCardSettingsResponse(
+        enabled=config.enabled,
         layout=config.layout,
         duration_seconds=config.duration_seconds,
         fade_in_ms=config.fade_in_ms,

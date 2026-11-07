@@ -32,9 +32,6 @@ export function StatusBar({
           <MetricCard icon={Tag} label="Versión" value={version} />
         </span>
       </div>
-      <p className={`${styles.credit} ${styles.hideWhenNarrow}`}>
-        Creado por Josué Rodríguez Ramírez
-      </p>
       <StatusIndicator
         label={overallLabel}
         tone={overall}

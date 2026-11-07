@@ -16,6 +16,8 @@ export interface SubtitleTemplateInfo {
   default_uppercase: boolean;
   default_margin_bottom: number;
   default_granularity: SubtitleGranularity;
+  default_bold?: boolean;
+  default_italic?: boolean;
 }
 
 export interface SubtitleCuePreview {

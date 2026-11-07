@@ -11,7 +11,7 @@ import { useProjects } from '../hooks/useProjects';
 import type { Project } from '../types/project';
 
 export function ProjectsPage() {
-  const { projects, loading, error, remove } = useProjects();
+  const { projects, loading, error, remove, replace } = useProjects();
   const [pendingDelete, setPendingDelete] = useState<Project | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
@@ -54,7 +54,9 @@ export function ProjectsPage() {
           />
         ) : null}
 
-        {projects.length > 0 ? <ProjectGrid projects={projects} onDelete={setPendingDelete} /> : null}
+        {projects.length > 0 ? (
+          <ProjectGrid projects={projects} onDelete={setPendingDelete} onUpdated={replace} />
+        ) : null}
 
         {deleteError ? <p className="error">{deleteError}</p> : null}
       </AppChrome>

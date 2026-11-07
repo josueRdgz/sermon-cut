@@ -48,6 +48,8 @@ def list_subtitle_templates() -> SubtitleTemplateListResponse:
             default_uppercase=template.default_uppercase,
             default_margin_bottom=template.default_margin_bottom,
             default_granularity=template.default_granularity.value,  # type: ignore[arg-type]
+            default_bold=template.bold,
+            default_italic=template.italic,
         )
         for template in TEMPLATES.values()
     ]

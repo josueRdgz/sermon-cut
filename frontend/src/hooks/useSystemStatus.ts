@@ -71,6 +71,12 @@ export function useSystemStatus(): SystemStatus {
         tone: toolTone(data?.gemini?.available ?? false, true),
         detail: data?.gemini?.available ? 'Configurado' : 'Sin configurar',
       },
+      {
+        key: 'groq',
+        label: 'Groq',
+        tone: toolTone(data?.groq?.available ?? false, true),
+        detail: data?.groq?.available ? 'Configurado' : 'Sin configurar',
+      },
     ];
 
     let overall: StatusTone = 'ok';

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import type { CoherenceIssue } from '../types/coherence';
-import { coherenceGroupLabel, groupCoherenceIssues } from './coherenceGroups';
+import { coherenceGroupLabel, coherenceIssueLabel, groupCoherenceIssues } from './coherenceGroups';
 
 function issue(partial: Partial<CoherenceIssue> & Pick<CoherenceIssue, 'code' | 'segment_id'>): CoherenceIssue {
   return {
@@ -24,5 +24,10 @@ describe('groupCoherenceIssues', () => {
     expect(groups).toHaveLength(2);
     expect(groups[0].issues.map((item) => item.segment_id)).toEqual([1, 2]);
     expect(coherenceGroupLabel(groups[0])).toBe('Fragmentos 1 y 2');
+  });
+
+  it('traduce códigos de aviso al español', () => {
+    expect(coherenceIssueLabel('WORD_CUT')).toBe('Palabra cortada');
+    expect(coherenceIssueLabel('FRAMING_JUMP')).toBe('Salto de plano');
   });
 });

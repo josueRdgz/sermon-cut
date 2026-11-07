@@ -2,7 +2,10 @@ import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 
 import type { AnalysisCandidate } from '../types/analysis';
+import type { ReelSegment } from '../types/reel';
 import {
+  addableAnalysisCandidates,
+  addedCandidateIdsOnReel,
   AnalysisProposalList,
   candidateDuration,
   visibleAnalysisCandidates,
@@ -94,5 +97,140 @@ describe('AnalysisProposalList', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Añadir a «Short de prueba»' }));
     expect(onEdit).toHaveBeenCalledWith(first);
     expect(onAddToReel).toHaveBeenCalledWith(first);
+  });
+
+  it('can show only the add-fragment action', () => {
+    const onEdit = vi.fn();
+    const onAddToReel = vi.fn();
+    render(
+      <AnalysisProposalList
+        compact
+        addOnly
+        candidates={[candidate()]}
+        canAddToReel
+        currentReelTitle="Short de prueba"
+        onEdit={onEdit}
+        onAddToReel={onAddToReel}
+      />,
+    );
+    expect(screen.queryByRole('button', { name: 'Editar esta propuesta' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Abrir en el editor' })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Añadir fragmento' }));
+    expect(onAddToReel).toHaveBeenCalled();
+  });
+
+  it('hides the proposal of the reel being edited', () => {
+    const current = candidate({
+      id: 'a',
+      rank: 0,
+      title: 'Abierta',
+      accepted_reel_id: 'reel-1',
+    });
+    const other = candidate({ id: 'b', rank: 1, title: 'Otra' });
+    render(
+      <AnalysisProposalList
+        compact
+        canAddToReel
+        currentReelId="reel-1"
+        candidates={[current, other]}
+        onEdit={vi.fn()}
+        onAddToReel={vi.fn()}
+      />,
+    );
+    expect(screen.queryByText('1. Abierta')).not.toBeInTheDocument();
+    expect(screen.getByText('2. Otra')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Editar esta propuesta' })).toBeInTheDocument();
+  });
+
+  it('hides the selected reel proposal when adding fragments', () => {
+    const current = candidate({
+      id: 'a',
+      rank: 0,
+      title: 'Abierta',
+      accepted_reel_id: 'reel-1',
+    });
+    const other = candidate({ id: 'b', rank: 1, title: 'Otra' });
+    const { rerender } = render(
+      <AnalysisProposalList
+        compact
+        addOnly
+        canAddToReel
+        currentReelId="reel-1"
+        candidates={[current, other]}
+        onAddToReel={vi.fn()}
+      />,
+    );
+    expect(screen.queryByText('1. Abierta')).not.toBeInTheDocument();
+    expect(screen.getByText('2. Otra')).toBeInTheDocument();
+
+    rerender(
+      <AnalysisProposalList
+        compact
+        addOnly
+        canAddToReel
+        currentReelId="reel-1"
+        candidates={[current]}
+        onAddToReel={vi.fn()}
+      />,
+    );
+    expect(screen.queryByText('1. Abierta')).not.toBeInTheDocument();
+    expect(screen.queryByRole('list')).not.toBeInTheDocument();
+  });
+});
+
+describe('addableAnalysisCandidates', () => {
+  it('drops the open reel and already added proposals', () => {
+    const items = addableAnalysisCandidates(
+      [
+        candidate({ id: 'open', rank: 0, accepted_reel_id: 'reel-1' }),
+        candidate({ id: 'added', rank: 1 }),
+        candidate({ id: 'other', rank: 2 }),
+      ],
+      'reel-1',
+      ['added'],
+    );
+    expect(items.map((item) => item.id)).toEqual(['other']);
+  });
+});
+
+describe('addedCandidateIdsOnReel', () => {
+  function clip(
+    id: string,
+    order: number,
+    start: number,
+    end: number,
+  ): ReelSegment {
+    return {
+      id,
+      reel_id: 'reel-1',
+      order,
+      source_start_seconds: start,
+      source_end_seconds: end,
+      duration_seconds: end - start,
+      transition_type: 'hard_cut',
+      transition_duration_ms: 0,
+      transcript_text: null,
+    };
+  }
+
+  it('marks extra fragments as added until they are deleted', () => {
+    const origin = candidate({
+      id: 'open',
+      rank: 0,
+      accepted_reel_id: 'reel-1',
+      segments: [{ start: 0, end: 41, exact_text: '', reason: '', match_ratio: 1, snapped: false }],
+    });
+    const extra = candidate({
+      id: 'extra',
+      rank: 1,
+      segments: [{ start: 9, end: 27, exact_text: '', reason: '', match_ratio: 1, snapped: false }],
+    });
+    expect(
+      addedCandidateIdsOnReel([origin, extra], 'reel-1', [
+        clip('a', 0, 0, 41),
+        clip('b', 1, 9, 27),
+      ]),
+    ).toEqual(['extra']);
+    expect(addedCandidateIdsOnReel([origin, extra], 'reel-1', [clip('a', 0, 0, 41)])).toEqual([]);
   });
 });

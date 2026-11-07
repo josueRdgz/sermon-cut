@@ -96,6 +96,8 @@ class AnalysisProviderStatusResponse(BaseModel):
     gemini_configured: bool
     gemini_sdk_installed: bool
     gemini_model: str
+    groq_configured: bool = False
+    groq_model: str = "llama-3.3-70b-versatile"
     optional: bool = True
 
 

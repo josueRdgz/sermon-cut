@@ -262,7 +262,7 @@ def test_merge_and_replace_candidates(analysis_env) -> None:
     project_id = _seed_project_with_transcript(session_factory)
     job = client.post(
         f"/api/projects/{project_id}/analysis",
-        json={"max_reels": 3, "min_duration_seconds": 10, "max_duration_seconds": 40},
+        json={"max_reels": 3, "min_duration_seconds": 10, "max_duration_seconds": 60},
     ).json()
     ids = [item["id"] for item in job["candidates"] if item["status"] == "pending"]
     assert len(ids) >= 2

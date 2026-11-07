@@ -17,6 +17,8 @@ vi.mock('../api/analysis', () => ({
     gemini_configured: false,
     gemini_model: 'gemini-2.5-flash',
     gemini_sdk_installed: false,
+    groq_configured: false,
+    groq_model: 'llama-3.3-70b-versatile',
     optional: true,
   }),
   getLatestAnalysis: vi.fn(),
@@ -26,6 +28,13 @@ vi.mock('../api/analysis', () => ({
 
 vi.mock('../api/transcripts', () => ({
   getTranscript: vi.fn(),
+}));
+
+vi.mock('../api/endCard', () => ({
+  getProjectEndCardSettings: vi.fn().mockResolvedValue({
+    enabled: true,
+    duration_seconds: 5,
+  }),
 }));
 
 const readyTranscript: Transcript = {

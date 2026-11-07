@@ -53,10 +53,20 @@ _XFADE_TRANSITIONS: dict[str, str] = {
     "fade": "fade",
     "flash": "fadewhite",
     "light_change": "fadegrays",
+    "dissolve": "dissolve",
     "wipe_down": "wipedown",
     "wipe_left": "wipeleft",
+    "wipe_right": "wiperight",
+    "wipe_up": "wipeup",
     "slide_down": "slidedown",
-    "dissolve": "dissolve",
+    "slide_left": "slideleft",
+    "slide_right": "slideright",
+    "slide_up": "slideup",
+    "circle_open": "circleopen",
+    "circle_close": "circleclose",
+    "pixelize": "pixelize",
+    "radial": "radial",
+    "zoom_in": "zoomin",
 }
 
 TARGET_SAMPLE_RATE = 48000
@@ -553,7 +563,7 @@ def _overlay_filters(
         src = input_start + index
         start = max(0.0, spec.start_seconds)
         duration = max(0.05, spec.duration_seconds)
-        width_px = max(8, int(round(canvas_width * min(max(spec.scale, 0.05), 3.0))))
+        width_px = max(8, int(round(canvas_width * min(max(spec.scale, 0.05), 4.0))))
         opacity = min(1.0, max(0.0, spec.opacity))
         chain: list[str] = []
         if spec.kind == "video":

@@ -255,7 +255,7 @@ def specs_for_render(
         if row.kind == ReelOverlayKind.text:
             temp_dir.mkdir(parents=True, exist_ok=True)
             path = temp_dir / f"overlay-{row.id}.png"
-            render_title_card(row.text or "Texto", path)
+            render_title_card(row.text or "Texto", path, style_json=row.style_json)
         elif row.asset_id is None and window is not None and row.kind == ReelOverlayKind.video:
             project = db.get(Project, project_id)
             if project is None or not project.video_filename:

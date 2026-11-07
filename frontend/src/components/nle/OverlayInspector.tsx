@@ -1,4 +1,10 @@
-import { overlayKindLabel, type ReelOverlay } from '../../types/overlay';
+import {
+  OVERLAY_SCALE_MAX,
+  OVERLAY_SCALE_MIN,
+  overlayKindLabel,
+  overlayTextLabel,
+  type ReelOverlay,
+} from '../../types/overlay';
 import { formatDuration } from '../../utils/format';
 
 interface OverlayInspectorProps {
@@ -57,40 +63,44 @@ export function OverlayInspector({
           <span>Texto</span>
           <textarea
             rows={compact ? 2 : 3}
-            value={overlay.text ?? ''}
+            value={overlayTextLabel(overlay.text, '')}
             disabled={busy}
             onChange={(event) => onChange({ text: event.target.value })}
           />
         </label>
       )}
-      {overlay.kind !== 'audio' && (
-        <label className="field field--inline reel-nle__overlay-size">
-          <span>Tamaño</span>
+      <div className="inspector-sliders">
+        {overlay.kind !== 'audio' && (
+          <label className="inspector-slider">
+            <span>Tamaño</span>
+            <input
+              type="range"
+              min={OVERLAY_SCALE_MIN}
+              max={OVERLAY_SCALE_MAX}
+              step={0.02}
+              value={overlay.scale}
+              disabled={busy}
+              aria-label="Tamaño de la capa"
+              onChange={(event) => onChange({ scale: Number(event.target.value) })}
+            />
+            <em>{Math.round(overlay.scale * 100)}%</em>
+          </label>
+        )}
+        <label className="inspector-slider">
+          <span>{overlay.kind === 'audio' ? 'Volumen' : 'Opacidad'}</span>
           <input
             type="range"
-            min={0.08}
-            max={2}
-            step={0.02}
-            value={overlay.scale}
+            min={0}
+            max={1}
+            step={0.05}
+            value={overlay.opacity}
             disabled={busy}
-            aria-label="Tamaño de la capa"
-            onChange={(event) => onChange({ scale: Number(event.target.value) })}
+            aria-label={overlay.kind === 'audio' ? 'Volumen de la capa' : 'Opacidad de la capa'}
+            onChange={(event) => onChange({ opacity: Number(event.target.value) })}
           />
-          <em>{Math.round(overlay.scale * 100)}%</em>
+          <em>{Math.round(overlay.opacity * 100)}%</em>
         </label>
-      )}
-      <label className="field field--inline">
-        <span>{overlay.kind === 'audio' ? 'Volumen' : 'Opacidad'}</span>
-        <input
-          type="number"
-          min={0}
-          max={1}
-          step={0.05}
-          value={overlay.opacity}
-          disabled={busy}
-          onChange={(event) => onChange({ opacity: Number(event.target.value) })}
-        />
-      </label>
+      </div>
       {!compact && (
         <div className="reel-segment-edit reel-segment-edit--roomy">
           <label className="field field--inline">
@@ -145,8 +155,8 @@ export function OverlayInspector({
                 <span>Escala</span>
                 <input
                   type="number"
-                  min={0.08}
-                  max={2}
+                  min={OVERLAY_SCALE_MIN}
+                  max={OVERLAY_SCALE_MAX}
                   step={0.02}
                   value={Number(overlay.scale.toFixed(2))}
                   disabled={busy}

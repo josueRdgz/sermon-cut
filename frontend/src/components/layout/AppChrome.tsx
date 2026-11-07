@@ -2,6 +2,7 @@ import type { LucideIcon } from 'lucide-react';
 import { useEffect, useState, type ReactNode } from 'react';
 
 import { useSystemStatus } from '../../hooks/useSystemStatus';
+import { OPEN_APP_PANEL_EVENT } from '../../utils/appPanels';
 import { AppModals, type AppPanel } from '../AppModals';
 import { AppLayout } from './AppLayout';
 import { Sidebar } from './Sidebar';
@@ -38,6 +39,17 @@ export function AppChrome({
 }: AppChromeProps) {
   const system = useSystemStatus();
   const [panel, setPanel] = useState<AppPanel | null>(null);
+
+  useEffect(() => {
+    function onOpenPanel(event: Event) {
+      const detail = (event as CustomEvent<AppPanel>).detail;
+      if (detail === 'settings' || detail === 'help' || detail === 'about') {
+        setPanel(detail);
+      }
+    }
+    window.addEventListener(OPEN_APP_PANEL_EVENT, onOpenPanel);
+    return () => window.removeEventListener(OPEN_APP_PANEL_EVENT, onOpenPanel);
+  }, []);
 
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {

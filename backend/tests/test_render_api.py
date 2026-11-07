@@ -305,6 +305,23 @@ def test_end_card_duration_override_reaches_the_render(render_env) -> None:
     assert body["total_seconds"] == pytest.approx(49.0)
 
 
+def test_render_skips_end_card_when_disabled(render_env) -> None:
+    client, session_factory, _ = render_env
+    project_id, reel_id = _seed_project_and_reel(session_factory)
+
+    saved = client.put(
+        f"/api/projects/{project_id}/end-card/settings",
+        json={"enabled": False},
+    )
+    assert saved.status_code == 200, saved.text
+    assert saved.json()["enabled"] is False
+
+    body = client.post(f"/api/projects/{project_id}/reels/{reel_id}/render", json={}).json()
+    assert body["status"] == "completed"
+    assert "endcard-" not in (body["ffmpeg_command"] or "")
+    assert body["total_seconds"] == pytest.approx(46.0)
+
+
 def test_render_output_is_downloadable_and_playable(render_env) -> None:
     client, session_factory, _ = render_env
     project_id, reel_id = _seed_project_and_reel(session_factory)

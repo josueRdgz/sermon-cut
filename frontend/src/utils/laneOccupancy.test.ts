@@ -4,6 +4,8 @@ import {
   collectLaneOccupants,
   laneConflict,
   occupantId,
+  placeOnLane,
+  placeTextOverlay,
   resolveExclusiveLane,
   settleExclusiveLanes,
   snapToFit,
@@ -75,7 +77,7 @@ describe('laneOccupancy', () => {
     ).toBe(2);
   });
 
-  it('moves a caption off the video lane instead of stacking', () => {
+  it('sits captions and overlays flush after the video on the same lane', () => {
     const byLane = collectLaneOccupants({
       laneCount: 3,
       clips: [{ id: 'a', lane: 1, start: 0, end: 8 }],
@@ -86,11 +88,53 @@ describe('laneOccupancy', () => {
     });
     const settled = settleExclusiveLanes(byLane, 3);
     expect(settled.assignments.get(occupantId('segment', 'a'))).toBe(1);
-    expect(settled.assignments.get(occupantId('caption', 'c'))).not.toBe(1);
-    expect(settled.assignments.get(occupantId('overlay', 's'))).not.toBe(1);
-    expect(settled.assignments.get(occupantId('caption', 'c'))).not.toBe(
-      settled.assignments.get(occupantId('overlay', 's')),
+    expect(settled.assignments.get(occupantId('caption', 'c'))).toBe(1);
+    expect(settled.assignments.get(occupantId('overlay', 's'))).toBe(1);
+    expect(settled.times.get(occupantId('caption', 'c'))).toEqual({ start: 8, end: 10 });
+    expect(settled.times.get(occupantId('overlay', 's'))).toEqual({ start: 10, end: 12 });
+  });
+
+  it('places a video overlay flush after the last clip on the lane', () => {
+    const next = placeOnLane(
+      [{ id: 'segment:a', kind: 'segment', start: 0, end: 41 }],
+      { id: 'overlay:v', kind: 'overlay', start: 5, end: 15 },
     );
-    expect(settled.laneCount).toBeGreaterThanOrEqual(4);
+    expect(next.start).toBeCloseTo(41);
+    expect(next.end).toBeCloseTo(51);
+  });
+
+  it('puts text on an empty lane instead of on the video', () => {
+    const byLane = collectLaneOccupants({
+      laneCount: 2,
+      clips: [{ id: 'a', lane: 1, start: 0, end: 40 }],
+      captions: [{ id: 'c', lane: 0, start: 0, end: 40 }],
+      overlays: [],
+      musicLane: null,
+      musicEnd: 0,
+    });
+    const packed = placeTextOverlay(
+      byLane,
+      { id: occupantId('text', 't'), kind: 'text', start: 0, end: 3 },
+      2,
+      1,
+    );
+    expect(packed.lane).not.toBe(1);
+    expect(packed.laneCount).toBeGreaterThanOrEqual(3);
+    expect(packed.occupant.start).toBe(0);
+  });
+
+  it('settles text off the video lane onto a free line', () => {
+    const byLane = collectLaneOccupants({
+      laneCount: 2,
+      clips: [{ id: 'a', lane: 1, start: 0, end: 8 }],
+      captions: [],
+      overlays: [{ id: 't', lane: 1, start: 1, end: 4, asText: true }],
+      musicLane: null,
+      musicEnd: 0,
+    });
+    const settled = settleExclusiveLanes(byLane, 2);
+    expect(settled.assignments.get(occupantId('segment', 'a'))).toBe(1);
+    expect(settled.assignments.get(occupantId('text', 't'))).not.toBe(1);
+    expect(settled.times.get(occupantId('text', 't'))).toEqual({ start: 1, end: 4 });
   });
 });

@@ -1,4 +1,5 @@
 import type { Ref } from 'react';
+import { Clapperboard, Minimize2 } from 'lucide-react';
 
 import { backgroundMusicAudioUrl } from '../../api/backgroundMusic';
 import { projectVideoUrl } from '../../api/projects';
@@ -33,6 +34,7 @@ interface PreviewMonitorProps {
   onSelectOverlay?: (overlayId: string) => void;
   onMoveOverlay?: (overlayId: string, x: number, y: number) => void;
   onScaleOverlay?: (overlayId: string, scale: number) => void;
+  onTextSizeOverlay?: (overlayId: string, fontSize: number) => void;
   framingMode?: FramingMode | string | null;
   cropX?: number | null;
   cropY?: number | null;
@@ -40,6 +42,9 @@ interface PreviewMonitorProps {
   incomingCropX?: number | null;
   incomingCropY?: number | null;
   inPad?: boolean;
+  onMinimize?: () => void;
+  dualMonitors?: boolean;
+  onToggleSource?: (enabled: boolean) => void;
 }
 
 function aspectClass(aspect: AspectRatio): 'portrait' | 'square' | 'landscape' {
@@ -72,6 +77,7 @@ export function PreviewMonitor({
   onSelectOverlay,
   onMoveOverlay,
   onScaleOverlay,
+  onTextSizeOverlay,
   framingMode = 'center_crop',
   cropX = 0.5,
   cropY = 0.45,
@@ -79,6 +85,9 @@ export function PreviewMonitor({
   incomingCropX = null,
   incomingCropY = null,
   inPad = false,
+  onMinimize,
+  dualMonitors = false,
+  onToggleSource,
 }: PreviewMonitorProps) {
   const videoSrc = projectVideoUrl(projectId, mediaRevision);
   const videoFit = previewVideoFit(framingMode);
@@ -109,6 +118,31 @@ export function PreviewMonitor({
         <strong>Programa</strong>
         <span className="muted">{aspectRatio}</span>
       </div>
+      {onMinimize ? (
+        <button
+          type="button"
+          className="reel-nle__preview-minimize"
+          data-tooltip="Ocultar vista previa"
+          title="Ocultar vista previa"
+          aria-label="Ocultar vista previa"
+          onClick={onMinimize}
+        >
+          <Minimize2 size={14} strokeWidth={2} aria-hidden />
+        </button>
+      ) : null}
+      {onToggleSource ? (
+        <button
+          type="button"
+          className={`reel-nle__preview-source${dualMonitors ? ' reel-nle__preview-source--on' : ''}`}
+          data-tooltip="Fuente"
+          title="Fuente"
+          aria-label="Fuente"
+          aria-pressed={dualMonitors}
+          onClick={() => onToggleSource(!dualMonitors)}
+        >
+          <Clapperboard size={14} strokeWidth={2} aria-hidden />
+        </button>
+      ) : null}
       <div className={`reel-player reel-player--${aspectClass(aspectRatio)}`}>
         <div
           className={`reel-player__stage${
@@ -161,6 +195,7 @@ export function PreviewMonitor({
           {previewMode === 'logical' && (
             <OverlayPreviewLayer
               overlays={overlays}
+              aspectRatio={aspectRatio}
               outputTime={outputTime}
               previewing={previewing}
               previewMuted={previewMuted}
@@ -169,6 +204,7 @@ export function PreviewMonitor({
               onSelectOverlay={onSelectOverlay}
               onMoveOverlay={onMoveOverlay}
               onScaleOverlay={onScaleOverlay}
+              onTextSizeOverlay={onTextSizeOverlay}
             />
           )}
           <div id="reel-subtitle-overlay" className="reel-player__subtitle-slot" />

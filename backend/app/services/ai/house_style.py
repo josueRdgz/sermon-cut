@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 CHURCH_SOCIAL_STYLE = """\
-Estilo de clip de iglesias que publican bien en Reels y Shorts \
-(p. ej. IBSJ y canales similares): debe sentirse como un video publicado \
-por una iglesia, no como un resumen académico del sermón.
+Estilo de Iglesias que publican bien en Reels y Shorts. \
+Debe sentirse como un video de la congregación, no como un resumen \
+académico del sermón.
 
 Selección:
 - Los primeros 2 segundos enganchan con tesis, contraste o pregunta. \
@@ -15,6 +15,8 @@ no todos los puntos del predicador.
 - Conserva la frase más memorable, casi lista para subtítulo.
 - Cierra con aplicación concreta: qué creer, decidir o hacer esta semana.
 - Corta rodeos, repeticiones, muletillas y transiciones de predicador.
+- Si un momento no cumple duración, evidencia o continuidad, no lo \
+propongas. Es mejor devolver menos clips válidos.
 
 Títulos y empaque:
 - Título recommended: 4 a 10 palabras, citable, bíblico, tono de iglesia local.
@@ -29,12 +31,19 @@ Títulos y empaque:
 TITLE_PACKAGING = """\
 Al rankear o titular, premia: (1) gancho audible de inmediato, \
 (2) frase memorable, (3) aplicación clara. Descarta clips que empiezan \
-con saludo o “el siguiente punto” y títulos que solo nombran el tema.
+con saludo o “el siguiente punto” y títulos que solo nombran el tema. \
+No entregues un clip que no puedas defender con la transcripción.
 """
 
 
-def with_house_style(base: str) -> str:
-    return f"{base.rstrip()}\n\n{CHURCH_SOCIAL_STYLE.strip()}\n"
+def style_block(editorial_style: str | None = None) -> str:
+    """The selected preset is the style. Default to church-social if empty."""
+    extra = (editorial_style or "").strip()
+    return extra or CHURCH_SOCIAL_STYLE.strip()
+
+
+def with_house_style(base: str, *, editorial_style: str | None = None) -> str:
+    return f"{base.rstrip()}\n\nEstilo editorial (obligatorio):\n{style_block(editorial_style)}\n"
 
 
 def context_block(*, church_name: str | None, editorial_context: str | None) -> list[str]:
@@ -46,5 +55,6 @@ def context_block(*, church_name: str | None, editorial_context: str | None) -> 
         )
     extra = (editorial_context or "").strip()
     if extra:
-        lines.append(f"Indicaciones adicionales del editor: {extra}")
+        lines.append("Brief editorial del editor (síguelo con prioridad):")
+        lines.append(extra)
     return lines

@@ -1,8 +1,7 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { ApiError } from '../api/client';
 import {
-  clearTracking,
   computeTracking,
   framingPreviewImageUrl,
   getFramingPreview,
@@ -60,6 +59,7 @@ export function FramingPanel({
   const [tabVisible, setTabVisible] = useState(
     () => typeof document === 'undefined' || !document.hidden,
   );
+  const autoTrackKeyRef = useRef<string | null>(null);
 
   const reload = useCallback(async () => {
     try {
@@ -68,6 +68,10 @@ export function FramingPanel({
       setStatus(null);
     }
   }, [projectId, reel.id]);
+
+  useEffect(() => {
+    autoTrackKeyRef.current = null;
+  }, [reel.id]);
 
   useEffect(() => {
     void reload();
@@ -122,6 +126,66 @@ export function FramingPanel({
     }
   };
 
+  const pollTracking = useCallback(async () => {
+    const started = Date.now();
+    while (Date.now() - started < 8 * 60 * 1000) {
+      const next = await getFramingStatus(projectId, reel.id);
+      setStatus(next);
+      if (next.tracking_status === 'failed') {
+        setError(next.tracking_error || 'No se pudo calcular el seguimiento');
+        return;
+      }
+      if (next.tracking_report) setReport(next.tracking_report);
+      if (
+        next.tracking_status === 'completed' ||
+        (next.has_cache && next.tracking_status !== 'queued' && next.tracking_status !== 'running')
+      ) {
+        return;
+      }
+      await new Promise((resolve) => window.setTimeout(resolve, 1500));
+    }
+  }, [projectId, reel.id]);
+
+  const ensureTracking = useCallback(async () => {
+    try {
+      const current = await getFramingStatus(projectId, reel.id);
+      setStatus(current);
+      if (current.tracking_status === 'queued' || current.tracking_status === 'running') {
+        await pollTracking();
+        return;
+      }
+      if (current.has_cache && current.tracking_status !== 'failed') {
+        if (current.tracking_report) setReport(current.tracking_report);
+        return;
+      }
+      await computeTracking(projectId, reel.id);
+      await pollTracking();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'No se pudo calcular el seguimiento');
+    }
+  }, [pollTracking, projectId, reel.id]);
+
+  useEffect(() => {
+    if (!active) return;
+    void reload();
+  }, [active, reload]);
+
+  useEffect(() => {
+    if (!active) {
+      autoTrackKeyRef.current = null;
+      return;
+    }
+    const currentMode = (status?.framing_mode ?? reel.framing_mode) as FramingMode;
+    if (currentMode !== 'auto_track' || !status) return;
+    if (status.tracking_status === 'queued' || status.tracking_status === 'running') return;
+    if (status.has_cache && status.tracking_status !== 'failed') return;
+    if (autoTrackKeyRef.current === reel.id) return;
+    autoTrackKeyRef.current = reel.id;
+    setActionBusy(true);
+    setError(null);
+    void ensureTracking().finally(() => setActionBusy(false));
+  }, [active, ensureTracking, reel.framing_mode, reel.id, status]);
+
   const handleMode = async (mode: FramingMode) => {
     setActionBusy(true);
     setError(null);
@@ -129,50 +193,12 @@ export function FramingPanel({
       const next = await setFramingMode(projectId, reel.id, mode);
       setStatus(next);
       onReelChange({ ...reel, framing_mode: mode });
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'No se pudo cambiar el encuadre');
-    } finally {
-      setActionBusy(false);
-    }
-  };
-
-  const handleTrack = async () => {
-    setActionBusy(true);
-    setError(null);
-    try {
-      await computeTracking(projectId, reel.id);
-      onReelChange({ ...reel, framing_mode: 'auto_track' });
-      const started = Date.now();
-      while (Date.now() - started < 8 * 60 * 1000) {
-        const next = await getFramingStatus(projectId, reel.id);
-        setStatus(next);
-        if (next.tracking_status === 'failed') {
-          setError(next.tracking_error || 'No se pudo calcular el tracking');
-          break;
-        }
-        if (next.tracking_report) {
-          setReport(next.tracking_report);
-        }
-        if (next.tracking_status === 'completed' || (next.has_cache && next.tracking_status !== 'queued' && next.tracking_status !== 'running')) {
-          break;
-        }
-        await new Promise((resolve) => window.setTimeout(resolve, 1500));
+      if (mode === 'auto_track') {
+        autoTrackKeyRef.current = reel.id;
+        await ensureTracking();
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'No se pudo calcular el tracking');
-    } finally {
-      setActionBusy(false);
-    }
-  };
-
-  const handleClear = async () => {
-    setActionBusy(true);
-    setError(null);
-    try {
-      setStatus(await clearTracking(projectId, reel.id));
-      setReport(null);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'No se pudo borrar el tracking');
+      setError(err instanceof Error ? err.message : 'No se pudo cambiar el encuadre');
     } finally {
       setActionBusy(false);
     }
@@ -206,14 +232,10 @@ export function FramingPanel({
 
   return (
     <div className={`framing-panel${compact ? ' framing-panel--compact' : ''}`}>
-      <div className="reel-editor__section-header">
-        <h4>{compact ? 'Encuadre' : 'Encuadre de salida'}</h4>
-        {status?.has_cache && <span className="badge badge--cut">Tracking en caché</span>}
-      </div>
       <p className="muted">
         {compact
           ? 'Elige Short o pantalla completa. El visor Programa usa este formato.'
-          : 'Elige si el video sale en vertical (Short) o a pantalla completa. El seguimiento mantiene al predicador dentro del recorte.'}
+          : 'Elige si el video sale en vertical (Short) o a pantalla completa. El seguimiento automático se calcula al elegir el modo.'}
       </p>
 
       <fieldset className="field" style={{ border: 'none', padding: 0 }}>
@@ -249,7 +271,7 @@ export function FramingPanel({
       </fieldset>
       <div className="transcript-toolbar">
         <label className="field field--inline">
-          <span>Modo</span>
+          <span className="framing-mode-label">Modo</span>
           <select
             value={mode}
             disabled={busy}
@@ -262,18 +284,6 @@ export function FramingPanel({
             ))}
           </select>
         </label>
-        <button type="button" onClick={() => void handleTrack()} disabled={busy}>
-          {status?.tracking_status === 'queued'
-            ? 'En cola…'
-            : status?.tracking_status === 'running'
-              ? 'Calculando…'
-              : aspectBusy
-                ? 'Guardando…'
-                : 'Calcular / recalcular tracking'}
-        </button>
-        <button type="button" className="button--ghost" onClick={() => void handleClear()} disabled={busy}>
-          Borrar caché
-        </button>
       </div>
 
       {report && <p className="muted">{report.summary}</p>}

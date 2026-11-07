@@ -11,6 +11,7 @@ const healthPayload = {
   ffprobe: { available: true, version: '8.1' },
   whisper: { available: true, version: '1.0.0' },
   gemini: { available: false, version: null },
+  groq: { available: false, version: null },
   storage: { bytes_used: 1048576, project_count: 1 },
 };
 

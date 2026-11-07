@@ -19,6 +19,8 @@ class SubtitleTemplateInfo(BaseModel):
     default_uppercase: bool
     default_margin_bottom: int
     default_granularity: SubtitleGranularity
+    default_bold: bool = False
+    default_italic: bool = False
 
 
 class SubtitleTemplateListResponse(BaseModel):

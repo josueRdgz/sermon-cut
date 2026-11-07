@@ -4,9 +4,9 @@ import { buildOutputClock, type OutputPlacement } from './reelOutputClock';
 export interface TimelineClipSpan {
   id: string;
   index: number;
-  /** Start on the output clock (seconds). */
+  /** Start on the sequential edit timeline (seconds). */
   start: number;
-  /** Duration on the output clock (seconds). */
+  /** Duration on the sequential edit timeline (seconds). */
   duration: number;
   /** Width as fraction of total [0, 1]. */
   widthRatio: number;
@@ -14,18 +14,18 @@ export interface TimelineClipSpan {
   leftRatio: number;
 }
 
-/** Build proportional clip spans using the xfade-aware output clock. */
+/** Build sequential clip spans. Transitions do not slide fragments. */
 export function buildClipSpans(segments: ReelSegment[]): TimelineClipSpan[] {
   const clock = buildOutputClock(segments);
-  const total = clock.totalDuration;
+  const total = clock.editDuration;
   if (!(total > 0)) return [];
 
   return clock.placements.map((placement: OutputPlacement) => ({
     id: placement.id,
     index: placement.index,
-    start: placement.outputStart,
+    start: placement.editStart,
     duration: placement.contentDuration,
-    leftRatio: placement.outputStart / total,
+    leftRatio: placement.editStart / total,
     widthRatio: placement.contentDuration / total,
   }));
 }
@@ -199,12 +199,20 @@ export function shiftCaptionWindow(
   let nextIn = inMs;
   let nextOut = outMs;
   if (edge === 'move') {
-    nextIn = Math.max(0, Math.min(total - width, inMs + deltaMs));
+    nextIn = inMs + deltaMs;
     nextOut = nextIn + width;
+    if (nextIn < 0) {
+      nextIn = 0;
+      nextOut = width;
+    }
+    if (nextIn > total - MIN_CAPTION_MS) {
+      nextIn = total - MIN_CAPTION_MS;
+      nextOut = nextIn + width;
+    }
   } else if (edge === 'start') {
     nextIn = Math.max(0, Math.min(outMs - MIN_CAPTION_MS, inMs + deltaMs));
   } else {
-    nextOut = Math.max(inMs + MIN_CAPTION_MS, Math.min(total, outMs + deltaMs));
+    nextOut = Math.max(inMs + MIN_CAPTION_MS, outMs + deltaMs);
   }
   return { inMs: Math.round(nextIn), outMs: Math.round(nextOut) };
 }
@@ -231,7 +239,7 @@ export function buildSourceGaps(segments: ReelSegment[]): SourceGapSpan[] {
     const placement = clock.placements[index];
     if (!placement) continue;
     gaps.push({
-      leftRatio: placement.outputStart / Math.max(clock.totalDuration, 0.01),
+      leftRatio: placement.editStart / Math.max(clock.editDuration, 0.01),
       afterIndex: index,
       beforeSegmentId: previous.id,
       afterSegmentId: current.id,

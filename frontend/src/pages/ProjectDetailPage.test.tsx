@@ -24,6 +24,7 @@ vi.mock('../api/health', () => ({
     ffprobe: { available: true, version: '7' },
     whisper: { available: true, version: '1' },
     gemini: { available: false, version: null },
+    groq: { available: false, version: null },
     storage: { bytes_used: 0, project_count: 0 },
   }),
 }));
@@ -50,10 +51,6 @@ vi.mock('../components/ReelEditor', () => ({
 
 vi.mock('../components/SermonRangePanel', () => ({
   SermonRangePanel: () => <div>Panel de predicación</div>,
-}));
-
-vi.mock('../components/ConfirmDialog', () => ({
-  ConfirmDialog: () => null,
 }));
 
 const PROJECT = {
@@ -113,7 +110,8 @@ describe('ProjectDetailPage workspace', () => {
     renderPage();
     await screen.findByRole('heading', { name: PROJECT.title });
 
-    expect(workspaceButton('Proyecto')).toHaveAttribute('aria-current', 'page');
+    expect(workspaceButton('Predicación')).toHaveAttribute('aria-current', 'page');
+    expect(screen.queryByRole('button', { name: 'Proyecto' })).not.toBeInTheDocument();
     expect(screen.getByText('Panel de transcripción')).not.toBeVisible();
 
     fireEvent.click(workspaceButton('Transcripción'));

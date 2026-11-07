@@ -6,13 +6,13 @@ import { splitReelSegment, updateReel, updateReelSegment } from '../api/reels';
 import { getSubtitlePreview, listSubtitleFonts, listSubtitleTemplates } from '../api/subtitles';
 import type { Reel, SubtitleGranularity, SubtitlePosition, SubtitleStyle } from '../types/reel';
 import type { SubtitleCuePreview, SubtitlePreview, SubtitleTemplateInfo } from '../types/subtitle';
+import { captionIsOmitted } from '../utils/reelCaptions';
 import { buildOutputClock } from '../utils/reelOutputClock';
 import {
   SubtitlePreviewOverlay,
   type SubtitleLayoutPatch,
-  FONT_MAX,
-  MARGIN_MAX,
 } from './SubtitlePreviewOverlay';
+import { TextStyleControls } from './TextStyleControls';
 
 interface SubtitlePanelProps {
   projectId: string;
@@ -22,6 +22,8 @@ interface SubtitlePanelProps {
   /** Index of the reel segment currently playing in the logical preview. */
   previewSegmentIndex: number | null;
   onReelUpdated: (reel: Reel) => void;
+  /** Put an omitted caption strip back on its fragment. */
+  onRestoreCaptions?: (segmentIds: string[]) => void;
   /** Hide the duplicate gradient stage when the main player already shows cues. */
   hideStagePreview?: boolean;
   /** Allow drag / Alt+wheel on the program monitor overlay. */
@@ -42,8 +44,6 @@ const POSITION_OPTIONS: { value: SubtitlePosition; label: string }[] = [
   { value: 'center', label: 'Centro' },
   { value: 'top', label: 'Superior' },
 ];
-
-const SUBTITLE_EMOJIS = ['🙏', '❤️', '🔥', '✨', '🙌', '📖', '✝️', '👏', '💭', '🕊️'];
 
 function sourceToOutput(reel: Reel, segmentIndex: number, sourceTime: number): number | null {
   const ordered = [...reel.segments].sort((a, b) => a.order - b.order);
@@ -111,6 +111,7 @@ export function SubtitlePanel({
   sourceTime,
   previewSegmentIndex,
   onReelUpdated,
+  onRestoreCaptions,
   hideStagePreview = false,
   interactivePreview = false,
   mountPreviewOverlay = true,
@@ -153,6 +154,10 @@ export function SubtitlePanel({
     reel.subtitle_granularity,
     reel.subtitle_font_size,
     reel.subtitle_font_family,
+    reel.subtitle_bold,
+    reel.subtitle_italic,
+    reel.subtitle_underline,
+    reel.subtitle_strikethrough,
     reel.subtitle_x,
     reel.subtitle_y,
     reel.subtitle_max_words,
@@ -160,7 +165,12 @@ export function SubtitlePanel({
     reel.subtitle_bible_reference,
     reel.updated_at,
     // Reload when any per-cut caption changes (fragment subtitle edits).
-    reel.segments.map((segment) => `${segment.id}:${segment.transcript_text ?? ''}`).join('|'),
+    reel.segments
+      .map(
+        (segment) =>
+          `${segment.id}:${segment.transcript_text ?? ''}:${segment.caption_in_ms ?? ''}:${segment.caption_out_ms ?? ''}`,
+      )
+      .join('|'),
   ]);
 
   const saveReelPatch = useCallback(
@@ -235,6 +245,14 @@ export function SubtitlePanel({
 
   const cueSegmentId = cue ? placementAtOutput(cue.start)?.id ?? null : null;
   const cueSegment = reel.segments.find((item) => item.id === cueSegmentId) ?? null;
+  const omittedSegments = useMemo(
+    () =>
+      [...reel.segments]
+        .sort((left, right) => left.order - right.order)
+        .map((segment, index) => ({ segment, index: index + 1 }))
+        .filter(({ segment }) => captionIsOmitted(segment)),
+    [reel.segments],
+  );
 
   useEffect(() => {
     const text = cue?.text ?? '';
@@ -356,6 +374,11 @@ export function SubtitlePanel({
         marginBottom={reel.subtitle_margin_bottom}
         uppercase={reel.subtitle_uppercase}
         fontFamily={reel.subtitle_font_family}
+        bold={reel.subtitle_bold}
+        italic={reel.subtitle_italic}
+        underline={reel.subtitle_underline}
+        strikethrough={reel.subtitle_strikethrough}
+        aspectRatio={reel.aspect_ratio}
         posX={reel.subtitle_x}
         posY={reel.subtitle_y}
         interactive={interactivePreview}
@@ -367,7 +390,6 @@ export function SubtitlePanel({
     <div className="subtitle-panel subtitle-panel--inspector">
       {overlayHost && overlayNode ? createPortal(overlayNode, overlayHost) : null}
       <div className="reel-editor__section-header">
-        <h4>Subtítulos incrustados (ASS)</h4>
         <label className="field field--inline field--checkbox">
           <input
             type="checkbox"
@@ -375,7 +397,7 @@ export function SubtitlePanel({
             disabled={busy}
             onChange={(e) => void saveReelPatch({ subtitle_enabled: e.target.checked })}
           />
-          <span>Incluir en el render</span>
+          <span>Incluir en el video</span>
         </label>
       </div>
 
@@ -385,14 +407,55 @@ export function SubtitlePanel({
           : 'Abre esta pestaña para ajustar posición, tamaño y el texto del recuadro actual.'}
       </p>
 
+      {omittedSegments.length > 0 && onRestoreCaptions ? (
+        <div className="subtitle-panel__omitted">
+          <div className="subtitle-panel__omitted-head">
+            <h5>Fragmentos sin subtítulo</h5>
+            {omittedSegments.length > 1 ? (
+              <button
+                type="button"
+                className="button button--secondary button--inline"
+                disabled={busy}
+                onClick={() =>
+                  onRestoreCaptions(omittedSegments.map((item) => item.segment.id))
+                }
+              >
+                Cargar todos
+              </button>
+            ) : null}
+          </div>
+          <ul className="subtitle-panel__omitted-list">
+            {omittedSegments.map(({ segment, index }) => {
+              const previewText = (segment.transcript_text ?? '').trim();
+              return (
+                <li key={segment.id} className="subtitle-panel__omitted-row">
+                  <span title={previewText || undefined}>
+                    Fragmento {index}
+                    {previewText ? ` · ${previewText}` : ''}
+                  </span>
+                  <button
+                    type="button"
+                    className="button button--secondary button--inline"
+                    disabled={busy}
+                    onClick={() => onRestoreCaptions([segment.id])}
+                  >
+                    Cargar
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+        </div>
+      ) : null}
+
       <div className="subtitle-panel__cue-editor">
         <label className="field">
           <span>Texto de este recuadro</span>
           <textarea
-            rows={3}
+            rows={2}
             value={cueDraft}
             disabled={busy || !reel.subtitle_enabled || !cue}
-            placeholder={cue ? 'Corrige ortografía, mayúsculas o añade un emoji…' : 'Reproduce hasta un subtítulo para editarlo'}
+            placeholder={cue ? 'Corrige ortografía, mayúsculas o añade un emoji con el teclado…' : 'Reproduce hasta un subtítulo para editarlo'}
             onChange={(event) => setCueDraft(event.target.value)}
             onBlur={() => {
               if (cue && cueDraft.trim() && cueDraft.trim() !== cue.text.trim()) {
@@ -401,26 +464,6 @@ export function SubtitlePanel({
             }}
           />
         </label>
-        <div className="subtitle-panel__emojis" role="group" aria-label="Emojis">
-          {SUBTITLE_EMOJIS.map((emoji) => (
-            <button
-              key={emoji}
-              type="button"
-              className="button button--inline"
-              disabled={busy || !cue}
-              onClick={() => {
-                const next = `${cueDraft}${emoji}`;
-                setCueDraft(next);
-                void saveCueText(next);
-              }}
-            >
-              {emoji}
-            </button>
-          ))}
-        </div>
-        <p className="muted">
-          Stickers: súbelos en Archivos (imagen) y arrástralos a la línea temporal.
-        </p>
         <div className="transcript-toolbar">
           <label className="field">
             <span>Pasar al siguiente recuadro</span>
@@ -459,6 +502,8 @@ export function SubtitlePanel({
                 subtitle_uppercase: template?.default_uppercase,
                 subtitle_margin_bottom: template?.default_margin_bottom,
                 subtitle_granularity: template?.default_granularity,
+                subtitle_bold: template?.default_bold ?? false,
+                subtitle_italic: template?.default_italic ?? false,
               });
             }}
           >
@@ -518,36 +563,32 @@ export function SubtitlePanel({
         </label>
       </div>
 
+      <TextStyleControls
+        fonts={fonts}
+        disabled={busy || !reel.subtitle_enabled}
+        value={{
+          fontFamily: reel.subtitle_font_family || fonts[0] || 'Helvetica Neue',
+          fontSize: reel.subtitle_font_size,
+          bold: Boolean(reel.subtitle_bold),
+          italic: Boolean(reel.subtitle_italic),
+          underline: Boolean(reel.subtitle_underline),
+          strikethrough: Boolean(reel.subtitle_strikethrough),
+          opacity: reel.subtitle_opacity,
+        }}
+        onChange={(patch) => {
+          if (patch.fontSize != null) flushLayoutPatch({ subtitle_font_size: patch.fontSize });
+          if (patch.opacity != null) flushLayoutPatch({ subtitle_opacity: patch.opacity });
+          const saved: Parameters<typeof saveReelPatch>[0] = {};
+          if (patch.fontFamily != null) saved.subtitle_font_family = patch.fontFamily;
+          if (patch.bold != null) saved.subtitle_bold = patch.bold;
+          if (patch.italic != null) saved.subtitle_italic = patch.italic;
+          if (patch.underline != null) saved.subtitle_underline = patch.underline;
+          if (patch.strikethrough != null) saved.subtitle_strikethrough = patch.strikethrough;
+          if (Object.keys(saved).length > 0) void saveReelPatch(saved);
+        }}
+      />
+
       <div className="transcript-toolbar">
-        <label className="field field--inline">
-          <span>Tipografía</span>
-          <select
-            value={reel.subtitle_font_family ?? ''}
-            disabled={busy || !reel.subtitle_enabled}
-            onChange={(e) =>
-              void saveReelPatch({ subtitle_font_family: e.target.value || null })
-            }
-          >
-            <option value="">Plantilla</option>
-            {fonts.map((family) => (
-              <option key={family} value={family}>
-                {family}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="field field--inline">
-          <span>Tamaño</span>
-          <input
-            type="range"
-            min={24}
-            max={FONT_MAX}
-            value={reel.subtitle_font_size}
-            disabled={busy || !reel.subtitle_enabled}
-            onChange={(e) => void saveReelPatch({ subtitle_font_size: Number(e.target.value) })}
-          />
-          <span className="muted">{reel.subtitle_font_size}px</span>
-        </label>
         <label className="field field--inline">
           <span>Máx. palabras</span>
           <input
@@ -559,40 +600,17 @@ export function SubtitlePanel({
             onChange={(e) => void saveReelPatch({ subtitle_max_words: Number(e.target.value) })}
           />
         </label>
-        <label className="field field--inline">
-          <span>Opacidad</span>
-          <input
-            type="range"
-            min={0.2}
-            max={1}
-            step={0.05}
-            value={reel.subtitle_opacity}
-            disabled={busy || !reel.subtitle_enabled}
-            onChange={(e) => void saveReelPatch({ subtitle_opacity: Number(e.target.value) })}
-          />
-        </label>
-        <label className="field field--inline">
-          <span>Margen inferior</span>
-          <input
-            type="range"
-            min={40}
-            max={MARGIN_MAX}
-            value={reel.subtitle_margin_bottom}
-            disabled={busy || !reel.subtitle_enabled}
-            onChange={(e) => void saveReelPatch({ subtitle_margin_bottom: Number(e.target.value) })}
-          />
-          <span className="muted">{reel.subtitle_margin_bottom}px</span>
-        </label>
-        <label className="field field--inline field--checkbox">
-          <input
-            type="checkbox"
-            checked={reel.subtitle_uppercase}
-            disabled={busy || !reel.subtitle_enabled}
-            onChange={(e) => void saveReelPatch({ subtitle_uppercase: e.target.checked })}
-          />
-          <span>Mayúsculas</span>
-        </label>
       </div>
+
+      <label className="field field--checkbox">
+        <input
+          type="checkbox"
+          checked={reel.subtitle_uppercase}
+          disabled={busy || !reel.subtitle_enabled}
+          onChange={(e) => void saveReelPatch({ subtitle_uppercase: e.target.checked })}
+        />
+        <span>Mayúsculas</span>
+      </label>
 
       {reel.subtitle_style === 'sermon_quote' && (
         <label className="field">
@@ -618,12 +636,32 @@ export function SubtitlePanel({
             className={styleClass}
             style={{
               fontSize: `${Math.round(reel.subtitle_font_size * 0.45)}px`,
+              fontFamily: reel.subtitle_font_family
+                ? `"${reel.subtitle_font_family}", sans-serif`
+                : undefined,
+              fontWeight: reel.subtitle_bold ? 700 : undefined,
+              fontStyle: reel.subtitle_italic ? 'italic' : undefined,
+              textDecoration: [
+                reel.subtitle_underline ? 'underline' : '',
+                reel.subtitle_strikethrough ? 'line-through' : '',
+              ]
+                .filter(Boolean)
+                .join(' ') || undefined,
               opacity: reel.subtitle_opacity,
               paddingBottom: `${Math.round(reel.subtitle_margin_bottom * 0.25)}px`,
               textTransform: reel.subtitle_uppercase ? 'uppercase' : 'none',
             }}
           >
-            <span className="subtitle-overlay__text">{stageText}</span>
+            <span
+              className="subtitle-overlay__text"
+              style={
+                reel.subtitle_font_family
+                  ? { fontFamily: `"${reel.subtitle_font_family}", sans-serif` }
+                  : undefined
+              }
+            >
+              {stageText}
+            </span>
           </div>
           <p className="muted">
             Vista previa sobre el reproductor
@@ -631,14 +669,6 @@ export function SubtitlePanel({
             {outputTime != null ? ` · t=${outputTime.toFixed(2)}s (salida)` : ''}
           </p>
         </div>
-      )}
-
-      {hideStagePreview && (
-        <p className="muted">
-          Los subtítulos se muestran sobre la vista previa
-          {preview ? ` · ${preview.cues.length} cue(s)` : ''}
-          {outputTime != null ? ` · t=${outputTime.toFixed(2)}s` : ''}
-        </p>
       )}
 
       {error && <p className="error">{error}</p>}

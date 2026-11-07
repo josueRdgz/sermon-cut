@@ -46,8 +46,21 @@ def ensure_builtin_profiles(db: Session) -> list[ExportProfile]:
         for row in db.scalars(select(ExportProfile).where(ExportProfile.is_builtin.is_(True))).all()
     }
     created: list[ExportProfile] = []
+    dirty = False
     for spec in BUILTIN_PROFILES:
-        if spec["slug"] in existing:
+        current = existing.get(spec["slug"])
+        if current is not None:
+            # Lift the old YouTube Shorts 60 s seed to the current 180 s cap
+            # without overwriting a profile the user already customized.
+            if (
+                spec["slug"] == "youtube-short"
+                and current.max_duration_seconds == 60
+                and spec["max_duration_seconds"] == 180
+            ):
+                current.max_duration_seconds = 180
+                current.description = spec.get("description")
+                current.updated_at = _utc_now()
+                dirty = True
             continue
         row = ExportProfile(
             slug=spec["slug"],
@@ -83,7 +96,8 @@ def ensure_builtin_profiles(db: Session) -> list[ExportProfile]:
         )
         db.add(row)
         created.append(row)
-    if created:
+        dirty = True
+    if dirty:
         db.commit()
         for row in created:
             db.refresh(row)
@@ -218,8 +232,7 @@ def assert_duration_allowed(profile: ExportProfile, duration_seconds: float) -> 
         raise ValidationAppError(
             (
                 f"El Reel (~{duration_seconds:.0f}s) supera el máximo del perfil "
-                f"({profile.max_duration_seconds}s). Acorta el contenido o edita el perfil "
-                f"(p. ej. YouTube Shorts hasta 180s)."
+                f"({profile.max_duration_seconds}s). Acorta el contenido o revisa la Configuración."
             ),
             code="export_duration_exceeded",
         )

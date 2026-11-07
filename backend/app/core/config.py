@@ -76,19 +76,23 @@ class Settings(BaseSettings):
     # prefers Homebrew's keg-only ffmpeg-full build when it is installed.
     ffmpeg_path: str | None = None
 
-    # ---- Optional AI analysis (Gemini) ----
+    # ---- Optional AI analysis (Gemini / Groq) ----
     ai_provider: str = "auto"
     gemini_api_key: str | None = None
     gemini_model: str = "gemini-2.5-flash"
     gemini_timeout_seconds: float = 180.0
     gemini_max_attempts: int = 3
+    groq_api_key: str | None = None
+    groq_model: str = "llama-3.3-70b-versatile"
+    groq_timeout_seconds: float = 90.0
+    groq_max_attempts: int = 3
     ai_chunk_char_limit: int = 48_000
     # Editorial pacing: prefer long, continuous source windows over rapid cuts.
     ai_max_segments_per_reel: int = 3
     ai_min_segment_seconds: float = 8.0
     ai_merge_gap_seconds: float = 1.25
-    # Extra seconds allowed so a clip can finish the idea past the requested max.
-    ai_duration_slack_seconds: float = 8.0
+    # Kept for compatibility; over-max clips are now rejected, not padded.
+    ai_duration_slack_seconds: float = 0.0
 
     # ---- Loudness (spoken-word friendly) ----
     target_lufs: float = -16.0

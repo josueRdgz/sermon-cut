@@ -124,3 +124,4 @@ class ProviderResult(BaseModel):
     response: AnalysisResponse
     usage: ProviderUsage | None = None
     raw_text: str | None = None
+    notice: str | None = None

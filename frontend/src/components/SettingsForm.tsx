@@ -2,11 +2,13 @@ import { useEffect, useState } from 'react';
 
 import { getAppSettings, updateAppSettings } from '../api/settings';
 import type { AppSettings } from '../types/settings';
+import { ExportProfilesSettings } from './ExportProfilesSettings';
 import styles from '../pages/HomePage.module.css';
 
 const PROVIDER_LABELS: Record<string, string> = {
-  auto: 'Automático (Gemini si hay clave)',
+  auto: 'Automático (Gemini, con Groq de respaldo)',
   gemini: 'Gemini',
+  groq: 'Groq',
   mock: 'Local estructural',
 };
 
@@ -22,6 +24,8 @@ export function SettingsForm({ onSaved }: { onSaved?: () => void }) {
   const [data, setData] = useState<AppSettings | null>(null);
   const [geminiKey, setGeminiKey] = useState('');
   const [geminiModel, setGeminiModel] = useState('');
+  const [groqKey, setGroqKey] = useState('');
+  const [groqModel, setGroqModel] = useState('');
   const [aiProvider, setAiProvider] = useState('auto');
   const [whisperModel, setWhisperModel] = useState('small');
   const [busy, setBusy] = useState(false);
@@ -48,9 +52,11 @@ export function SettingsForm({ onSaved }: { onSaved?: () => void }) {
   function applySettings(settings: AppSettings) {
     setData(settings);
     setGeminiModel(settings.gemini_model);
+    setGroqModel(settings.groq_model);
     setAiProvider(settings.ai_provider);
     setWhisperModel(settings.whisper_model);
     setGeminiKey('');
+    setGroqKey('');
   }
 
   async function handleSave() {
@@ -62,8 +68,10 @@ export function SettingsForm({ onSaved }: { onSaved?: () => void }) {
         ai_provider: aiProvider,
         whisper_model: whisperModel,
         gemini_model: geminiModel.trim() || undefined,
+        groq_model: groqModel.trim() || undefined,
       };
       if (geminiKey.trim()) payload.gemini_api_key = geminiKey.trim();
+      if (groqKey.trim()) payload.groq_api_key = groqKey.trim();
       const saved = await updateAppSettings(payload);
       applySettings(saved);
       setNotice('Configuración guardada.');
@@ -75,13 +83,28 @@ export function SettingsForm({ onSaved }: { onSaved?: () => void }) {
     }
   }
 
-  async function handleClearKey() {
+  async function handleClearGemini() {
     setBusy(true);
     setError(null);
     try {
       const saved = await updateAppSettings({ clear_gemini_api_key: true });
       applySettings(saved);
       setNotice('Clave de Gemini eliminada.');
+      onSaved?.();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'No se pudo eliminar la clave');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleClearGroq() {
+    setBusy(true);
+    setError(null);
+    try {
+      const saved = await updateAppSettings({ clear_groq_api_key: true });
+      applySettings(saved);
+      setNotice('Clave de Groq eliminada.');
       onSaved?.();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'No se pudo eliminar la clave');
@@ -101,6 +124,7 @@ export function SettingsForm({ onSaved }: { onSaved?: () => void }) {
           { key: 'ffmpeg', label: 'FFmpeg', tool: data.ffmpeg },
           { key: 'whisper', label: 'Whisper', tool: data.whisper },
           { key: 'gemini', label: 'Gemini', tool: data.gemini },
+          { key: 'groq', label: 'Groq', tool: data.groq },
         ].map((row) => (
           <div key={row.key} className={styles.aboutRow}>
             <span className={styles.aboutKey}>{row.label}</span>
@@ -155,9 +179,36 @@ export function SettingsForm({ onSaved }: { onSaved?: () => void }) {
         />
       </label>
       {data.gemini_api_key_masked ? (
-        <p className={styles.note}>Clave guardada: {data.gemini_api_key_masked}</p>
+        <p className={styles.note}>Clave Gemini guardada: {data.gemini_api_key_masked}</p>
       ) : (
-        <p className={styles.note}>Sin clave: el análisis usará el motor local.</p>
+        <p className={styles.note}>Sin Gemini: si hay Groq, se usará como motor.</p>
+      )}
+
+      <label className="field">
+        <span>Modelo Groq</span>
+        <input
+          type="text"
+          value={groqModel}
+          disabled={busy}
+          onChange={(e) => setGroqModel(e.target.value)}
+        />
+      </label>
+
+      <label className="field">
+        <span>Clave de Groq</span>
+        <input
+          type="password"
+          autoComplete="off"
+          placeholder={data.groq_api_key_masked ?? 'Pega aquí la clave gratuita'}
+          value={groqKey}
+          disabled={busy}
+          onChange={(e) => setGroqKey(e.target.value)}
+        />
+      </label>
+      {data.groq_api_key_masked ? (
+        <p className={styles.note}>Clave Groq guardada: {data.groq_api_key_masked}</p>
+      ) : (
+        <p className={styles.note}>Groq cubre los fallos 503 de Gemini. La clave se pide en console.groq.com.</p>
       )}
 
       <div className="button-stack">
@@ -165,13 +216,24 @@ export function SettingsForm({ onSaved }: { onSaved?: () => void }) {
           {busy ? 'Guardando…' : 'Guardar'}
         </button>
         {data.gemini_configured ? (
-          <button type="button" className="button--ghost" onClick={() => void handleClearKey()} disabled={busy}>
-            Quitar clave
+          <button type="button" className="button--ghost" onClick={() => void handleClearGemini()} disabled={busy}>
+            Quitar Gemini
+          </button>
+        ) : null}
+        {data.groq_configured ? (
+          <button type="button" className="button--ghost" onClick={() => void handleClearGroq()} disabled={busy}>
+            Quitar Groq
           </button>
         ) : null}
       </div>
       {notice ? <p className="muted">{notice}</p> : null}
       {error ? <p className="error">{error}</p> : null}
+
+      <h3 className={styles.sectionTitle}>Perfiles de exportación</h3>
+      <p className={styles.note}>
+        Duración máxima, fotogramas y márgenes de YouTube, Instagram, Facebook y WhatsApp.
+      </p>
+      <ExportProfilesSettings />
     </div>
   );
 }

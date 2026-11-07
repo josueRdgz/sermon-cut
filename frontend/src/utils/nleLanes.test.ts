@@ -4,6 +4,7 @@ import {
   assignLanes,
   clampLane,
   defaultLaneLayout,
+  inheritSegmentLanes,
   insertLane,
   laneForCaption,
   laneForSegment,
@@ -23,6 +24,10 @@ describe('nleLanes', () => {
     expect(layout.videoLane).toBe(1);
     expect(laneForCaption(layout, 'seg-1')).toBe(2);
     expect(laneForCaption({ ...layout, captionLanes: { 'seg-1': 0 } }, 'seg-1')).toBe(0);
+  });
+
+  it('keeps default captions off the video when the video sits on the last lane', () => {
+    expect(laneForCaption({ ...defaultLaneLayout(), videoLane: 2 }, 'seg-1')).toBe(1);
   });
 
   it('keeps video clips on the video lane until assigned', () => {
@@ -73,6 +78,16 @@ describe('nleLanes', () => {
     expect(next.musicLane).toBe(0);
     expect(remapAfterRemove(2, 2)).toBe(1);
     expect(remapAfterRemove(3, 2)).toBe(2);
+  });
+
+  it('keeps a split clip on the same line as its parent', () => {
+    const layout = {
+      ...defaultLaneLayout(),
+      segmentLanes: { a: 2 },
+    };
+    const next = inheritSegmentLanes(layout, ['a', 'a-right']);
+    expect(next.segmentLanes).toEqual({ a: 2, 'a-right': 2 });
+    expect(inheritSegmentLanes(next, ['a', 'a-right'])).toBe(next);
   });
 
   it('keeps at least two lanes', () => {

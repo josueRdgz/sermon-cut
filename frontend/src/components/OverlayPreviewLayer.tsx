@@ -1,10 +1,24 @@
 import { useEffect, useRef, type CSSProperties, type PointerEvent, type ReactNode } from 'react';
 
 import { assetMediaSrc } from '../api/assets';
-import { overlaySourceWindow, type ReelOverlay } from '../types/overlay';
+import {
+  clampOverlayScale,
+  overlayKindLabel,
+  overlaySourceWindow,
+  overlayTextLabel,
+  type ReelOverlay,
+} from '../types/overlay';
+import type { AspectRatio } from '../types/reel';
+import { previewFontSizeCqh } from '../utils/previewTypography';
+import {
+  clampTextFontSize,
+  parseTextOverlayStyle,
+  textDecorationCss,
+} from '../utils/textOverlayStyle';
 
 interface OverlayPreviewLayerProps {
   overlays: ReelOverlay[];
+  aspectRatio?: AspectRatio | null;
   outputTime: number;
   previewing?: boolean;
   previewMuted?: boolean;
@@ -13,6 +27,7 @@ interface OverlayPreviewLayerProps {
   onSelectOverlay?: (overlayId: string) => void;
   onMoveOverlay?: (overlayId: string, x: number, y: number) => void;
   onScaleOverlay?: (overlayId: string, scale: number) => void;
+  onTextSizeOverlay?: (overlayId: string, fontSize: number) => void;
 }
 
 function isActive(overlay: ReelOverlay, outputTime: number): boolean {
@@ -110,14 +125,18 @@ function beginOverlayDrag(
   const originY = overlay.y;
   const startX = event.clientX;
   const startY = event.clientY;
+  const layerRect = bounds.getBoundingClientRect();
+  const box = target.getBoundingClientRect();
+  const halfW = Math.min(0.48, box.width / 2 / Math.max(1, layerRect.width));
+  const halfH = Math.min(0.48, box.height / 2 / Math.max(1, layerRect.height));
   let dragging = false;
   target.setPointerCapture(pointerId);
 
   function apply(clientX: number, clientY: number) {
     const rect = bounds.getBoundingClientRect();
     if (rect.width <= 0 || rect.height <= 0) return;
-    const x = Math.max(0.08, Math.min(0.92, originX + (clientX - startX) / rect.width));
-    const y = Math.max(0.1, Math.min(0.84, originY + (clientY - startY) / rect.height));
+    const x = Math.max(halfW, Math.min(1 - halfW, originX + (clientX - startX) / rect.width));
+    const y = Math.max(halfH, Math.min(1 - halfH, originY + (clientY - startY) / rect.height));
     moveOverlay(overlay.id, x, y);
   }
 
@@ -149,14 +168,13 @@ function beginOverlayDrag(
   window.addEventListener('pointercancel', onPointerUp);
 }
 
-const SCALE_MIN = 0.08;
-const SCALE_MAX = 2;
 const HANDLE_CORNERS = ['nw', 'ne', 'sw', 'se'] as const;
 
 function beginOverlayScale(
   event: PointerEvent<HTMLElement>,
   overlay: ReelOverlay,
-  onScale: (overlayId: string, scale: number) => void,
+  onScale?: (overlayId: string, scale: number) => void,
+  onTextSize?: (overlayId: string, fontSize: number) => void,
 ) {
   event.preventDefault();
   event.stopPropagation();
@@ -166,6 +184,7 @@ function beginOverlayScale(
   const target = event.currentTarget;
   const pointerId = event.pointerId;
   const origin = overlay.scale;
+  const originFont = overlay.kind === 'text' ? parseTextOverlayStyle(overlay).font_size : null;
   const rect = bounds.getBoundingClientRect();
   const cx = rect.left + overlay.x * rect.width;
   const cy = rect.top + overlay.y * rect.height;
@@ -174,8 +193,12 @@ function beginOverlayScale(
 
   function apply(clientX: number, clientY: number) {
     const dist = Math.hypot(clientX - cx, clientY - cy);
-    const next = Math.max(SCALE_MIN, Math.min(SCALE_MAX, origin * (dist / startDist)));
-    onScale(overlay.id, next);
+    const factor = dist / startDist;
+    if (originFont != null && onTextSize) {
+      onTextSize(overlay.id, clampTextFontSize(originFont * factor));
+      return;
+    }
+    if (onScale) onScale(overlay.id, clampOverlayScale(origin * factor));
   }
 
   function onPointerMove(move: globalThis.PointerEvent) {
@@ -208,6 +231,7 @@ function OverlayChrome({
   onSelect,
   onMove,
   onScale,
+  onTextSize,
   children,
 }: {
   overlay: ReelOverlay;
@@ -217,36 +241,45 @@ function OverlayChrome({
   onSelect?: (overlayId: string) => void;
   onMove?: (overlayId: string, x: number, y: number) => void;
   onScale?: (overlayId: string, scale: number) => void;
+  onTextSize?: (overlayId: string, fontSize: number) => void;
   children: ReactNode;
 }) {
   return (
     <div
       className={`reel-nle__overlay-item ${className}${selected ? ' reel-nle__overlay-item--selected' : ''}`}
       style={style}
+      role="button"
+      aria-label={
+        overlay.kind === 'text' ? overlayTextLabel(overlay.text) : overlayKindLabel(overlay.kind)
+      }
       onPointerDown={(event) => beginOverlayDrag(event, overlay, onSelect, onMove)}
       onWheel={
-        onScale
+        onScale || onTextSize
           ? (event) => {
               event.preventDefault();
               event.stopPropagation();
-              const next = Math.max(
-                SCALE_MIN,
-                Math.min(SCALE_MAX, overlay.scale * (event.deltaY < 0 ? 1.06 : 0.94)),
-              );
-              onScale(overlay.id, next);
+              const factor = event.deltaY < 0 ? 1.06 : 0.94;
+              if (overlay.kind === 'text' && onTextSize) {
+                onTextSize(
+                  overlay.id,
+                  clampTextFontSize(parseTextOverlayStyle(overlay).font_size * factor),
+                );
+                return;
+              }
+              if (onScale) onScale(overlay.id, clampOverlayScale(overlay.scale * factor));
             }
           : undefined
       }
     >
       {children}
-      {selected && onScale
+      {selected && (onScale || onTextSize)
         ? HANDLE_CORNERS.map((corner) => (
             <span
               key={corner}
               className={`reel-nle__overlay-handle reel-nle__overlay-handle--${corner}`}
               role="slider"
               aria-label="Cambiar tamaño"
-              onPointerDown={(event) => beginOverlayScale(event, overlay, onScale)}
+              onPointerDown={(event) => beginOverlayScale(event, overlay, onScale, onTextSize)}
             />
           ))
         : null}
@@ -305,6 +338,7 @@ function OverlayAudioItem({
 
 export function OverlayPreviewLayer({
   overlays,
+  aspectRatio = '9:16',
   outputTime,
   previewing = false,
   previewMuted = false,
@@ -313,6 +347,7 @@ export function OverlayPreviewLayer({
   onSelectOverlay,
   onMoveOverlay,
   onScaleOverlay,
+  onTextSizeOverlay,
 }: OverlayPreviewLayerProps) {
   const active = overlays
     .filter((overlay) => isActive(overlay, outputTime))
@@ -388,18 +423,26 @@ export function OverlayPreviewLayer({
         }
 
         if (overlay.kind === 'text') {
+          const textStyle = parseTextOverlayStyle(overlay);
           return (
             <OverlayChrome
               key={overlay.id}
               overlay={overlay}
               selected={selected}
-              style={style}
+              style={{
+                ...style,
+                fontFamily: `"${textStyle.font_family}", sans-serif`,
+                fontSize: previewFontSizeCqh(textStyle.font_size, aspectRatio),
+                fontWeight: textStyle.bold ? 700 : 500,
+                fontStyle: textStyle.italic ? 'italic' : 'normal',
+                textDecoration: textDecorationCss(textStyle),
+              }}
               className="reel-nle__overlay-item--text"
               onSelect={onSelectOverlay}
               onMove={onMoveOverlay}
-              onScale={onScaleOverlay}
+              onTextSize={onTextSizeOverlay}
             >
-              {overlay.text || 'Texto'}
+              {overlayTextLabel(overlay.text)}
             </OverlayChrome>
           );
         }

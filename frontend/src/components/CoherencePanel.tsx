@@ -9,8 +9,9 @@ import {
 import { ApiError } from '../api/client';
 import { removeReelSegment, updateReelSegment } from '../api/reels';
 import type { CoherenceIssue, CoherenceReport } from '../types/coherence';
-import { coherenceGroupLabel, groupCoherenceIssues } from '../utils/coherenceGroups';
+import { coherenceGroupLabel, coherenceIssueLabel, groupCoherenceIssues } from '../utils/coherenceGroups';
 import type { Reel, ReelSegment } from '../types/reel';
+import { clipDeleteAction, type SourceWindow } from '../utils/reelTrim';
 
 interface CoherencePanelProps {
   projectId: string;
@@ -18,6 +19,7 @@ interface CoherencePanelProps {
   segments: ReelSegment[];
   onReelChange: (reel: Reel) => void;
   onReportChange?: (report: CoherenceReport | null) => void;
+  originWindows?: SourceWindow[];
 }
 
 const SEVERITY_LABEL: Record<string, string> = {
@@ -32,6 +34,7 @@ export function CoherencePanel({
   segments,
   onReelChange,
   onReportChange,
+  originWindows = [],
 }: CoherencePanelProps) {
   const [report, setReport] = useState<CoherenceReport | null>(null);
   const [includeAi, setIncludeAi] = useState(false);
@@ -184,6 +187,10 @@ export function CoherencePanel({
       setError('No se pudo identificar el fragmento a eliminar.');
       return;
     }
+    if (clipDeleteAction(segments, issue.segment_uuid, originWindows) === 'keep') {
+      setError('El video del fragmento elegido no se puede eliminar.');
+      return;
+    }
     setBusy(true);
     setError(null);
     try {
@@ -244,7 +251,7 @@ export function CoherencePanel({
   return (
     <div className="coherence-panel">
       <div className="reel-editor__section-header">
-        <h4>Validación de unión</h4>
+        <h4>Empalmes</h4>
         {report && (
           <span className={`badge badge--coherence-${report.severity}`}>
             {SEVERITY_LABEL[report.severity] ?? report.severity}
@@ -252,45 +259,60 @@ export function CoherencePanel({
         )}
       </div>
 
-      <p className="muted">
-        Se revisa si los empalmes pueden resultar incoherentes o engañosos (conectores sueltos,
-        frases cortadas, referencias sin contexto, saltos de audio/plano). Puedes corregirlos o
-        exportar igual: no bloquean la salida.
+      <p className="muted coherence-panel__hint">
+        Revisa empalmes que puedan cortar una frase o saltar de plano. Puedes corregirlos o
+        exportar igual.
       </p>
 
-      <div className="transcript-toolbar">
-        <label className="field field--inline field--checkbox">
-          <input
-            type="checkbox"
-            checked={includeMedia}
-            onChange={(e) => setIncludeMedia(e.target.checked)}
-            disabled={busy}
-          />
-          <span>Sondas de audio/plano (lentas; no bloquean el export)</span>
-        </label>
-        <label className="field field--inline field--checkbox">
-          <input
-            type="checkbox"
-            checked={includeAi}
-            onChange={(e) => setIncludeAi(e.target.checked)}
-            disabled={busy}
-          />
-          <span>
-            Revisión opcional con Gemini (envía texto del sermón a Google; ver docs/PRIVACY.md)
-          </span>
-        </label>
-        <button type="button" className="button--ghost" onClick={() => void runValidate()} disabled={busy}>
+      <div className="cuts-review__toolbar">
+        <div className="cuts-review__chips" role="group" aria-label="Opciones extra">
+          <label
+            className="cuts-review__chip"
+            title="Comprueba saltos de audio y de plano. Tarda más."
+          >
+            <input
+              type="checkbox"
+              checked={includeMedia}
+              onChange={(e) => setIncludeMedia(e.target.checked)}
+              disabled={busy}
+            />
+            Audio y plano
+          </label>
+          <label
+            className="cuts-review__chip"
+            title="Envía el texto unido a Google para una revisión editorial opcional."
+          >
+            <input
+              type="checkbox"
+              checked={includeAi}
+              onChange={(e) => setIncludeAi(e.target.checked)}
+              disabled={busy}
+            />
+            Gemini
+          </label>
+        </div>
+        <button
+          type="button"
+          className="button button--secondary button--inline"
+          onClick={() => void runValidate()}
+          disabled={busy}
+        >
           {busy ? 'Validando…' : 'Revalidar'}
         </button>
         {activeIssues.length > 0 && (
-          <button type="button" onClick={() => void handleAutoFix()} disabled={busy}>
-            {busy ? 'Corrigiendo…' : 'Corregir automáticamente'}
+          <button
+            type="button"
+            className="button button--secondary button--inline"
+            onClick={() => void handleAutoFix()}
+            disabled={busy}
+          >
+            {busy ? 'Corrigiendo…' : 'Corregir'}
           </button>
         )}
       </div>
 
-      {report && (
-        <p className="muted">{report.summary}</p>
+      {report && activeIssues.length === 0 && (
+        <p className="muted coherence-panel__hint">{report.summary}</p>
       )}
       {fixResult && <p className="success">{fixResult}</p>}
 
@@ -304,7 +326,7 @@ export function CoherencePanel({
               className={`coherence-item coherence-item--${issue.severity}`}
             >
               <div className="coherence-item__head">
-                <code>{issue.code}</code>
+                <strong className="coherence-item__code">{coherenceIssueLabel(issue.code)}</strong>
                 <span className={`badge badge--coherence-${issue.severity}`}>
                   {SEVERITY_LABEL[issue.severity]}
                 </span>
@@ -313,20 +335,25 @@ export function CoherencePanel({
               <p>{issue.message}</p>
               {issue.recommendation && <p className="muted">{issue.recommendation}</p>}
               <div className="button-stack">
-                <button type="button" onClick={() => void handleDismiss(group.issues)} disabled={busy}>
+                <button
+                  type="button"
+                  className="button button--secondary button--inline"
+                  onClick={() => void handleDismiss(group.issues)}
+                  disabled={busy}
+                >
                   Ignorar
                 </button>
                 <button
                   type="button"
-                  className="button--ghost"
+                  className="button button--secondary button--inline"
                   onClick={() => openEdit(issue)}
                   disabled={busy || !issue.segment_uuid}
                 >
-                  Editar tiempos
+                  Editar
                 </button>
                 <button
                   type="button"
-                  className="button--ghost"
+                  className="button button--secondary button--inline"
                   onClick={() => void handleExpand(issue)}
                   disabled={busy}
                 >
@@ -334,11 +361,21 @@ export function CoherencePanel({
                 </button>
                 <button
                   type="button"
-                  className="button--danger"
+                  className="button button--danger button--inline"
                   onClick={() => void handleRemove(issue)}
-                  disabled={busy || !issue.segment_uuid}
+                  disabled={
+                    busy ||
+                    !issue.segment_uuid ||
+                    clipDeleteAction(segments, issue.segment_uuid, originWindows) === 'keep'
+                  }
+                  title={
+                    issue.segment_uuid &&
+                    clipDeleteAction(segments, issue.segment_uuid, originWindows) === 'keep'
+                      ? 'El video del fragmento elegido no se puede eliminar'
+                      : undefined
+                  }
                 >
-                  Eliminar fragmento
+                  Quitar
                 </button>
               </div>
             </li>
@@ -353,7 +390,7 @@ export function CoherencePanel({
           <ul className="coherence-list">
             {dismissedIssues.map((issue) => (
               <li key={`d-${issue.code}-${issue.segment_id}`} className="coherence-item muted">
-                <code>{issue.code}</code> · Fragmento {issue.segment_id}: {issue.message}
+                {coherenceIssueLabel(issue.code)} · Fragmento {issue.segment_id}: {issue.message}
               </li>
             ))}
           </ul>
